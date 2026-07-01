@@ -1,6 +1,6 @@
--- Fechamento global de competência 25-24.
--- Não há obra_id: o fechamento é global para todas as obras.
--- Esta migration não apaga dados existentes.
+-- Fechamento global de competencia 25-24.
+-- Nao ha obra_id: o fechamento e global para todas as obras.
+-- Esta migration nao apaga dados existentes.
 
 CREATE TABLE IF NOT EXISTS public.fechamentos_competencia (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -107,7 +107,7 @@ AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     IF public.competencia_fechada(OLD.data) THEN
-      RAISE EXCEPTION 'Competência fechada. Solicite reabertura ao gerente para alterar este período.'
+      RAISE EXCEPTION 'Competencia fechada. Solicite reabertura ao gerente para alterar este periodo.'
         USING ERRCODE = 'P0001';
     END IF;
     RETURN OLD;
@@ -115,14 +115,14 @@ BEGIN
 
   IF TG_OP = 'UPDATE' THEN
     IF public.competencia_fechada(OLD.data) OR public.competencia_fechada(NEW.data) THEN
-      RAISE EXCEPTION 'Competência fechada. Solicite reabertura ao gerente para alterar este período.'
+      RAISE EXCEPTION 'Competencia fechada. Solicite reabertura ao gerente para alterar este periodo.'
         USING ERRCODE = 'P0001';
     END IF;
     RETURN NEW;
   END IF;
 
   IF public.competencia_fechada(NEW.data) THEN
-    RAISE EXCEPTION 'Competência fechada. Solicite reabertura ao gerente para alterar este período.'
+    RAISE EXCEPTION 'Competencia fechada. Solicite reabertura ao gerente para alterar este periodo.'
       USING ERRCODE = 'P0001';
   END IF;
 
