@@ -1,0 +1,1 @@
+ALTER TABLE public.funcionarios DROP COLUMN IF EXISTS cpf CASCADE;
