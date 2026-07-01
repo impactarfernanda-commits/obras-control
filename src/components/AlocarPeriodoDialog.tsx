@@ -9,6 +9,13 @@ import {
   mensagemErroBancoAlocacao,
   type AlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
+import {
+  buscarCompetenciasFechadasPorDatas,
+  calcularCompetencia,
+  formatarPeriodoCompetencia,
+  mensagemErroCompetenciaFechada,
+  type FechamentoCompetencia,
+} from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,6 +96,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [conflitosAloc, setConflitosAloc] = useState<Set<string>>(new Set());
   const [conflitosReg, setConflitosReg] = useState<Set<string>>(new Set());
   const [conflitosOutraObra, setConflitosOutraObra] = useState<AlocacaoConflito[]>([]);
+  const [competenciasFechadas, setCompetenciasFechadas] = useState<FechamentoCompetencia[]>([]);
   const [modo, setModo] = useState<"pular" | "sobrescrever">("pular");
   const [verificando, setVerificando] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -147,6 +155,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setConflitosAloc(new Set());
       setConflitosReg(new Set());
       setConflitosOutraObra([]);
+      setCompetenciasFechadas([]);
       setFuncionarioId("");
       setDataInicio(today);
       setDataFim(today);
@@ -165,7 +174,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     }
     setVerificando(true);
     try {
-      const [alocRes, regRes, conflitosObraDiferente] = await Promise.all([
+      const [alocRes, regRes, conflitosObraDiferente, fechadas] = await Promise.all([
         supabase
           .from("alocacoes")
           .select("data")
@@ -184,6 +193,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           obraId,
           datas: dias,
         }),
+        buscarCompetenciasFechadasPorDatas(supabase, dias),
       ]);
       if (alocRes.error) throw alocRes.error;
       if (regRes.error) throw regRes.error;
@@ -196,8 +206,14 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setConflitosAloc(setA);
       setConflitosReg(setR);
       setConflitosOutraObra(conflitosObraDiferente);
-      if (setA.size === 0 && setR.size === 0 && conflitosObraDiferente.length === 0) {
-        await salvar("pular", setA, setR, conflitosObraDiferente);
+      setCompetenciasFechadas(fechadas);
+      if (
+        setA.size === 0 &&
+        setR.size === 0 &&
+        conflitosObraDiferente.length === 0 &&
+        fechadas.length === 0
+      ) {
+        await salvar("pular", setA, setR, conflitosObraDiferente, fechadas);
       } else {
         setStep("conflitos");
       }
@@ -213,14 +229,27 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     setA: Set<string>,
     setR: Set<string>,
     conflitosExternos = conflitosOutraObra,
+    fechadas = competenciasFechadas,
   ) {
     setSalvando(true);
     try {
+      const competenciasBloqueadas = new Set(fechadas.map((c) => c.competencia));
+      const datasBloqueadasCompetencia = new Set(
+        dias.filter((d) => competenciasBloqueadas.has(calcularCompetencia(d).competencia)),
+      );
       const datasBloqueadasOutraObra = new Set(conflitosExternos.map((c) => c.data));
       const diasAlvo =
         modoAtual === "sobrescrever"
-          ? dias.filter((d) => !datasBloqueadasOutraObra.has(d))
-          : dias.filter((d) => !datasBloqueadasOutraObra.has(d) && !setA.has(d) && !setR.has(d));
+          ? dias.filter(
+              (d) => !datasBloqueadasCompetencia.has(d) && !datasBloqueadasOutraObra.has(d),
+            )
+          : dias.filter(
+              (d) =>
+                !datasBloqueadasCompetencia.has(d) &&
+                !datasBloqueadasOutraObra.has(d) &&
+                !setA.has(d) &&
+                !setR.has(d),
+            );
 
       if (diasAlvo.length === 0) {
         toast.info("Nada a alocar — todos os dias já estavam ocupados.");
@@ -239,7 +268,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         onConflict: "funcionario_id,obra_id,data",
         ignoreDuplicates: true,
       });
-      if (alocErr) throw new Error(mensagemErroBancoAlocacao(alocErr) ?? alocErr.message);
+      if (alocErr) {
+        throw new Error(
+          mensagemErroCompetenciaFechada(alocErr) ??
+            mensagemErroBancoAlocacao(alocErr) ??
+            alocErr.message,
+        );
+      }
 
       const regRows = diasAlvo.map((d) => ({
         funcionario_id: funcionarioId,
@@ -257,7 +292,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       const { error: regErr } = await supabase
         .from("registros_horas")
         .upsert(regRows, { onConflict: "funcionario_id,obra_id,data" });
-      if (regErr) throw regErr;
+      if (regErr) throw new Error(mensagemErroCompetenciaFechada(regErr) ?? regErr.message);
 
       const pulados = dias.length - diasAlvo.length;
       toast.success(
@@ -282,25 +317,45 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     return m;
   }, [conflitosOutraObra]);
 
+  const competenciasFechadasSet = useMemo(
+    () => new Set(competenciasFechadas.map((c) => c.competencia)),
+    [competenciasFechadas],
+  );
+
+  const datasCompetenciaFechada = useMemo(
+    () => dias.filter((d) => competenciasFechadasSet.has(calcularCompetencia(d).competencia)),
+    [dias, competenciasFechadasSet],
+  );
+
   const conflitosUniao = useMemo(() => {
     const s = new Set<string>([
       ...conflitosAloc,
       ...conflitosReg,
       ...conflitosOutraObra.map((c) => c.data),
+      ...datasCompetenciaFechada,
     ]);
     return Array.from(s).sort();
-  }, [conflitosAloc, conflitosReg, conflitosOutraObra]);
+  }, [conflitosAloc, conflitosReg, conflitosOutraObra, datasCompetenciaFechada]);
 
   const diasDisponiveisParaPular = useMemo(
     () =>
       dias.filter(
-        (d) => !conflitosOutraObraPorData.has(d) && !conflitosAloc.has(d) && !conflitosReg.has(d),
+        (d) =>
+          !competenciasFechadasSet.has(calcularCompetencia(d).competencia) &&
+          !conflitosOutraObraPorData.has(d) &&
+          !conflitosAloc.has(d) &&
+          !conflitosReg.has(d),
       ).length,
-    [dias, conflitosOutraObraPorData, conflitosAloc, conflitosReg],
+    [dias, competenciasFechadasSet, conflitosOutraObraPorData, conflitosAloc, conflitosReg],
   );
   const diasDisponiveisParaSobrescrever = useMemo(
-    () => dias.filter((d) => !conflitosOutraObraPorData.has(d)).length,
-    [dias, conflitosOutraObraPorData],
+    () =>
+      dias.filter(
+        (d) =>
+          !competenciasFechadasSet.has(calcularCompetencia(d).competencia) &&
+          !conflitosOutraObraPorData.has(d),
+      ).length,
+    [dias, competenciasFechadasSet, conflitosOutraObraPorData],
   );
 
   return (
@@ -415,7 +470,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               <div className="mt-1 text-xs text-muted-foreground">
                 {conflitosUniao.length}{" "}
                 {conflitosUniao.length === 1 ? "dia possui" : "dias possuem"} alocação ou horas
-                lançadas para este funcionário. Dias em outra obra serão sempre pulados.
+                lançadas para este funcionário. Dias em outra obra ou competência fechada serão
+                sempre pulados.
               </div>
               <ul className="mt-2 max-h-32 space-y-0.5 overflow-y-auto text-xs">
                 {conflitosUniao.map((d) => (
@@ -428,11 +484,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                       })}
                     </span>
                     <span className="text-muted-foreground">
-                      {conflitosOutraObraPorData.has(d)
-                        ? `outra obra: ${conflitosOutraObraPorData.get(d)?.obraNome}`
-                        : conflitosReg.has(d)
-                          ? "horas lançadas nesta obra"
-                          : "alocado nesta obra"}
+                      {competenciasFechadasSet.has(calcularCompetencia(d).competencia)
+                        ? `competência fechada: ${calcularCompetencia(d).competencia}`
+                        : conflitosOutraObraPorData.has(d)
+                          ? `outra obra: ${conflitosOutraObraPorData.get(d)?.obraNome}`
+                          : conflitosReg.has(d)
+                            ? "horas lançadas nesta obra"
+                            : "alocado nesta obra"}
                     </span>
                   </li>
                 ))}
@@ -467,8 +525,9 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                   <div>
                     <div className="font-medium">Sobrescrever</div>
                     <div className="text-xs text-muted-foreground">
-                      Substitui horas existentes desta obra pelas horas padrão. Dias já lançados em
-                      outra obra serão pulados ({diasDisponiveisParaSobrescrever} possíveis).
+                      Substitui horas existentes desta obra pelas horas padrão. Dias em competência
+                      fechada ou outra obra serão pulados ({diasDisponiveisParaSobrescrever}{" "}
+                      possíveis).
                     </div>
                   </div>
                 </label>

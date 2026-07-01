@@ -55,6 +55,7 @@ import {
   mensagemConflitoAlocacao,
   mensagemErroBancoAlocacao,
 } from "@/lib/alocacoes-conflitos";
+import { garantirCompetenciaAberta, mensagemErroCompetenciaFechada } from "@/lib/competencias";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -345,6 +346,8 @@ function AlocacoesPage() {
       const { total, hn, he } = calcHoras(v.hora_entrada, v.hora_saida, v.data);
       if (total <= 0) throw new Error("Horário inválido");
 
+      await garantirCompetenciaAberta(supabase, v.data);
+
       const conflito = await buscarConflitoAlocacao({
         supabase,
         funcionarioId: v.funcionario_id,
@@ -364,7 +367,13 @@ function AlocacoesPage() {
         ],
         { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
       );
-      if (alocErr) throw new Error(mensagemErroBancoAlocacao(alocErr) ?? alocErr.message);
+      if (alocErr) {
+        throw new Error(
+          mensagemErroCompetenciaFechada(alocErr) ??
+            mensagemErroBancoAlocacao(alocErr) ??
+            alocErr.message,
+        );
+      }
 
       const { error: regErr } = await supabase.from("registros_horas").upsert(
         [
@@ -383,7 +392,7 @@ function AlocacoesPage() {
         ],
         { onConflict: "funcionario_id,obra_id,data" },
       );
-      if (regErr) throw regErr;
+      if (regErr) throw new Error(mensagemErroCompetenciaFechada(regErr) ?? regErr.message);
       return { hn, he };
     },
     onSuccess: ({ hn, he }) => {
@@ -405,13 +414,16 @@ function AlocacoesPage() {
       obra_id: string;
       data: string;
     }) => {
+      await garantirCompetenciaAberta(supabase, a.data);
       const { error } = await supabase.from("alocacoes").delete().eq("id", a.id);
-      if (error) throw error;
-      await supabase.from("registros_horas").delete().match({
+      if (error) throw new Error(mensagemErroCompetenciaFechada(error) ?? error.message);
+      const { error: regDelErr } = await supabase.from("registros_horas").delete().match({
         funcionario_id: a.funcionario_id,
         obra_id: a.obra_id,
         data: a.data,
       });
+      if (regDelErr)
+        throw new Error(mensagemErroCompetenciaFechada(regDelErr) ?? regDelErr.message);
     },
     onSuccess: () => {
       toast.success("Alocação removida");
@@ -435,17 +447,20 @@ function AlocacoesPage() {
         .maybeSingle();
       if (selErr) throw selErr;
       if (!last) throw new Error("Nenhum lançamento seu para desfazer");
+      await garantirCompetenciaAberta(supabase, last.data);
       const nome = nomeById.get(last.funcionario_id) ?? "funcionário";
       const dataBr = new Date(last.data + "T00:00:00").toLocaleDateString("pt-BR");
       const ok = window.confirm(`Desfazer o último lançamento?\n\n${nome} em ${dataBr}`);
       if (!ok) return { skipped: true as const };
       const { error: delErr } = await supabase.from("alocacoes").delete().eq("id", last.id);
-      if (delErr) throw delErr;
-      await supabase.from("registros_horas").delete().match({
+      if (delErr) throw new Error(mensagemErroCompetenciaFechada(delErr) ?? delErr.message);
+      const { error: regDelErr } = await supabase.from("registros_horas").delete().match({
         funcionario_id: last.funcionario_id,
         obra_id: last.obra_id,
         data: last.data,
       });
+      if (regDelErr)
+        throw new Error(mensagemErroCompetenciaFechada(regDelErr) ?? regDelErr.message);
       return { skipped: false as const };
     },
     onSuccess: (res) => {

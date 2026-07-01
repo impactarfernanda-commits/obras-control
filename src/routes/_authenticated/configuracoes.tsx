@@ -4,24 +4,47 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
+import { FechamentoCompetenciaCard } from "@/components/FechamentoCompetenciaCard";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,6 +65,13 @@ export const Route = createFileRoute("/_authenticated/configuracoes")({
 });
 
 type Linha = { categoria: string; salario: string; encargos: string; seguro_vida: string };
+type ErrorLike = { message?: string };
+type CategoriaSalario = {
+  categoria: string;
+  salario: number;
+  encargos: number;
+  seguro_vida: number | null;
+};
 
 function ConfiguracoesPage() {
   const qc = useQueryClient();
@@ -65,10 +95,10 @@ function ConfiguracoesPage() {
 
   useEffect(() => {
     if (!data || !categorias) return;
-    const map = new Map(data.map((r: any) => [r.categoria, r]));
+    const map = new Map((data as CategoriaSalario[]).map((r) => [r.categoria, r]));
     setLinhas(
       categorias.map((c) => {
-        const r = map.get(c.nome) as any;
+        const r = map.get(c.nome);
         return {
           categoria: c.nome,
           salario: r ? String(r.salario) : "0",
@@ -87,7 +117,9 @@ function ConfiguracoesPage() {
         encargos: Number(l.encargos) || 0,
         seguro_vida: Number(l.seguro_vida) || 0,
       }));
-      const { error } = await supabase.from("categoria_salarios").upsert(payload as any, { onConflict: "categoria" });
+      const { error } = await supabase
+        .from("categoria_salarios")
+        .upsert(payload, { onConflict: "categoria" });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -95,14 +127,14 @@ function ConfiguracoesPage() {
       qc.invalidateQueries({ queryKey: ["categoria_salarios"] });
       qc.invalidateQueries({ queryKey: ["seguros_vida"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar"),
+    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao salvar"),
   });
 
   const novaCategoriaMutation = useMutation({
     mutationFn: async () => {
       const nome = novoNome.trim();
       if (!nome) throw new Error("Informe o nome da função");
-      const { error } = await supabase.from("categorias" as any).insert({ nome, tipo: novoTipo });
+      const { error } = await supabase.from("categorias").insert({ nome, tipo: novoTipo });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -113,12 +145,12 @@ function ConfiguracoesPage() {
       qc.invalidateQueries({ queryKey: ["categorias"] });
       qc.invalidateQueries({ queryKey: ["categoria_salarios"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao criar função"),
+    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao criar função"),
   });
 
   const deleteCategoriaMutation = useMutation({
     mutationFn: async (nome: string) => {
-      const { error } = await supabase.from("categorias" as any).delete().eq("nome", nome);
+      const { error } = await supabase.from("categorias").delete().eq("nome", nome);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -126,51 +158,61 @@ function ConfiguracoesPage() {
       qc.invalidateQueries({ queryKey: ["categorias"] });
       qc.invalidateQueries({ queryKey: ["categoria_salarios"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao excluir"),
+    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao excluir"),
   });
 
   function updateLinha(idx: number, campo: "salario" | "encargos" | "seguro_vida", valor: string) {
     setLinhas((prev) => prev.map((l, i) => (i === idx ? { ...l, [campo]: valor } : l)));
   }
 
-  const tipoMap = new Map<string, Categoria["tipo"]>((categorias ?? []).map((c) => [c.nome, c.tipo]));
+  const tipoMap = new Map<string, Categoria["tipo"]>(
+    (categorias ?? []).map((c) => [c.nome, c.tipo]),
+  );
 
   return (
     <div>
-      <PageHeader
-        title="Configurações"
-        description="Tabela salarial e funções da organização."
-      />
+      <PageHeader title="Configurações" description="Tabela salarial e funções da organização." />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <div>
             <CardTitle>Tabela salarial por função</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Valores aplicados automaticamente ao cadastrar um funcionário. Continuam editáveis no cadastro.
+              Valores aplicados automaticamente ao cadastrar um funcionário. Continuam editáveis no
+              cadastro.
             </p>
           </div>
           <div className="flex gap-2">
             <Dialog open={openNova} onOpenChange={setOpenNova}>
               <DialogTrigger asChild>
-                <Button variant="outline"><Plus className="mr-2 h-4 w-4" />Nova função</Button>
+                <Button variant="outline">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nova função
+                </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Nova função</DialogTitle>
                   <DialogDescription>
-                    Crie uma nova função/categoria. Os valores de salário e encargos começam em zero e podem ser ajustados depois.
+                    Crie uma nova função/categoria. Os valores de salário e encargos começam em zero
+                    e podem ser ajustados depois.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3">
                   <div>
                     <Label>Nome da função</Label>
-                    <Input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Ex.: Eletricista" />
+                    <Input
+                      value={novoNome}
+                      onChange={(e) => setNovoNome(e.target.value)}
+                      placeholder="Ex.: Eletricista"
+                    />
                   </div>
                   <div>
                     <Label>Tipo</Label>
                     <Select value={novoTipo} onValueChange={(v) => setNovoTipo(v as "MOI" | "MOD")}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="MOI">MOI – Mão de obra indireta</SelectItem>
                         <SelectItem value="MOD">MOD – Mão de obra direta</SelectItem>
@@ -179,15 +221,23 @@ function ConfiguracoesPage() {
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button variant="ghost" onClick={() => setOpenNova(false)}>Cancelar</Button>
-                  <Button onClick={() => novaCategoriaMutation.mutate()} disabled={novaCategoriaMutation.isPending}>
+                  <Button variant="ghost" onClick={() => setOpenNova(false)}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => novaCategoriaMutation.mutate()}
+                    disabled={novaCategoriaMutation.isPending}
+                  >
                     {novaCategoriaMutation.isPending ? "Criando..." : "Criar"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
             {canEditSalario && (
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || isLoading}>
+              <Button
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending || isLoading}
+              >
                 {saveMutation.isPending ? "Salvando..." : "Salvar alterações"}
               </Button>
             )}
@@ -260,12 +310,16 @@ function ConfiguracoesPage() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Excluir função "{l.categoria}"?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                A função e seus valores padrão de salário/encargos serão removidos. Funcionários já cadastrados manterão a função como texto histórico, mas ela não estará mais disponível em novos cadastros.
+                                A função e seus valores padrão de salário/encargos serão removidos.
+                                Funcionários já cadastrados manterão a função como texto histórico,
+                                mas ela não estará mais disponível em novos cadastros.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => deleteCategoriaMutation.mutate(l.categoria)}>
+                              <AlertDialogAction
+                                onClick={() => deleteCategoriaMutation.mutate(l.categoria)}
+                              >
                                 Excluir
                               </AlertDialogAction>
                             </AlertDialogFooter>
@@ -282,6 +336,7 @@ function ConfiguracoesPage() {
       </Card>
 
       <BeneficiosCard canEdit={canEditSalario} />
+      <FechamentoCompetenciaCard />
     </div>
   );
 }
@@ -322,7 +377,7 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
         multibeneficio: Number(form.multibeneficio) || 0,
       };
       const { error } = await supabase
-        .from("beneficios_config" as any)
+        .from("beneficios_config")
         .upsert(payload, { onConflict: "id" });
       if (error) throw error;
     },
@@ -330,7 +385,7 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
       toast.success("Benefícios atualizados");
       qc.invalidateQueries({ queryKey: ["beneficios_config"] });
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar"),
+    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao salvar"),
   });
 
   const fields: Array<{ key: keyof typeof form; label: string }> = [
@@ -346,8 +401,10 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
         <div>
           <CardTitle>Benefícios fixos (globais)</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Valores aplicados a todos os funcionários ativos no cálculo do custo total.
-            Encargos = {(ENCARGOS_PCT * 100).toFixed(1)}% do salário; Provisão 13º e Provisão aviso prévio = 1/12 de (salário+encargos) cada; Provisão férias = Provisão 13º + 1/3. Seguro de vida é definido por categoria.
+            Valores aplicados a todos os funcionários ativos no cálculo do custo total. Encargos ={" "}
+            {(ENCARGOS_PCT * 100).toFixed(1)}% do salário; Provisão 13º e Provisão aviso prévio =
+            1/12 de (salário+encargos) cada; Provisão férias = Provisão 13º + 1/3. Seguro de vida é
+            definido por categoria.
           </p>
         </div>
         {canEdit && (
@@ -358,7 +415,10 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {fields.map((f) => (
@@ -375,7 +435,9 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
               </div>
             ))}
             <div className="sm:col-span-2 mt-2 flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">Total mensal de benefícios por funcionário</span>
+              <span className="text-muted-foreground">
+                Total mensal de benefícios por funcionário
+              </span>
               <span className="font-semibold">{fmtBRL(totalBenef)}</span>
             </div>
           </div>

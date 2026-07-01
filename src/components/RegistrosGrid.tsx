@@ -9,6 +9,7 @@ import {
   mensagemConflitoAlocacao,
   mensagemErroBancoAlocacao,
 } from "@/lib/alocacoes-conflitos";
+import { garantirCompetenciaAberta, mensagemErroCompetenciaFechada } from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -246,6 +247,14 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
 
       // Garante alocação antes de gravar horas/ausência
       if (hasContent) {
+        try {
+          await garantirCompetenciaAberta(supabase, r.data);
+        } catch (e) {
+          setSaving((s) => ({ ...s, [key]: "error" }));
+          toast.error(mensagemErroCompetenciaFechada(e) ?? (e as Error).message);
+          return;
+        }
+
         const conflito = await buscarConflitoAlocacao({
           supabase,
           funcionarioId: r.funcionario_id,
@@ -274,7 +283,11 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         );
         if (alocErr) {
           setSaving((s) => ({ ...s, [key]: "error" }));
-          toast.error(mensagemErroBancoAlocacao(alocErr) ?? alocErr.message);
+          toast.error(
+            mensagemErroCompetenciaFechada(alocErr) ??
+              mensagemErroBancoAlocacao(alocErr) ??
+              alocErr.message,
+          );
           return;
         }
       }
@@ -300,7 +313,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         .single();
       if (error) {
         setSaving((s) => ({ ...s, [key]: "error" }));
-        toast.error(error.message);
+        toast.error(mensagemErroCompetenciaFechada(error) ?? error.message);
         return;
       }
       setCells((prev) => ({ ...prev, [key]: data as Registro }));
