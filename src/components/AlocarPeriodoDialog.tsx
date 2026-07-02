@@ -6,8 +6,12 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buscarConflitosAlocacao,
+  erroBancoAlocacao,
+  isAlocacaoConflitoError,
   mensagemErroBancoAlocacao,
+  TITULO_CONFLITO_ALOCACAO,
   type AlocacaoConflito,
+  type MensagemAlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
 import {
   buscarCompetenciasFechadasPorDatas,
@@ -17,6 +21,7 @@ import {
   type FechamentoCompetencia,
 } from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,6 +102,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [conflitosReg, setConflitosReg] = useState<Set<string>>(new Set());
   const [conflitosOutraObra, setConflitosOutraObra] = useState<AlocacaoConflito[]>([]);
   const [competenciasFechadas, setCompetenciasFechadas] = useState<FechamentoCompetencia[]>([]);
+  const [dialogFeedback, setDialogFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const [modo, setModo] = useState<"pular" | "sobrescrever">("pular");
   const [verificando, setVerificando] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -156,6 +162,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setConflitosReg(new Set());
       setConflitosOutraObra([]);
       setCompetenciasFechadas([]);
+      setDialogFeedback(null);
       setFuncionarioId("");
       setDataInicio(today);
       setDataFim(today);
@@ -172,6 +179,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       toast.error("O intervalo não contém dias úteis (seg–sex)");
       return;
     }
+    setDialogFeedback(null);
     setVerificando(true);
     try {
       const [alocRes, regRes, conflitosObraDiferente, fechadas] = await Promise.all([
@@ -207,6 +215,21 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setConflitosReg(setR);
       setConflitosOutraObra(conflitosObraDiferente);
       setCompetenciasFechadas(fechadas);
+      if (conflitosObraDiferente.length > 0) {
+        const resumo = conflitosObraDiferente
+          .slice(0, 3)
+          .map(
+            (c) => new Date(c.data + "T00:00:00").toLocaleDateString("pt-BR") + " - " + c.obraNome,
+          )
+          .join("; ");
+        toast.warning(TITULO_CONFLITO_ALOCACAO, {
+          description:
+            "Algumas datas não foram alocadas porque o funcionário já possui alocação em outra obra." +
+            (resumo
+              ? " Conflitos: " + resumo + (conflitosObraDiferente.length > 3 ? "; ..." : "")
+              : ""),
+        });
+      }
       if (
         setA.size === 0 &&
         setR.size === 0 &&
@@ -269,6 +292,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         ignoreDuplicates: true,
       });
       if (alocErr) {
+        const erroAmigavel = erroBancoAlocacao(alocErr);
+        if (erroAmigavel) throw erroAmigavel;
         throw new Error(
           mensagemErroCompetenciaFechada(alocErr) ??
             mensagemErroBancoAlocacao(alocErr) ??
@@ -305,7 +330,12 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
       resetAndClose(false);
     } catch (e: unknown) {
-      toast.error((e as PostgrestErrorLike)?.message ?? "Erro ao alocar período");
+      if (isAlocacaoConflitoError(e)) {
+        setDialogFeedback({ title: e.title, description: e.description });
+        toast.error(e.title, { description: e.description, duration: 10000 });
+      } else {
+        toast.error((e as PostgrestErrorLike)?.message ?? "Erro ao alocar período");
+      }
     } finally {
       setSalvando(false);
     }
@@ -374,6 +404,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
             seg–qui, 8h sex).
           </DialogDescription>
         </DialogHeader>
+
+        {dialogFeedback && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>{dialogFeedback.title}</AlertTitle>
+            <AlertDescription>{dialogFeedback.description}</AlertDescription>
+          </Alert>
+        )}
 
         {step === "form" ? (
           <div className="space-y-4">

@@ -6,11 +6,14 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buscarConflitoAlocacao,
-  mensagemConflitoAlocacao,
+  detalhesConflitoAlocacao,
+  erroBancoAlocacao,
   mensagemErroBancoAlocacao,
+  type MensagemAlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
 import { garantirCompetenciaAberta, mensagemErroCompetenciaFechada } from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -85,6 +88,13 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const [weekStart, setWeekStart] = useState<Date>(() =>
     startOfWeek(initialWeekStart ?? new Date()),
   );
+  const initialWeekStartKey = initialWeekStart ? isoDate(startOfWeek(initialWeekStart)) : null;
+
+  useEffect(() => {
+    if (!initialWeekStartKey) return;
+    setWeekStart(startOfWeek(new Date(initialWeekStartKey + "T00:00:00")));
+  }, [initialWeekStartKey]);
+
   const days = useMemo(() => weekDays(weekStart), [weekStart]);
   const firstDay = isoDate(days[0]);
   const lastDay = isoDate(days[6]);
@@ -217,6 +227,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   // estado local editável
   const [cells, setCells] = useState<Record<CellKey, Registro>>({});
   const [saving, setSaving] = useState<Record<CellKey, "idle" | "saving" | "saved" | "error">>({});
+  const [gridFeedback, setGridFeedback] = useState<MensagemAlocacaoConflito | null>(null);
 
   useEffect(() => {
     if (!registrosRemote) return;
@@ -237,6 +248,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const saveCell = useCallback(
     async (key: CellKey, r: Registro) => {
       setSaving((s) => ({ ...s, [key]: "saving" }));
+      setGridFeedback(null);
       const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
       const hasContent = r.ausencia || total > 0 || !!r.observacoes?.trim();
 
@@ -262,8 +274,10 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
           data: r.data,
         });
         if (conflito) {
+          const mensagem = detalhesConflitoAlocacao(conflito);
           setSaving((s) => ({ ...s, [key]: "error" }));
-          toast.error(mensagemConflitoAlocacao(conflito));
+          setGridFeedback(mensagem);
+          toast.error(mensagem.title, { description: mensagem.description, duration: 10000 });
           return;
         }
 
@@ -282,7 +296,16 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
           },
         );
         if (alocErr) {
+          const erroAmigavel = erroBancoAlocacao(alocErr);
           setSaving((s) => ({ ...s, [key]: "error" }));
+          if (erroAmigavel) {
+            setGridFeedback({ title: erroAmigavel.title, description: erroAmigavel.description });
+            toast.error(erroAmigavel.title, {
+              description: erroAmigavel.description,
+              duration: 10000,
+            });
+            return;
+          }
           toast.error(
             mensagemErroCompetenciaFechada(alocErr) ??
               mensagemErroBancoAlocacao(alocErr) ??
@@ -345,6 +368,14 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
 
   return (
     <div className="space-y-3">
+      {gridFeedback && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>{gridFeedback.title}</AlertTitle>
+          <AlertDescription>{gridFeedback.description}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
           <Button

@@ -62,3 +62,5 @@ dist/
 .wrangler/
 
 doc/00-progress/*.zip
+
+supabase/.temp/

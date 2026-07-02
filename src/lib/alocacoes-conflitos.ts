@@ -10,6 +10,11 @@ export type AlocacaoConflito = {
   obraNome: string;
 };
 
+export type MensagemAlocacaoConflito = {
+  title: string;
+  description: string;
+};
+
 type AlocacaoComObra = {
   id: string;
   data: string;
@@ -33,8 +38,51 @@ function mapRow(row: AlocacaoComObra): AlocacaoConflito {
   };
 }
 
+function formatarDataBR(dataISO: string) {
+  return new Date(dataISO + "T00:00:00").toLocaleDateString("pt-BR");
+}
+
+export const TITULO_CONFLITO_ALOCACAO = "Funcionário já alocado";
+
+export function detalhesConflitoAlocacao(
+  conflito?: AlocacaoConflito | null,
+): MensagemAlocacaoConflito {
+  if (conflito) {
+    return {
+      title: TITULO_CONFLITO_ALOCACAO,
+      description: `Este funcionário já está alocado na obra ${conflito.obraNome} em ${formatarDataBR(conflito.data)}. Remova ou ajuste a alocação existente antes de lançar uma nova.`,
+    };
+  }
+
+  return {
+    title: TITULO_CONFLITO_ALOCACAO,
+    description:
+      "Este funcionário já está alocado em outra obra nesta data. Remova ou ajuste a alocação existente antes de lançar uma nova.",
+  };
+}
+
 export function mensagemConflitoAlocacao(conflito: AlocacaoConflito) {
-  return `Funcionário já lançado nesta data na obra: ${conflito.obraNome}. Não é permitido lançar o mesmo funcionário em duas obras no mesmo dia.`;
+  return detalhesConflitoAlocacao(conflito).description;
+}
+
+export class AlocacaoConflitoError extends Error {
+  title: string;
+  description: string;
+
+  constructor(message: MensagemAlocacaoConflito) {
+    super(message.description);
+    this.name = "AlocacaoConflitoError";
+    this.title = message.title;
+    this.description = message.description;
+  }
+}
+
+export function criarErroConflitoAlocacao(conflito?: AlocacaoConflito | null) {
+  return new AlocacaoConflitoError(detalhesConflitoAlocacao(conflito));
+}
+
+export function isAlocacaoConflitoError(error: unknown): error is AlocacaoConflitoError {
+  return error instanceof AlocacaoConflitoError;
 }
 
 export async function buscarConflitoAlocacao(params: {
@@ -82,18 +130,38 @@ type SupabaseErrorLike = {
   constraint?: string;
 };
 
-const MENSAGEM_CONFLITO_BANCO =
-  "Funcionário já lançado nesta data. Não é permitido lançar o mesmo funcionário em duas obras no mesmo dia.";
+function textoErroBanco(error: SupabaseErrorLike) {
+  return [error.message, error.details, error.hint, error.constraint].filter(Boolean).join(" ");
+}
 
-export function mensagemErroBancoAlocacao(error: unknown) {
+function pareceConflitoFuncionarioData(error: SupabaseErrorLike) {
+  const textoErro = textoErroBanco(error).toLowerCase();
+  if (error.code !== "23505") return false;
+
+  return (
+    textoErro.includes("alocacoes_funcionario_data_unique") ||
+    textoErro.includes("alocacoes_funcionario_id_data_key") ||
+    (textoErro.includes("alocacoes") &&
+      textoErro.includes("funcionario_id") &&
+      textoErro.includes("data")) ||
+    (textoErro.includes("funcionario_id") &&
+      textoErro.includes("data") &&
+      textoErro.includes("duplicate key"))
+  );
+}
+
+export function detalhesErroBancoAlocacao(error: unknown): MensagemAlocacaoConflito | null {
   if (!error || typeof error !== "object") return null;
 
   const err = error as SupabaseErrorLike;
-  const textoErro = [err.message, err.details, err.hint, err.constraint].filter(Boolean).join(" ");
-  const violaConstraintFuncionarioData =
-    err.code === "23505" &&
-    (textoErro.includes("alocacoes_funcionario_data_unique") ||
-      textoErro.includes("alocacoes_funcionario_id_data_key"));
+  return pareceConflitoFuncionarioData(err) ? detalhesConflitoAlocacao() : null;
+}
 
-  return violaConstraintFuncionarioData ? MENSAGEM_CONFLITO_BANCO : null;
+export function mensagemErroBancoAlocacao(error: unknown) {
+  return detalhesErroBancoAlocacao(error)?.description ?? null;
+}
+
+export function erroBancoAlocacao(error: unknown) {
+  const detalhes = detalhesErroBancoAlocacao(error);
+  return detalhes ? new AlocacaoConflitoError(detalhes) : null;
 }

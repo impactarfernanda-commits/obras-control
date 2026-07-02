@@ -4,7 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CalendarPlus, ChevronLeft, ChevronRight, Trash2, Undo2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -12,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,12 +58,21 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
+import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import {
   buscarConflitoAlocacao,
-  mensagemConflitoAlocacao,
+  criarErroConflitoAlocacao,
+  erroBancoAlocacao,
+  isAlocacaoConflitoError,
   mensagemErroBancoAlocacao,
+  type MensagemAlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
-import { garantirCompetenciaAberta, mensagemErroCompetenciaFechada } from "@/lib/competencias";
+import {
+  calcularCompetencia,
+  formatarPeriodoCompetencia,
+  garantirCompetenciaAberta,
+  mensagemErroCompetenciaFechada,
+} from "@/lib/competencias";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -135,9 +152,10 @@ function pad(n: number) {
 function monthStart(y: number, m: number) {
   return `${y}-${pad(m + 1)}-01`;
 }
-function monthEnd(y: number, m: number) {
-  const d = new Date(y, m + 1, 0);
-  return `${y}-${pad(m + 1)}-${pad(d.getDate())}`;
+function addDaysISO(dateISO: string, days: number) {
+  const d = new Date(dateISO + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function monthLabel(y: number, m: number) {
   return new Date(y, m, 1).toLocaleDateString("pt-BR", {
@@ -159,13 +177,19 @@ function AlocacoesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
+  const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth()); // 0-indexed
 
-  const startISO = monthStart(year, month);
-  const endISO = monthEnd(year, month);
+  const competenciaPeriodo = useMemo(
+    () => calcularCompetencia(monthStart(year, month)),
+    [year, month],
+  );
+  const startISO = competenciaPeriodo.data_inicio;
+  const endISO = competenciaPeriodo.data_fim;
   const mesKey = `${year}-${pad(month + 1)}`;
+  const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
 
   const { data: funcionarios, error: funcionariosError } = useQuery({
     queryKey: ["funcionarios-min-all"],
@@ -223,16 +247,24 @@ function AlocacoesPage() {
   } = useQuery({
     queryKey: ["alocacoes-mes", mesKey, obraFiltro],
     queryFn: async () => {
-      let q = supabase
-        .from("alocacoes")
-        .select("id, data, funcionario_id, obra_id, obras(id,nome)")
-        .gte("data", startISO)
-        .lte("data", endISO)
-        .order("data", { ascending: true });
-      if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []) as unknown as AlocRow[];
+      const pageSize = 1000;
+      const rows: AlocRow[] = [];
+      for (let from = 0; ; from += pageSize) {
+        let q = supabase
+          .from("alocacoes")
+          .select("id, data, funcionario_id, obra_id, obras(id,nome)")
+          .gte("data", startISO)
+          .lte("data", endISO)
+          .order("data", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
+        const { data, error } = await q;
+        if (error) throw error;
+        const page = (data ?? []) as unknown as AlocRow[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return rows;
     },
   });
 
@@ -240,15 +272,30 @@ function AlocacoesPage() {
     queryKey: ["registros-mes", mesKey, obraFiltro],
     enabled: !!alocacoes && alocacoes.length > 0,
     queryFn: async () => {
-      let q = supabase
-        .from("registros_horas")
-        .select("funcionario_id, obra_id, data, horas_normais, horas_extras")
-        .gte("data", startISO)
-        .lte("data", endISO);
-      if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-      const { data, error } = await q;
-      if (error) throw error;
-      return data ?? [];
+      const pageSize = 1000;
+      const rows: Array<{
+        funcionario_id: string;
+        obra_id: string;
+        data: string;
+        horas_normais: number;
+        horas_extras: number;
+      }> = [];
+      for (let from = 0; ; from += pageSize) {
+        let q = supabase
+          .from("registros_horas")
+          .select("funcionario_id, obra_id, data, horas_normais, horas_extras")
+          .gte("data", startISO)
+          .lte("data", endISO)
+          .order("data", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
+        const { data, error } = await q;
+        if (error) throw error;
+        const page = data ?? [];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return rows;
     },
   });
 
@@ -306,13 +353,11 @@ function AlocacoesPage() {
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [alocacoes, horasMap, nomeById]);
 
-  // Build month day list
-  const monthDays = useMemo(() => {
+  const competenciaDays = useMemo(() => {
     const days: string[] = [];
-    const last = new Date(year, month + 1, 0).getDate();
-    for (let d = 1; d <= last; d++) days.push(`${year}-${pad(month + 1)}-${pad(d)}`);
+    for (let d = startISO; d <= endISO; d = addDaysISO(d, 1)) days.push(d);
     return days;
-  }, [year, month]);
+  }, [startISO, endISO]);
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultFormValues: FormVals = {
@@ -343,6 +388,7 @@ function AlocacoesPage() {
 
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
+      setAlocacaoFeedback(null);
       const { total, hn, he } = calcHoras(v.hora_entrada, v.hora_saida, v.data);
       if (total <= 0) throw new Error("Horário inválido");
 
@@ -354,7 +400,7 @@ function AlocacoesPage() {
         obraId: v.obra_id,
         data: v.data,
       });
-      if (conflito) throw new Error(mensagemConflitoAlocacao(conflito));
+      if (conflito) throw criarErroConflitoAlocacao(conflito);
 
       const { error: alocErr } = await supabase.from("alocacoes").upsert(
         [
@@ -368,6 +414,8 @@ function AlocacoesPage() {
         { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
       );
       if (alocErr) {
+        const erroAmigavel = erroBancoAlocacao(alocErr);
+        if (erroAmigavel) throw erroAmigavel;
         throw new Error(
           mensagemErroCompetenciaFechada(alocErr) ??
             mensagemErroBancoAlocacao(alocErr) ??
@@ -404,7 +452,14 @@ function AlocacoesPage() {
       setOpen(false);
       form.reset(defaultFormValues);
     },
-    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao salvar lançamento"),
+    onError: (e: ErrorLike) => {
+      if (isAlocacaoConflitoError(e)) {
+        setAlocacaoFeedback({ title: e.title, description: e.description });
+        toast.error(e.title, { description: e.description, duration: 10000 });
+        return;
+      }
+      toast.error(e.message ?? "Erro ao salvar lançamento");
+    },
   });
 
   const deleteMutation = useMutation({
@@ -497,9 +552,10 @@ function AlocacoesPage() {
     <div>
       <PageHeader
         title="Alocações"
-        description="Visualize as alocações agrupadas por obra, mês a mês."
+        description="Visualize as alocações agrupadas por obra na competência 25-24."
         actions={
           <div className="flex gap-2">
+            <ImportarPlanilhaLegadoDialog />
             <Button
               variant="outline"
               onClick={() => undoLastMutation.mutate()}
@@ -682,14 +738,25 @@ function AlocacoesPage() {
         }
       />
 
+      {alocacaoFeedback && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>{alocacaoFeedback.title}</AlertTitle>
+          <AlertDescription>{alocacaoFeedback.description}</AlertDescription>
+        </Alert>
+      )}
+
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
           <div className="flex items-center gap-1">
             <Button size="icon" variant="outline" onClick={prevMonth} aria-label="Mês anterior">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="min-w-[160px] text-center text-sm font-medium capitalize">
+            <div className="min-w-[220px] text-center text-sm font-medium capitalize">
               {monthLabel(year, month)}
+              <div className="text-[11px] font-normal normal-case text-muted-foreground">
+                {periodoLabel}
+              </div>
             </div>
             <Button size="icon" variant="outline" onClick={nextMonth} aria-label="Próximo mês">
               <ChevronRight className="h-4 w-4" />
@@ -725,7 +792,7 @@ function AlocacoesPage() {
       ) : porObra.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            Nenhuma alocação neste mês.
+            Nenhuma alocação nesta competência.
           </CardContent>
         </Card>
       ) : (
@@ -766,7 +833,7 @@ function AlocacoesPage() {
                     <TabsContent value="calendario" className="mt-3 space-y-4">
                       <div>
                         <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">
-                          Funcionários no mês
+                          Funcionários na competência
                         </div>
                         <ul className="divide-y rounded-md border">
                           {funcsArr.map((f) => (
@@ -800,14 +867,14 @@ function AlocacoesPage() {
                         </div>
                         <div className="mt-1 grid grid-cols-7 gap-1">
                           {(() => {
-                            const firstDow = new Date(year, month, 1).getDay();
+                            const firstDow = new Date(startISO + "T00:00:00").getDay();
                             const blanks = Array.from({ length: firstDow });
                             return (
                               <>
                                 {blanks.map((_, i) => (
                                   <div key={`b${i}`} />
                                 ))}
-                                {monthDays.map((d) => {
+                                {competenciaDays.map((d) => {
                                   const dayNum = Number(d.slice(-2));
                                   const items = obra.dias.get(d) ?? [];
                                   const count = items.length;
@@ -927,7 +994,10 @@ function AlocacoesPage() {
                     </TabsContent>
 
                     <TabsContent value="grade" className="mt-3">
-                      <RegistrosGrid obraId={obra.id} initialWeekStart={new Date(year, month, 1)} />
+                      <RegistrosGrid
+                        obraId={obra.id}
+                        initialWeekStart={new Date(startISO + "T00:00:00")}
+                      />
                     </TabsContent>
                   </Tabs>
                 </AccordionContent>
