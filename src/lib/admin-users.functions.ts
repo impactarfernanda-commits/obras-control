@@ -6,7 +6,14 @@ type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 
 const ROLES: Role[] = ["assistente", "supervisor", "coordenador", "gerente", "diretor"];
 
-async function assertDirector(ctx: { supabase: any; userId: string }) {
+type AuthRpcClient = {
+  rpc: (
+    fn: "has_role",
+    args: { _user_id: string; _role: Role },
+  ) => PromiseLike<{ data: boolean | null; error: { message: string } | null }>;
+};
+
+async function assertDirector(ctx: { supabase: AuthRpcClient; userId: string }) {
   const { data, error } = await ctx.supabase.rpc("has_role", {
     _user_id: ctx.userId,
     _role: "diretor",
@@ -38,12 +45,23 @@ export const listAdminUsers = createServerFn({ method: "GET" })
 
     const ids = authData.users.map((u) => u.id);
     const [profilesRes, rolesRes] = await Promise.all([
-      supabaseAdmin.from("users_profiles").select("id, full_name").in("id", ids),
+      supabaseAdmin
+        .from("users_profiles" as never)
+        .select("id, full_name, email")
+        .in("id", ids),
       supabaseAdmin.from("user_roles").select("user_id, role").in("user_id", ids),
     ]);
-    const profiles = new Map((profilesRes.data ?? []).map((p: any) => [p.id, p.full_name]));
+    const profiles = new Map(
+      (
+        (profilesRes.data ?? []) as unknown as Array<{
+          id: string;
+          full_name: string | null;
+          email: string | null;
+        }>
+      ).map((p) => [p.id, { fullName: p.full_name ?? "", email: p.email ?? "" }]),
+    );
     const rolesByUser = new Map<string, Role[]>();
-    for (const r of (rolesRes.data ?? []) as any[]) {
+    for (const r of (rolesRes.data ?? []) as Array<{ user_id: string; role: Role }>) {
       const arr = rolesByUser.get(r.user_id) ?? [];
       arr.push(r.role as Role);
       rolesByUser.set(r.user_id, arr);
@@ -55,10 +73,10 @@ export const listAdminUsers = createServerFn({ method: "GET" })
       const top = priority.find((p) => userRoles.includes(p)) ?? null;
       return {
         id: u.id,
-        email: u.email ?? "",
-        full_name: (profiles.get(u.id) as string) ?? "",
+        email: u.email ?? profiles.get(u.id)?.email ?? "",
+        full_name: profiles.get(u.id)?.fullName ?? "",
         role: top,
-        banned_until: (u as any).banned_until ?? null,
+        banned_until: (u as { banned_until?: string | null }).banned_until ?? null,
         created_at: u.created_at,
       };
     });
@@ -90,47 +108,55 @@ export const adminCreateUser = createServerFn({ method: "POST" })
     // handle_new_user trigger cria profile + role 'assistente'. Ajustar.
     await supabaseAdmin
       .from("users_profiles")
-      .upsert({ id: userId, full_name: data.full_name }, { onConflict: "id" });
+      .upsert({ id: userId, full_name: data.full_name, email: data.email } as never, {
+        onConflict: "id",
+      });
 
-    if (data.role !== "assistente") {
-      await supabaseAdmin.from("user_roles").delete().eq("user_id", userId);
-      const { error: rErr } = await supabaseAdmin
-        .from("user_roles")
-        .insert({ user_id: userId, role: data.role });
-      if (rErr) throw new Error(rErr.message);
-    }
+    const { error: rErr } = await supabaseAdmin
+      .from("user_roles")
+      .upsert({ user_id: userId, role: data.role }, { onConflict: "user_id" });
+    if (rErr) throw new Error(rErr.message);
 
     return { id: userId };
   });
 
-const setRoleSchema = z.object({
+const updateUserSchema = z.object({
   user_id: z.string().uuid(),
+  full_name: z.string().trim().min(2).max(120),
   role: z.enum(["assistente", "supervisor", "coordenador", "gerente", "diretor"]),
 });
 
-export const adminSetUserRole = createServerFn({ method: "POST" })
+export const adminUpdateUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setRoleSchema.parse(d))
+  .inputValidator((d: unknown) => updateUserSchema.parse(d))
   .handler(async ({ data, context }) => {
     await assertDirector(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Anti-lockout: se o alvo é o último diretor e role nova não é diretor, bloquear.
     if (data.role !== "diretor") {
       const { data: dirs } = await supabaseAdmin
         .from("user_roles")
         .select("user_id")
         .eq("role", "diretor");
-      const directorIds = new Set((dirs ?? []).map((r: any) => r.user_id));
+      const directorIds = new Set((dirs ?? []).map((r: { user_id: string }) => r.user_id));
       if (directorIds.has(data.user_id) && directorIds.size <= 1) {
         throw new Error("Não é possível remover o último diretor do sistema.");
       }
     }
 
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", data.user_id);
+    const { error: profileErr } = await supabaseAdmin
+      .from("users_profiles")
+      .upsert({ id: data.user_id, full_name: data.full_name }, { onConflict: "id" });
+    if (profileErr) throw new Error(profileErr.message);
+
+    const { error: metadataErr } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
+      user_metadata: { full_name: data.full_name },
+    });
+    if (metadataErr) throw new Error(metadataErr.message);
+
     const { error } = await supabaseAdmin
       .from("user_roles")
-      .insert({ user_id: data.user_id, role: data.role });
+      .upsert({ user_id: data.user_id, role: data.role }, { onConflict: "user_id" });
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -176,11 +202,15 @@ export const adminSetUserActive = createServerFn({ method: "POST" })
         .from("user_roles")
         .select("user_id")
         .eq("role", "diretor");
-      const directorIds = (dirs ?? []).map((r: any) => r.user_id) as string[];
+      const directorIds = (dirs ?? []).map((r: { user_id: string }) => r.user_id) as string[];
       if (directorIds.includes(data.user_id)) {
-        const { data: usersResp } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
+        const { data: usersResp } = await supabaseAdmin.auth.admin.listUsers({
+          page: 1,
+          perPage: 200,
+        });
         const activeDirs = (usersResp?.users ?? []).filter(
-          (u) => directorIds.includes(u.id) && !(u as any).banned_until,
+          (u) =>
+            directorIds.includes(u.id) && !(u as { banned_until?: string | null }).banned_until,
         );
         if (activeDirs.length <= 1) {
           throw new Error("Não é possível desativar o último diretor ativo.");
@@ -190,7 +220,7 @@ export const adminSetUserActive = createServerFn({ method: "POST" })
 
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
       ban_duration: data.active ? "none" : "876000h",
-    } as any);
+    } as { ban_duration: string });
     if (error) throw new Error(error.message);
     return { ok: true };
   });

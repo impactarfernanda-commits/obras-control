@@ -16,22 +16,47 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import {
-  listAdminUsers, adminCreateUser, adminSetUserRole, adminResetPassword,
-  adminSetUserActive, ROLES, type AdminUser,
+  listAdminUsers,
+  adminCreateUser,
+  adminUpdateUser,
+  adminResetPassword,
+  adminSetUserActive,
+  ROLES,
+  type AdminUser,
 } from "@/lib/admin-users.functions";
 
 export const Route = createFileRoute("/_authenticated/admin/usuarios")({
@@ -67,7 +92,7 @@ function AdminUsuariosPage() {
 
   const list = useServerFn(listAdminUsers);
   const create = useServerFn(adminCreateUser);
-  const setRole = useServerFn(adminSetUserRole);
+  const updateUser = useServerFn(adminUpdateUser);
   const resetPwd = useServerFn(adminResetPassword);
   const setActive = useServerFn(adminSetUserActive);
 
@@ -77,7 +102,8 @@ function AdminUsuariosPage() {
   const [openCreate, setOpenCreate] = useState(false);
   const [createdPassword, setCreatedPassword] = useState<string | null>(null);
   const [roleTarget, setRoleTarget] = useState<AdminUser | null>(null);
-  const [novaRole, setNovaRole] = useState<string>("assistente");
+  const [novoNome, setNovoNome] = useState("");
+  const [novaRole, setNovaRole] = useState<CreateForm["role"]>("assistente");
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
   const [resetShown, setResetShown] = useState<{ email: string; password: string } | null>(null);
   const [toggleTarget, setToggleTarget] = useState<AdminUser | null>(null);
@@ -92,7 +118,9 @@ function AdminUsuariosPage() {
     let r = users ?? [];
     if (busca.trim()) {
       const q = busca.toLowerCase();
-      r = r.filter((u) => u.email.toLowerCase().includes(q) || u.full_name.toLowerCase().includes(q));
+      r = r.filter(
+        (u) => u.email.toLowerCase().includes(q) || u.full_name.toLowerCase().includes(q),
+      );
     }
     if (filtroRole !== "todas") r = r.filter((u) => u.role === filtroRole);
     if (filtroStatus === "ativos") r = r.filter((u) => !u.banned_until);
@@ -117,11 +145,11 @@ function AdminUsuariosPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const roleMut = useMutation({
-    mutationFn: (v: { user_id: string; role: string }) =>
-      setRole({ data: { user_id: v.user_id, role: v.role as any } }),
+  const updateMut = useMutation({
+    mutationFn: (v: { user_id: string; full_name: string; role: CreateForm["role"] }) =>
+      updateUser({ data: v }),
     onSuccess: () => {
-      toast.success("Role atualizado");
+      toast.success("Usuário atualizado");
       setRoleTarget(null);
       qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
@@ -129,8 +157,7 @@ function AdminUsuariosPage() {
   });
 
   const resetMut = useMutation({
-    mutationFn: (v: { user_id: string; password: string }) =>
-      resetPwd({ data: v }),
+    mutationFn: (v: { user_id: string; password: string }) => resetPwd({ data: v }),
     onSuccess: (_r, v) => {
       toast.success("Senha redefinida");
       setResetShown({ email: resetTarget!.email, password: v.password });
@@ -141,8 +168,7 @@ function AdminUsuariosPage() {
   });
 
   const toggleMut = useMutation({
-    mutationFn: (v: { user_id: string; active: boolean }) =>
-      setActive({ data: v }),
+    mutationFn: (v: { user_id: string; active: boolean }) => setActive({ data: v }),
     onSuccess: () => {
       toast.success("Status atualizado");
       setToggleTarget(null);
@@ -159,14 +185,18 @@ function AdminUsuariosPage() {
     );
   }
 
-
   return (
     <div className="space-y-4">
       <PageHeader
         title="Usuários"
         description="Gestão de usuários, roles e acesso ao sistema."
         actions={
-          <Button onClick={() => { form.reset({ email: "", full_name: "", role: "assistente", password: gerarSenha() }); setOpenCreate(true); }}>
+          <Button
+            onClick={() => {
+              form.reset({ email: "", full_name: "", role: "assistente", password: gerarSenha() });
+              setOpenCreate(true);
+            }}
+          >
             <UserPlus className="mr-2 h-4 w-4" /> Novo usuário
           </Button>
         }
@@ -176,22 +206,34 @@ function AdminUsuariosPage() {
         <CardContent className="grid gap-3 pt-6 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <Label className="text-xs">Buscar</Label>
-            <Input placeholder="Nome ou email" value={busca} onChange={(e) => setBusca(e.target.value)} />
+            <Input
+              placeholder="Nome ou email"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
           </div>
           <div>
             <Label className="text-xs">Role</Label>
             <Select value={filtroRole} onValueChange={setFiltroRole}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todas">Todas</SelectItem>
-                {ROLES.map((r) => <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>)}
+                {ROLES.map((r) => (
+                  <SelectItem key={r} value={r} className="capitalize">
+                    {r}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Status</Label>
             <Select value={filtroStatus} onValueChange={setFiltroStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ativos">Ativos</SelectItem>
                 <SelectItem value="inativos">Inativos</SelectItem>
@@ -200,7 +242,10 @@ function AdminUsuariosPage() {
             </Select>
           </div>
           <div className="flex items-end">
-            <Button variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["admin-users"] })}>
+            <Button
+              variant="outline"
+              onClick={() => qc.invalidateQueries({ queryKey: ["admin-users"] })}
+            >
               <RefreshCw className="mr-2 h-4 w-4" /> Recarregar
             </Button>
           </div>
@@ -226,45 +271,89 @@ function AdminUsuariosPage() {
                 </TableHeader>
                 <TableBody>
                   {filtered.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum usuário</TableCell></TableRow>
-                  ) : filtered.map((u) => {
-                    const inactive = !!u.banned_until;
-                    const isSelf = u.id === user?.id;
-                    return (
-                      <TableRow key={u.id}>
-                        <TableCell className="font-medium">{u.full_name || "—"} {isSelf && <span className="text-xs text-muted-foreground">(você)</span>}</TableCell>
-                        <TableCell className="text-sm">{u.email}</TableCell>
-                        <TableCell>
-                          {u.role ? (
-                            <Badge variant="outline" className={`capitalize ${roleColor[u.role]}`}>{u.role}</Badge>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell>
-                          {inactive
-                            ? <Badge variant="outline" className="bg-red-500/10 text-red-700 dark:text-red-300">Inativo</Badge>
-                            : <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">Ativo</Badge>}
-                        </TableCell>
-                        <TableCell className="text-xs">{new Date(u.created_at).toLocaleDateString("pt-BR")}</TableCell>
-                        <TableCell className="text-right space-x-1">
-                          <Button size="sm" variant="outline" onClick={() => { setRoleTarget(u); setNovaRole(u.role ?? "assistente"); }}>
-                            Role
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => setResetTarget(u)}>
-                            <KeyRound className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant={inactive ? "outline" : "outline"}
-                            disabled={isSelf}
-                            onClick={() => setToggleTarget(u)}
-                            title={isSelf ? "Você não pode desativar a si mesmo" : ""}
-                          >
-                            {inactive ? <CheckCircle2 className="h-3 w-3" /> : <Ban className="h-3 w-3" />}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                        Nenhum usuário
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filtered.map((u) => {
+                      const inactive = !!u.banned_until;
+                      const isSelf = u.id === user?.id;
+                      return (
+                        <TableRow key={u.id}>
+                          <TableCell className="font-medium">
+                            {u.full_name || "—"}{" "}
+                            {isSelf && (
+                              <span className="text-xs text-muted-foreground">(você)</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm">{u.email}</TableCell>
+                          <TableCell>
+                            {u.role ? (
+                              <Badge
+                                variant="outline"
+                                className={`capitalize ${roleColor[u.role]}`}
+                              >
+                                {u.role}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {inactive ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-red-500/10 text-red-700 dark:text-red-300"
+                              >
+                                Inativo
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              >
+                                Ativo
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                          </TableCell>
+                          <TableCell className="text-right space-x-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setRoleTarget(u);
+                                setNovoNome(u.full_name || "");
+                                setNovaRole(u.role ?? "assistente");
+                              }}
+                            >
+                              Editar
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setResetTarget(u)}>
+                              <KeyRound className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={inactive ? "outline" : "outline"}
+                              disabled={isSelf}
+                              onClick={() => setToggleTarget(u)}
+                              title={isSelf ? "Você não pode desativar a si mesmo" : ""}
+                            >
+                              {inactive ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : (
+                                <Ban className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -277,28 +366,46 @@ function AdminUsuariosPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Novo usuário</DialogTitle>
-            <DialogDescription>Crie a conta e repasse a senha temporária ao usuário.</DialogDescription>
+            <DialogDescription>
+              Crie a conta e repasse a senha temporária ao usuário.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={form.handleSubmit((d) => createMut.mutate(d))} className="space-y-3">
             <div>
               <Label>Nome completo</Label>
               <Input {...form.register("full_name")} />
-              {form.formState.errors.full_name && <p className="text-xs text-destructive mt-1">{form.formState.errors.full_name.message}</p>}
+              {form.formState.errors.full_name && (
+                <p className="text-xs text-destructive mt-1">
+                  {form.formState.errors.full_name.message}
+                </p>
+              )}
             </div>
             <div>
               <Label>Email</Label>
               <Input type="email" {...form.register("email")} />
-              {form.formState.errors.email && <p className="text-xs text-destructive mt-1">{form.formState.errors.email.message}</p>}
+              {form.formState.errors.email && (
+                <p className="text-xs text-destructive mt-1">
+                  {form.formState.errors.email.message}
+                </p>
+              )}
             </div>
             <div>
               <Label>Role</Label>
               <Select
                 value={form.watch("role")}
-                onValueChange={(v) => form.setValue("role", v as any, { shouldValidate: true })}
+                onValueChange={(v) =>
+                  form.setValue("role", v as CreateForm["role"], { shouldValidate: true })
+                }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {ROLES.map((r) => <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>)}
+                  {ROLES.map((r) => (
+                    <SelectItem key={r} value={r} className="capitalize">
+                      {r}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -306,15 +413,27 @@ function AdminUsuariosPage() {
               <Label>Senha temporária</Label>
               <div className="flex gap-2">
                 <Input {...form.register("password")} />
-                <Button type="button" variant="outline" onClick={() => form.setValue("password", gerarSenha(), { shouldValidate: true })}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => form.setValue("password", gerarSenha(), { shouldValidate: true })}
+                >
                   Gerar
                 </Button>
               </div>
-              {form.formState.errors.password && <p className="text-xs text-destructive mt-1">{form.formState.errors.password.message}</p>}
+              {form.formState.errors.password && (
+                <p className="text-xs text-destructive mt-1">
+                  {form.formState.errors.password.message}
+                </p>
+              )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setOpenCreate(false)}>Cancelar</Button>
-              <Button type="submit" disabled={createMut.isPending}>Criar</Button>
+              <Button type="button" variant="ghost" onClick={() => setOpenCreate(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createMut.isPending}>
+                Criar
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -325,43 +444,78 @@ function AdminUsuariosPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Usuário criado</DialogTitle>
-            <DialogDescription>Copie a senha temporária — ela não será mostrada novamente.</DialogDescription>
+            <DialogDescription>
+              Copie a senha temporária — ela não será mostrada novamente.
+            </DialogDescription>
           </DialogHeader>
-          <div className="rounded border bg-muted p-3 font-mono text-sm break-all">{createdPassword}</div>
+          <div className="rounded border bg-muted p-3 font-mono text-sm break-all">
+            {createdPassword}
+          </div>
           <DialogFooter>
-            <Button onClick={() => { navigator.clipboard.writeText(createdPassword ?? ""); toast.success("Copiado"); }}>
+            <Button
+              onClick={() => {
+                navigator.clipboard.writeText(createdPassword ?? "");
+                toast.success("Copiado");
+              }}
+            >
               <Copy className="mr-2 h-4 w-4" /> Copiar
             </Button>
-            <Button variant="outline" onClick={() => setCreatedPassword(null)}>Fechar</Button>
+            <Button variant="outline" onClick={() => setCreatedPassword(null)}>
+              Fechar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Editar role */}
+      {/* Editar usuario */}
       <Dialog open={!!roleTarget} onOpenChange={(o) => !o && setRoleTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Alterar role</DialogTitle>
-            <DialogDescription>
-              {roleTarget?.full_name || roleTarget?.email} — role atual: <b className="capitalize">{roleTarget?.role ?? "—"}</b>
-            </DialogDescription>
+            <DialogTitle>Editar usuario</DialogTitle>
+            <DialogDescription>{roleTarget?.email}</DialogDescription>
           </DialogHeader>
-          <div>
-            <Label>Nova role</Label>
-            <Select value={novaRole} onValueChange={setNovaRole}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ROLES.map((r) => <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="space-y-3">
+            <div>
+              <Label>Nome completo</Label>
+              <Input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+            </div>
+            <div>
+              <Label>Perfil</Label>
+              <Select value={novaRole} onValueChange={(v) => setNovaRole(v as CreateForm["role"])}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r} value={r} className="capitalize">
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRoleTarget(null)}>Cancelar</Button>
+            <Button variant="ghost" onClick={() => setRoleTarget(null)}>
+              Cancelar
+            </Button>
             <Button
-              disabled={roleMut.isPending || !roleTarget || novaRole === roleTarget?.role}
-              onClick={() => roleTarget && roleMut.mutate({ user_id: roleTarget.id, role: novaRole })}
+              disabled={
+                updateMut.isPending ||
+                !roleTarget ||
+                novoNome.trim().length < 2 ||
+                (novaRole === roleTarget?.role && novoNome.trim() === (roleTarget?.full_name ?? ""))
+              }
+              onClick={() =>
+                roleTarget &&
+                updateMut.mutate({
+                  user_id: roleTarget.id,
+                  full_name: novoNome.trim(),
+                  role: novaRole,
+                })
+              }
             >
-              Confirmar
+              Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -373,13 +527,16 @@ function AdminUsuariosPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Redefinir senha?</AlertDialogTitle>
             <AlertDialogDescription>
-              Será gerada uma nova senha temporária para <b>{resetTarget?.email}</b>. A senha atual deixará de funcionar.
+              Será gerada uma nova senha temporária para <b>{resetTarget?.email}</b>. A senha atual
+              deixará de funcionar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => resetTarget && resetMut.mutate({ user_id: resetTarget.id, password: gerarSenha() })}
+              onClick={() =>
+                resetTarget && resetMut.mutate({ user_id: resetTarget.id, password: gerarSenha() })
+              }
             >
               Redefinir
             </AlertDialogAction>
@@ -391,14 +548,25 @@ function AdminUsuariosPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Nova senha de {resetShown?.email}</DialogTitle>
-            <DialogDescription>Copie e repasse ao usuário — não será mostrada novamente.</DialogDescription>
+            <DialogDescription>
+              Copie e repasse ao usuário — não será mostrada novamente.
+            </DialogDescription>
           </DialogHeader>
-          <div className="rounded border bg-muted p-3 font-mono text-sm break-all">{resetShown?.password}</div>
+          <div className="rounded border bg-muted p-3 font-mono text-sm break-all">
+            {resetShown?.password}
+          </div>
           <DialogFooter>
-            <Button onClick={() => { navigator.clipboard.writeText(resetShown?.password ?? ""); toast.success("Copiado"); }}>
+            <Button
+              onClick={() => {
+                navigator.clipboard.writeText(resetShown?.password ?? "");
+                toast.success("Copiado");
+              }}
+            >
               <Copy className="mr-2 h-4 w-4" /> Copiar
             </Button>
-            <Button variant="outline" onClick={() => setResetShown(null)}>Fechar</Button>
+            <Button variant="outline" onClick={() => setResetShown(null)}>
+              Fechar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -419,7 +587,10 @@ function AdminUsuariosPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => toggleTarget && toggleMut.mutate({ user_id: toggleTarget.id, active: !!toggleTarget.banned_until })}
+              onClick={() =>
+                toggleTarget &&
+                toggleMut.mutate({ user_id: toggleTarget.id, active: !!toggleTarget.banned_until })
+              }
             >
               Confirmar
             </AlertDialogAction>
