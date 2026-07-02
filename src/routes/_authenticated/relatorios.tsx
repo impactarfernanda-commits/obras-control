@@ -8,14 +8,28 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useCategorias, tipoCategoria } from "@/lib/categorias";
-import { calcularCusto, fmtBRL, useBeneficios, useSegurosVida, diasUteisNoIntervalo, custoDoDia } from "@/lib/custos";
+import {
+  calcularCusto,
+  fmtBRL,
+  useBeneficios,
+  useSegurosVida,
+  diasUteisNoIntervalo,
+  custoDoDia,
+} from "@/lib/custos";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   beforeLoad: async () => {
@@ -30,17 +44,62 @@ export const Route = createFileRoute("/_authenticated/relatorios")({
   component: RelatoriosPage,
 });
 
-type FuncRow = { id: string; nome: string; categoria_mo: string; ativo: boolean; salario: number | null };
-type AlocRow = { funcionario_id: string; obra_id: string; data: string };
-type RegRow = { funcionario_id: string; obra_id: string; data: string; horas_normais: number; horas_extras: number; ausencia: boolean };
+type FuncRow = {
+  id: string;
+  nome: string;
+  categoria_mo: string;
+  ativo: boolean;
+  salario: number | null;
+};
+type TipoMaoObra = "montagem" | "civil" | "indireta" | null;
+type AlocRow = {
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
+  tipo_mao_obra: TipoMaoObra;
+};
+type RegRow = {
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
+  horas_normais: number;
+  horas_extras: number;
+  ausencia: boolean;
+};
 type ObraRow = { id: string; nome: string };
 
 function payrollRange(year: number, month: number) {
   // Folha: dia 25 do mês anterior até dia 24 do mês selecionado
   const start = new Date(year, month - 1, 25);
   const end = new Date(year, month, 24);
-  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return { start: iso(start), end: iso(end), startDate: start, endDate: end };
+}
+
+async function fetchAll<T>(
+  queryFactory: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
+) {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await queryFactory(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+function tipoPorAlocacao(
+  alocacao: AlocRow,
+  funcionario: FuncRow,
+  categorias: Parameters<typeof tipoCategoria>[1],
+) {
+  if (alocacao.tipo_mao_obra === "montagem" || alocacao.tipo_mao_obra === "civil") return "MOD";
+  if (alocacao.tipo_mao_obra === "indireta") return "MOI";
+  return tipoCategoria(funcionario.categoria_mo, categorias) ?? "MOD";
 }
 
 function RelatoriosPage() {
@@ -56,7 +115,7 @@ function RelatoriosPage() {
     queryKey: ["funcionarios"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("funcionarios_safe" as any)
+        .from("funcionarios_safe" as unknown as "funcionarios")
         .select("id,nome,categoria_mo,ativo,salario")
         .order("nome");
       if (error) throw error;
@@ -76,94 +135,136 @@ function RelatoriosPage() {
   const { start, end, startDate, endDate } = payrollRange(year, month);
 
   const { data: alocacoes, isLoading: la } = useQuery({
-    queryKey: ["alocacoes-mes", `${year}-${month + 1}`],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("alocacoes")
-        .select("funcionario_id,obra_id,data")
-        .gte("data", start)
-        .lte("data", end);
-      if (error) throw error;
-      return (data ?? []) as AlocRow[];
-    },
+    queryKey: ["alocacoes-mes", start, end],
+    queryFn: async () =>
+      fetchAll<AlocRow>((from, to) =>
+        supabase
+          .from("alocacoes")
+          .select("funcionario_id,obra_id,data,tipo_mao_obra" as never)
+          .gte("data", start)
+          .lte("data", end)
+          .order("data", { ascending: true })
+          .range(from, to),
+      ),
   });
 
   const { data: registros, isLoading: lr } = useQuery({
-    queryKey: ["registros-mes", `${year}-${month + 1}`],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("registros_horas")
-        .select("funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia")
-        .gte("data", start)
-        .lte("data", end);
-      if (error) throw error;
-      return (data ?? []) as RegRow[];
-    },
+    queryKey: ["registros-mes", start, end],
+    queryFn: async () =>
+      fetchAll<RegRow>((from, to) =>
+        supabase
+          .from("registros_horas")
+          .select("funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia")
+          .gte("data", start)
+          .lte("data", end)
+          .order("data", { ascending: true })
+          .range(from, to),
+      ),
   });
 
   const custoPorFunc = useMemo(() => {
     const m = new Map<string, ReturnType<typeof calcularCusto>>();
     for (const f of funcionarios ?? []) {
-      m.set(f.id, calcularCusto(f.salario, beneficios ?? null, segurosVida?.get(f.categoria_mo) ?? 0));
+      m.set(
+        f.id,
+        calcularCusto(f.salario, beneficios ?? null, segurosVida?.get(f.categoria_mo) ?? 0),
+      );
     }
     return m;
   }, [funcionarios, beneficios, segurosVida]);
 
   const diasUteis = useMemo(() => diasUteisNoIntervalo(startDate, endDate), [startDate, endDate]);
 
-  const obrasComCusto = useMemo(() => {
+  const resultadoObras = useMemo(() => {
     const obraMap = new Map((obras ?? []).map((o) => [o.id, o.nome]));
-    const acc = new Map<string, { nome: string; mod: number; moi: number; total: number; funcs: Set<string> }>();
+    const funcMap = new Map((funcionarios ?? []).map((f) => [f.id, f]));
+    const acc = new Map<
+      string,
+      { nome: string; mod: number; moi: number; total: number; funcs: Set<string> }
+    >();
+    const avisos = new Set<string>();
 
-    // Index registros: funcId|obraId|data -> reg
     const regIndex = new Map<string, RegRow>();
     for (const r of registros ?? []) {
       regIndex.set(`${r.funcionario_id}|${r.obra_id}|${r.data}`, r);
     }
 
-    // Combine alocações + registros (registros podem existir sem alocação explícita)
-    const pairs = new Map<string, { funcionario_id: string; obra_id: string; data: string }>();
     for (const a of alocacoes ?? []) {
-      pairs.set(`${a.funcionario_id}|${a.obra_id}|${a.data}`, a);
-    }
-    for (const r of registros ?? []) {
-      const k = `${r.funcionario_id}|${r.obra_id}|${r.data}`;
-      if (!pairs.has(k)) pairs.set(k, { funcionario_id: r.funcionario_id, obra_id: r.obra_id, data: r.data });
-    }
+      const func = funcMap.get(a.funcionario_id);
+      if (!func) {
+        avisos.add("Ha alocacoes sem funcionario correspondente carregado no relatorio.");
+        continue;
+      }
+      const custo = custoPorFunc.get(a.funcionario_id);
+      if (!custo || custo.total <= 0) {
+        avisos.add("Ha alocacoes com funcionario sem custo mensal calculado.");
+        continue;
+      }
 
-    for (const p of pairs.values()) {
-      const func = funcionarios?.find((f) => f.id === p.funcionario_id);
-      const custo = custoPorFunc.get(p.funcionario_id);
-      if (!func || !custo) continue;
-      const reg = regIndex.get(`${p.funcionario_id}|${p.obra_id}|${p.data}`);
+      const reg = regIndex.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+      if (!reg) {
+        avisos.add(
+          "Ha alocacoes sem registro de horas correspondente; foi usada a jornada padrao do dia.",
+        );
+      } else if (
+        !reg.ausencia &&
+        Number(reg.horas_normais || 0) + Number(reg.horas_extras || 0) <= 0
+      ) {
+        avisos.add("Ha registros de horas sem horas normais/extras; essas linhas nao geram custo.");
+      }
+      if (!a.tipo_mao_obra) {
+        avisos.add(
+          "Ha alocacoes sem tipo de mao de obra; foi usado o tipo padrao da categoria ou MOD como fallback.",
+        );
+      }
+
       const valor = custoDoDia({
         custoMensal: custo.total,
         diasUteis,
-        dataISO: p.data,
+        dataISO: a.data,
         horasNormais: reg?.horas_normais ?? null,
         horasExtras: reg?.horas_extras ?? null,
         ausencia: reg?.ausencia ?? null,
       });
       if (valor <= 0) continue;
-      const tipo = tipoCategoria(func.categoria_mo, categorias);
-      const e = acc.get(p.obra_id) ?? { nome: obraMap.get(p.obra_id) ?? "—", mod: 0, moi: 0, total: 0, funcs: new Set<string>() };
-      if (tipo === "MOD") e.mod += valor;
-      else if (tipo === "MOI") e.moi += valor;
+
+      const tipo = tipoPorAlocacao(a, func, categorias);
+      const e = acc.get(a.obra_id) ?? {
+        nome: obraMap.get(a.obra_id) ?? "-",
+        mod: 0,
+        moi: 0,
+        total: 0,
+        funcs: new Set<string>(),
+      };
+      if (tipo === "MOI") e.moi += valor;
+      else e.mod += valor;
       e.total += valor;
-      e.funcs.add(p.funcionario_id);
-      acc.set(p.obra_id, e);
+      e.funcs.add(a.funcionario_id);
+      acc.set(a.obra_id, e);
     }
 
-    return Array.from(acc.entries())
-      .map(([id, v]) => ({ id, nome: v.nome, mod: v.mod, moi: v.moi, total: v.total, funcs: v.funcs.size }))
+    const obrasComCusto = Array.from(acc.entries())
+      .map(([id, v]) => ({
+        id,
+        nome: v.nome,
+        mod: v.mod,
+        moi: v.moi,
+        total: v.total,
+        funcs: v.funcs.size,
+      }))
       .sort((a, b) => b.total - a.total);
+    return { obrasComCusto, avisos: Array.from(avisos) };
   }, [alocacoes, registros, custoPorFunc, funcionarios, categorias, obras, diasUteis]);
 
+  const obrasComCusto = resultadoObras.obrasComCusto;
+  const avisosObras = resultadoObras.avisos;
+
   const totaisObra = useMemo(
-    () => obrasComCusto.reduce(
-      (acc, o) => ({ mod: acc.mod + o.mod, moi: acc.moi + o.moi, total: acc.total + o.total }),
-      { mod: 0, moi: 0, total: 0 },
-    ),
+    () =>
+      obrasComCusto.reduce(
+        (acc, o) => ({ mod: acc.mod + o.mod, moi: acc.moi + o.moi, total: acc.total + o.total }),
+        { mod: 0, moi: 0, total: 0 },
+      ),
     [obrasComCusto],
   );
 
@@ -177,7 +278,10 @@ function RelatoriosPage() {
   const ativos = (funcionarios ?? []).filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce((s, f) => s + (custoPorFunc.get(f.id)?.total ?? 0), 0);
 
-  const mesLabel = new Date(year, month, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  const mesLabel = new Date(year, month, 1).toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+  });
   const periodoLabel = `${startDate.toLocaleDateString("pt-BR")} a ${endDate.toLocaleDateString("pt-BR")}`;
 
   function nav(delta: number) {
@@ -195,10 +299,27 @@ function RelatoriosPage() {
         description="Custos consolidados de mão de obra por funcionário e por obra."
         actions={
           <div className="flex items-center gap-1 rounded-md border bg-card p-1">
-            <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Mês anterior"><ChevronLeft className="h-4 w-4" /></Button>
-            <span className="min-w-[200px] text-center text-sm font-medium capitalize">{mesLabel} <span className="text-xs text-muted-foreground normal-case">({periodoLabel})</span></span>
-            <Button variant="ghost" size="icon" onClick={() => nav(1)} aria-label="Próximo mês"><ChevronRight className="h-4 w-4" /></Button>
-            <Button variant="outline" size="sm" className="ml-1" onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); }}>Hoje</Button>
+            <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Mês anterior">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[200px] text-center text-sm font-medium capitalize">
+              {mesLabel}{" "}
+              <span className="text-xs text-muted-foreground normal-case">({periodoLabel})</span>
+            </span>
+            <Button variant="ghost" size="icon" onClick={() => nav(1)} aria-label="Próximo mês">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-1"
+              onClick={() => {
+                setYear(today.getFullYear());
+                setMonth(today.getMonth());
+              }}
+            >
+              Hoje
+            </Button>
           </div>
         }
       />
@@ -213,11 +334,18 @@ function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle>Folha mensal — funcionários ativos</CardTitle>
-              <p className="text-sm text-muted-foreground">Total mensal: <span className="font-semibold text-foreground">{fmtBRL(totalFolhaAtiva)}</span> · {ativos.length} funcionário(s)</p>
+              <p className="text-sm text-muted-foreground">
+                Total mensal:{" "}
+                <span className="font-semibold text-foreground">{fmtBRL(totalFolhaAtiva)}</span> ·{" "}
+                {ativos.length} funcionário(s)
+              </p>
             </CardHeader>
             <CardContent className="p-0">
               {loading ? (
-                <div className="space-y-2 p-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+                <div className="space-y-2 p-4">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
               ) : (
                 <Table>
                   <TableHeader>
@@ -237,39 +365,55 @@ function RelatoriosPage() {
                   </TableHeader>
                   <TableBody>
                     {ativos.length === 0 ? (
-                      <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">Nenhum funcionário ativo.</TableCell></TableRow>
-                    ) : ativos.map((f) => {
-                      const c = custoPorFunc.get(f.id);
-                      const tipo = tipoCategoria(f.categoria_mo, categorias);
-                      if (!c) return null;
-                      return (
-                        <TableRow key={f.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <span>{f.nome}</span>
-                              {!f.ativo && (
-                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">Inativo</span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>{f.categoria_mo}</TableCell>
-                          <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.provAvisoPrevio)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.beneficios)}</TableCell>
-                          <TableCell className="text-right">{fmtBRL(c.seguroVida)}</TableCell>
-                          <TableCell className="text-right font-semibold">{fmtBRL(c.total)}</TableCell>
-                        </TableRow>
-                      );
-                    })}
+                      <TableRow>
+                        <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
+                          Nenhum funcionário ativo.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      ativos.map((f) => {
+                        const c = custoPorFunc.get(f.id);
+                        const tipo = tipoCategoria(f.categoria_mo, categorias);
+                        if (!c) return null;
+                        return (
+                          <TableRow key={f.id}>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                <span>{f.nome}</span>
+                                {!f.ativo && (
+                                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                    Inativo
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{f.categoria_mo}</TableCell>
+                            <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
+                            <TableCell className="text-right">
+                              {fmtBRL(c.provAvisoPrevio)}
+                            </TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.beneficios)}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(c.seguroVida)}</TableCell>
+                            <TableCell className="text-right font-semibold">
+                              {fmtBRL(c.total)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={10} className="text-right font-medium">Total</TableCell>
-                      <TableCell className="text-right font-semibold">{fmtBRL(totalFolhaAtiva)}</TableCell>
+                      <TableCell colSpan={10} className="text-right font-medium">
+                        Total
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {fmtBRL(totalFolhaAtiva)}
+                      </TableCell>
                     </TableRow>
                   </TableFooter>
                 </Table>
@@ -281,45 +425,81 @@ function RelatoriosPage() {
         <TabsContent value="obras">
           <Card>
             <CardHeader>
-              <CardTitle>Custo de mão de obra por obra — {mesLabel} <span className="text-sm font-normal text-muted-foreground">({periodoLabel})</span></CardTitle>
+              <CardTitle>
+                Custo de mão de obra por obra — {mesLabel}{" "}
+                <span className="text-sm font-normal text-muted-foreground">({periodoLabel})</span>
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Custo proporcional: (custo mensal ÷ {diasUteis} dias úteis) × dias alocados, com horas extras (1,5×) somadas quando registradas.
+                Custo proporcional: (custo mensal ÷ {diasUteis} dias úteis) × dias alocados, com
+                horas extras (1,5×) somadas quando registradas.
               </p>
             </CardHeader>
             <CardContent className="p-0">
               {loading ? (
-                <div className="space-y-2 p-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+                <div className="space-y-2 p-4">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Obra</TableHead>
-                      <TableHead className="text-right">MOD</TableHead>
-                      <TableHead className="text-right">MOI</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {obrasComCusto.length === 0 ? (
-                      <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">Nenhuma alocação no mês.</TableCell></TableRow>
-                    ) : obrasComCusto.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell className="font-medium">{o.nome}</TableCell>
-                        <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
-                        <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
-                        <TableCell className="text-right font-semibold">{fmtBRL(o.total)}</TableCell>
+                <>
+                  {avisosObras.length > 0 && (
+                    <Alert className="m-4">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Avisos do calculo</AlertTitle>
+                      <AlertDescription>
+                        <ul className="list-disc space-y-1 pl-4">
+                          {avisosObras.map((aviso) => (
+                            <li key={aviso}>{aviso}</li>
+                          ))}
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Obra</TableHead>
+                        <TableHead className="text-right">MOD</TableHead>
+                        <TableHead className="text-right">MOI</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                  <TableFooter>
-                    <TableRow>
-                      <TableCell className="font-medium">Total geral</TableCell>
-                      <TableCell className="text-right font-medium">{fmtBRL(totaisObra.mod)}</TableCell>
-                      <TableCell className="text-right font-medium">{fmtBRL(totaisObra.moi)}</TableCell>
-                      <TableCell className="text-right font-semibold">{fmtBRL(totaisObra.total)}</TableCell>
-                    </TableRow>
-                  </TableFooter>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {obrasComCusto.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                            Nenhuma alocação no mês.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        obrasComCusto.map((o) => (
+                          <TableRow key={o.id}>
+                            <TableCell className="font-medium">{o.nome}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
+                            <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
+                            <TableCell className="text-right font-semibold">
+                              {fmtBRL(o.total)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell className="font-medium">Total geral</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {fmtBRL(totaisObra.mod)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {fmtBRL(totaisObra.moi)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {fmtBRL(totaisObra.total)}
+                        </TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
+                </>
               )}
             </CardContent>
           </Card>
