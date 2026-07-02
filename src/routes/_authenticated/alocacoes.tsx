@@ -173,7 +173,7 @@ type AlocRow = {
 };
 
 function AlocacoesPage() {
-  const { user } = useAuth();
+  const { user, isManagerOrAbove } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
@@ -555,7 +555,7 @@ function AlocacoesPage() {
         description="Visualize as alocações agrupadas por obra na competência 25-24."
         actions={
           <div className="flex gap-2">
-            <ImportarPlanilhaLegadoDialog />
+            {isManagerOrAbove && <ImportarPlanilhaLegadoDialog />}
             <Button
               variant="outline"
               onClick={() => undoLastMutation.mutate()}

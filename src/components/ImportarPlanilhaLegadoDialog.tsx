@@ -87,6 +87,8 @@ type Preview = {
   bloqueado: boolean;
 };
 type ErrorLike = { message?: string };
+const MENSAGEM_SEM_PERMISSAO_IMPORTAR =
+  "Você não tem permissão para importar planilhas. Esta ação é restrita a gerentes e diretores.";
 const MONTHS: Record<string, number> = {
   jan: 1,
   fev: 2,
@@ -213,7 +215,7 @@ function emptyPreview(error: string): Preview {
 }
 
 export function ImportarPlanilhaLegadoDialog() {
-  const { user } = useAuth();
+  const { user, isManagerOrAbove } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -221,10 +223,25 @@ export function ImportarPlanilhaLegadoDialog() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const podeImportar = useMemo(
-    () => preview && !preview.bloqueado && preview.alocacoesValidas.length > 0,
-    [preview],
+    () => isManagerOrAbove && preview && !preview.bloqueado && preview.alocacoesValidas.length > 0,
+    [isManagerOrAbove, preview],
   );
+  function bloquearSemPermissao() {
+    setPreview(emptyPreview(MENSAGEM_SEM_PERMISSAO_IMPORTAR));
+    toast.error(MENSAGEM_SEM_PERMISSAO_IMPORTAR);
+  }
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen && !isManagerOrAbove) {
+      bloquearSemPermissao();
+      return;
+    }
+    setOpen(nextOpen);
+  }
   async function carregarArquivo(file: File) {
+    if (!isManagerOrAbove) {
+      bloquearSemPermissao();
+      return;
+    }
     setLoading(true);
     setPreview(null);
     setFileName(file.name);
@@ -479,6 +496,10 @@ export function ImportarPlanilhaLegadoDialog() {
     };
   }
   async function confirmarImportacao() {
+    if (!isManagerOrAbove) {
+      bloquearSemPermissao();
+      return;
+    }
     if (!preview || preview.bloqueado || !user?.id) return;
     setImporting(true);
     try {
@@ -556,7 +577,7 @@ export function ImportarPlanilhaLegadoDialog() {
     }
   }
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline">
           <FileSpreadsheet className="mr-2 h-4 w-4" />
