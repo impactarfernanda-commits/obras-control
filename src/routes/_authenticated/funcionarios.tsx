@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Pencil, Plus, Search } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -31,6 +31,10 @@ import { tipoCategoria, useCategorias } from "@/lib/categorias";
 import { useAuth } from "@/hooks/use-auth";
 import { calcularCusto, ENCARGOS_PCT, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 
 export const Route = createFileRoute("/_authenticated/funcionarios")({
@@ -57,17 +61,27 @@ function Row({ label, value, bold }: { label: string; value: number; bold?: bool
   );
 }
 
+function databaseError(error: unknown) {
+  if (typeof error !== "object" || error === null) return { message: "", code: "" };
+  const candidate = error as { message?: unknown; code?: unknown };
+  return {
+    message: typeof candidate.message === "string" ? candidate.message : "",
+    code: typeof candidate.code === "string" ? candidate.code : "",
+  };
+}
+
 function FuncionariosPage() {
   const qc = useQueryClient();
   const { isManagerOrAbove } = useAuth();
   const canSeeSalario = isManagerOrAbove;
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<"all" | "MOI" | "MOD">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "ativo" | "inativo">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "ativo" | "inativo">("ativo");
   const [obraFilter, setObraFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Funcionario | null>(null);
+  const [deleting, setDeleting] = useState<Funcionario | null>(null);
   const [salarioDirty, setSalarioDirty] = useState(false);
 
   const { data: categorias } = useCategorias();
@@ -212,7 +226,32 @@ function FuncionariosPage() {
       setEditing(null);
       form.reset();
     },
-    onError: (e: any) => toast.error(e?.message ?? "Erro ao salvar"),
+    onError: (error: unknown) => {
+      const { message, code } = databaseError(error);
+      if (message.includes("FUNCIONARIO_DUPLICADO_INATIVO")) {
+        toast.error("Existe um funcionário inativo/excluído com este nome. Reative o cadastro existente ou confirme a regra antes de criar um novo.");
+      } else if (message.includes("FUNCIONARIO_DUPLICADO_ATIVO") || code === "23505") {
+        toast.error("Já existe um funcionário cadastrado com este nome. Verifique o cadastro antes de adicionar novamente.");
+      } else toast.error(message || "Erro ao salvar");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (funcionario: Funcionario) => {
+      const { error } = await supabase
+        .from("funcionarios")
+        .update({ ativo: false, deleted_at: new Date().toISOString() })
+        .eq("id", funcionario.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Funcionário excluído. O histórico foi preservado.");
+      setDeleting(null);
+      qc.invalidateQueries({ queryKey: ["funcionarios"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-min-all"] });
+    },
+    onError: (error: unknown) =>
+      toast.error(databaseError(error).message || "Erro ao excluir funcionário"),
   });
 
   return (
@@ -416,9 +455,16 @@ function FuncionariosPage() {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <div className="flex">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(f)} aria-label="Editar">
                           <Pencil className="h-4 w-4" />
                         </Button>
+                        {isManagerOrAbove && f.ativo && (
+                          <Button variant="ghost" size="icon" onClick={() => setDeleting(f)} aria-label="Excluir">
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -437,6 +483,25 @@ function FuncionariosPage() {
           <Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Próxima</Button>
         </div>
       </div>
+      <AlertDialog open={Boolean(deleting)} onOpenChange={(value) => { if (!value) setDeleting(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir funcionário</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir este funcionário? O histórico será preservado, mas ele não ficará disponível para novas alocações.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleting && deleteMutation.mutate(deleting)}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "Excluindo..." : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

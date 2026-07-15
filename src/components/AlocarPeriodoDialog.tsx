@@ -121,10 +121,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         ativo: boolean;
         data_desligamento: string | null;
       }>;
-      // Inclui inativos no select (com marcador) para permitir lançamentos retroativos até a data de desligamento.
-      return arr
-        .slice()
-        .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome));
+      return arr.filter((f) => f.ativo).sort((a, b) => a.nome.localeCompare(b.nome));
     },
   });
   const funcSelecionado = useMemo(

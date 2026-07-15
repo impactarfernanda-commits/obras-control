@@ -218,6 +218,8 @@ export type Database = {
           categoria_mo: string
           created_at: string
           data_desligamento: string | null
+          deleted_at: string | null
+          deleted_by: string | null
           encargos: number
           id: string
           nome: string
@@ -228,6 +230,8 @@ export type Database = {
           categoria_mo: string
           created_at?: string
           data_desligamento?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           encargos?: number
           id?: string
           nome: string
@@ -238,6 +242,8 @@ export type Database = {
           categoria_mo?: string
           created_at?: string
           data_desligamento?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           encargos?: number
           id?: string
           nome?: string
@@ -496,6 +502,8 @@ export type Database = {
           categoria_mo: string | null
           created_at: string | null
           data_desligamento: string | null
+          deleted_at: string | null
+          deleted_by: string | null
           encargos: number | null
           id: string | null
           nome: string | null
@@ -506,6 +514,8 @@ export type Database = {
           categoria_mo?: string | null
           created_at?: string | null
           data_desligamento?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           encargos?: never
           id?: string | null
           nome?: string | null
@@ -516,6 +526,8 @@ export type Database = {
           categoria_mo?: string | null
           created_at?: string | null
           data_desligamento?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           encargos?: never
           id?: string | null
           nome?: string | null

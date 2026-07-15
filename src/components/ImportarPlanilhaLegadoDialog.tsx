@@ -324,6 +324,15 @@ export function ImportarPlanilhaLegadoDialog() {
     if (funcsError) throw funcsError;
     const funcionariosExistentes = (funcsData ?? []) as unknown as FuncionarioExistente[];
     const funcMap = new Map(funcionariosExistentes.map((f) => [normalizeName(f.nome), f]));
+    for (const [key, item] of funcionariosPorNome) {
+      const existente = funcMap.get(key);
+      if (existente && !existente.ativo) {
+        erros.push(
+          "Existe um funcionário inativo/excluído com este nome: " + item.nome +
+          ". Reative o cadastro existente antes de importar.",
+        );
+      }
+    }
     const { data: obrasData, error: obrasError } = await supabase.from("obras").select("id,nome");
     if (obrasError) throw obrasError;
     const obrasExistentes = (obrasData ?? []) as ObraExistente[];

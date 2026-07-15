@@ -136,12 +136,12 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
       });
     return m;
   }, [funcionariosAll]);
-  // Inclui inativos no select de "+ Adicionar funcionário" para permitir lançamentos retroativos.
   const funcionariosAtivos = useMemo(
     () =>
       (funcionariosAll ?? [])
+        .filter((f) => f.ativo)
         .slice()
-        .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
     [funcionariosAll],
   );
 
