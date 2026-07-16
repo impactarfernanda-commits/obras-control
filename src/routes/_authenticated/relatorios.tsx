@@ -18,7 +18,15 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useCategorias, tipoCategoria } from "@/lib/categorias";
@@ -50,6 +58,9 @@ type FuncRow = {
   categoria_mo: string;
   ativo: boolean;
   salario: number | null;
+  data_admissao: string | null;
+  data_desligamento: string | null;
+  deleted_at: string | null;
 };
 type TipoMaoObra = "montagem" | "civil" | "indireta" | null;
 type AlocRow = {
@@ -106,6 +117,10 @@ function RelatoriosPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [pendenciaFilter, setPendenciaFilter] = useState<
+    "all" | "ativos" | "admitidos" | "desligados"
+  >("all");
+  const [categoriaFilter, setCategoriaFilter] = useState("all");
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida();
@@ -116,7 +131,7 @@ function RelatoriosPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,salario")
+        .select("id,nome,categoria_mo,ativo,salario,data_admissao,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       return (data ?? []) as unknown as FuncRow[];
@@ -274,6 +289,73 @@ function RelatoriosPage() {
     for (const r of registros ?? []) s.add(r.funcionario_id);
     return s;
   }, [alocacoes, registros]);
+
+  const semAlocacao = useMemo(() => {
+    const alocados = new Set((alocacoes ?? []).map((a) => a.funcionario_id));
+    return (funcionarios ?? [])
+      .filter((f) => {
+        if (f.deleted_at || alocados.has(f.id)) return false;
+        if (f.data_admissao && f.data_admissao > end) return false;
+        if (f.data_desligamento && f.data_desligamento < start) return false;
+        return true;
+      })
+      .map((f) => {
+        const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
+        const fim = f.data_desligamento && f.data_desligamento < end ? f.data_desligamento : end;
+        const admitidoNoPeriodo = Boolean(
+          f.data_admissao && f.data_admissao >= start && f.data_admissao <= end,
+        );
+        const desligadoNoPeriodo = Boolean(
+          f.data_desligamento && f.data_desligamento >= start && f.data_desligamento <= end,
+        );
+        const observacao = admitidoNoPeriodo
+          ? `Admitido em ${new Date(f.data_admissao! + "T00:00:00").toLocaleDateString("pt-BR")} e sem alocação registrada após admissão.`
+          : desligadoNoPeriodo
+            ? `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")} e sem alocação registrada até o desligamento.`
+            : "Sem alocação registrada na competência.";
+        return {
+          ...f,
+          diasDisponiveis: diasUteisNoIntervalo(
+            new Date(inicio + "T00:00:00"),
+            new Date(fim + "T00:00:00"),
+          ),
+          admitidoNoPeriodo,
+          desligadoNoPeriodo,
+          observacao,
+        };
+      })
+      .filter((f) => {
+        if (pendenciaFilter === "ativos" && !f.ativo) return false;
+        if (pendenciaFilter === "admitidos" && !f.admitidoNoPeriodo) return false;
+        if (pendenciaFilter === "desligados" && !f.desligadoNoPeriodo) return false;
+        return categoriaFilter === "all" || f.categoria_mo === categoriaFilter;
+      })
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [alocacoes, funcionarios, start, end, pendenciaFilter, categoriaFilter]);
+
+  const categoriasPendencias = useMemo(
+    () => Array.from(new Set((funcionarios ?? []).map((f) => f.categoria_mo))).sort(),
+    [funcionarios],
+  );
+
+  function exportarSemAlocacao() {
+    const rows = semAlocacao.map((f) => ({
+      Funcionário: f.nome,
+      "Função/Categoria": f.categoria_mo,
+      "Data de admissão": f.data_admissao
+        ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString("pt-BR")
+        : "",
+      "Data de desligamento": f.data_desligamento
+        ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString("pt-BR")
+        : "",
+      Status: f.ativo ? "Ativo" : "Desligado",
+      "Dias disponíveis": f.diasDisponiveis,
+      Observação: f.observacao,
+    }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Sem alocação");
+    XLSX.writeFile(workbook, `funcionarios-sem-alocacao-${start}-${end}.xlsx`);
+  }
   // Mostra ativos + inativos com lançamentos no período (custos pagos mesmo após desligamento).
   const ativos = (funcionarios ?? []).filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce((s, f) => s + (custoPorFunc.get(f.id)?.total ?? 0), 0);
@@ -328,6 +410,7 @@ function RelatoriosPage() {
         <TabsList>
           <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>
           <TabsTrigger value="obras">Custo por obra</TabsTrigger>
+          <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
         <TabsContent value="funcionarios">
@@ -500,6 +583,115 @@ function RelatoriosPage() {
                     </TableFooter>
                   </Table>
                 </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="sem-alocacao">
+          <Card>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle>Funcionários sem alocação na competência</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {periodoLabel} · {semAlocacao.length} pendência(s)
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={exportarSemAlocacao}
+                  disabled={!semAlocacao.length}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Excel
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Select
+                  value={pendenciaFilter}
+                  onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}
+                >
+                  <SelectTrigger className="w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="ativos">Apenas ativos</SelectItem>
+                    <SelectItem value="admitidos">Admitidos no período</SelectItem>
+                    <SelectItem value="desligados">Desligados no período</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
+                  <SelectTrigger className="w-[230px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as categorias</SelectItem>
+                    {categoriasPendencias.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="space-y-2 p-4">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Funcionário</TableHead>
+                      <TableHead>Função/Categoria</TableHead>
+                      <TableHead>Admissão</TableHead>
+                      <TableHead>Desligamento</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Dias disponíveis</TableHead>
+                      <TableHead>Observação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!semAlocacao.length ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                          Nenhum funcionário sem alocação nesta competência.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      semAlocacao.map((f) => (
+                        <TableRow key={f.id}>
+                          <TableCell className="font-medium">{f.nome}</TableCell>
+                          <TableCell>{f.categoria_mo}</TableCell>
+                          <TableCell>
+                            {f.data_admissao
+                              ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString("pt-BR")
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {f.data_desligamento
+                              ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString(
+                                  "pt-BR",
+                                )
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={f.ativo ? "default" : "secondary"}>
+                              {f.ativo ? "Ativo" : "Desligado"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
+                          <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               )}
             </CardContent>
           </Card>
