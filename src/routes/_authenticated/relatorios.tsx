@@ -88,6 +88,23 @@ function payrollRange(year: number, month: number) {
   return { start: iso(start), end: iso(end), startDate: start, endDate: end };
 }
 
+function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
+  const datas: string[] = [];
+  for (
+    let data = new Date(inicioISO + "T00:00:00");
+    data <= new Date(fimISO + "T00:00:00");
+    data = new Date(data.getFullYear(), data.getMonth(), data.getDate() + 1)
+  ) {
+    const dia = data.getDay();
+    if (dia !== 0 && dia !== 6) {
+      datas.push(
+        `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`,
+      );
+    }
+  }
+  return datas;
+}
+
 async function fetchAll<T>(
   queryFactory: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
 ) {
@@ -121,6 +138,7 @@ function RelatoriosPage() {
     "all" | "ativos" | "admitidos" | "desligados"
   >("all");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
+  const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida();
@@ -291,10 +309,15 @@ function RelatoriosPage() {
   }, [alocacoes, registros]);
 
   const semAlocacao = useMemo(() => {
-    const alocados = new Set((alocacoes ?? []).map((a) => a.funcionario_id));
+    const alocacoesPorFuncionario = new Map<string, Set<string>>();
+    for (const alocacao of alocacoes ?? []) {
+      const datas = alocacoesPorFuncionario.get(alocacao.funcionario_id) ?? new Set<string>();
+      datas.add(alocacao.data);
+      alocacoesPorFuncionario.set(alocacao.funcionario_id, datas);
+    }
     return (funcionarios ?? [])
       .filter((f) => {
-        if (f.deleted_at || alocados.has(f.id)) return false;
+        if (f.deleted_at) return false;
         if (f.data_admissao && f.data_admissao > end) return false;
         if (f.data_desligamento && f.data_desligamento < start) return false;
         return true;
@@ -302,36 +325,52 @@ function RelatoriosPage() {
       .map((f) => {
         const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
         const fim = f.data_desligamento && f.data_desligamento < end ? f.data_desligamento : end;
+        const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
+        const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
+        const diasComAlocacao = diasDisponiveis.filter((data) => datasAlocadas.has(data));
+        const diasSemAlocacao = diasDisponiveis.filter((data) => !datasAlocadas.has(data));
         const admitidoNoPeriodo = Boolean(
           f.data_admissao && f.data_admissao >= start && f.data_admissao <= end,
         );
         const desligadoNoPeriodo = Boolean(
           f.data_desligamento && f.data_desligamento >= start && f.data_desligamento <= end,
         );
-        const observacao = admitidoNoPeriodo
-          ? `Admitido em ${new Date(f.data_admissao! + "T00:00:00").toLocaleDateString("pt-BR")} e sem alocação registrada após admissão.`
-          : desligadoNoPeriodo
-            ? `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")} e sem alocação registrada até o desligamento.`
-            : "Sem alocação registrada na competência.";
+        const observacoes = [
+          diasComAlocacao.length === 0
+            ? "Sem nenhuma alocação registrada na competência."
+            : "Possui alocação parcial. Existem dias úteis sem lançamento.",
+        ];
+        if (admitidoNoPeriodo)
+          observacoes.push(
+            `Admitido em ${new Date(f.data_admissao! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações a partir da admissão.`,
+          );
+        if (desligadoNoPeriodo)
+          observacoes.push(
+            `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações até o desligamento.`,
+          );
         return {
           ...f,
-          diasDisponiveis: diasUteisNoIntervalo(
-            new Date(inicio + "T00:00:00"),
-            new Date(fim + "T00:00:00"),
-          ),
+          diasDisponiveis: diasDisponiveis.length,
+          diasComAlocacao: diasComAlocacao.length,
+          diasSemAlocacao: diasSemAlocacao.length,
+          datasSemAlocacao: diasSemAlocacao,
           admitidoNoPeriodo,
           desligadoNoPeriodo,
-          observacao,
+          observacao: observacoes.join(" "),
         };
       })
       .filter((f) => {
+        if (f.diasDisponiveis === 0 || f.diasSemAlocacao === 0) return false;
         if (pendenciaFilter === "ativos" && !f.ativo) return false;
         if (pendenciaFilter === "admitidos" && !f.admitidoNoPeriodo) return false;
         if (pendenciaFilter === "desligados" && !f.desligadoNoPeriodo) return false;
-        return categoriaFilter === "all" || f.categoria_mo === categoriaFilter;
+        if (categoriaFilter !== "all" && f.categoria_mo !== categoriaFilter) return false;
+        if (coberturaFilter === "zero" && f.diasComAlocacao !== 0) return false;
+        if (coberturaFilter === "parcial" && f.diasComAlocacao === 0) return false;
+        return true;
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, funcionarios, start, end, pendenciaFilter, categoriaFilter]);
+  }, [alocacoes, funcionarios, start, end, pendenciaFilter, categoriaFilter, coberturaFilter]);
 
   const categoriasPendencias = useMemo(
     () => Array.from(new Set((funcionarios ?? []).map((f) => f.categoria_mo))).sort(),
@@ -350,6 +389,11 @@ function RelatoriosPage() {
         : "",
       Status: f.ativo ? "Ativo" : "Desligado",
       "Dias disponíveis": f.diasDisponiveis,
+      "Dias com alocação": f.diasComAlocacao,
+      "Dias sem alocação": f.diasSemAlocacao,
+      "Datas sem alocação": f.datasSemAlocacao
+        .map((data) => new Date(data + "T00:00:00").toLocaleDateString("pt-BR"))
+        .join(", "),
       Observação: f.observacao,
     }));
     const workbook = XLSX.utils.book_new();
@@ -635,6 +679,19 @@ function RelatoriosPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <Select
+                  value={coberturaFilter}
+                  onValueChange={(v) => setCoberturaFilter(v as typeof coberturaFilter)}
+                >
+                  <SelectTrigger className="w-[230px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as pendências</SelectItem>
+                    <SelectItem value="zero">Sem nenhuma alocação</SelectItem>
+                    <SelectItem value="parcial">Alocação parcial</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -653,13 +710,16 @@ function RelatoriosPage() {
                       <TableHead>Desligamento</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Dias disponíveis</TableHead>
+                      <TableHead className="text-right">Dias alocados</TableHead>
+                      <TableHead className="text-right">Dias pendentes</TableHead>
+                      <TableHead>Datas sem alocação</TableHead>
                       <TableHead>Observação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {!semAlocacao.length ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
                           Nenhum funcionário sem alocação nesta competência.
                         </TableCell>
                       </TableRow>
@@ -686,6 +746,17 @@ function RelatoriosPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
+                          <TableCell className="text-right">{f.diasComAlocacao}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            {f.diasSemAlocacao}
+                          </TableCell>
+                          <TableCell className="max-w-[320px] text-xs leading-5">
+                            {f.datasSemAlocacao
+                              .map((data) =>
+                                new Date(data + "T00:00:00").toLocaleDateString("pt-BR"),
+                              )
+                              .join(", ")}
+                          </TableCell>
                           <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
                         </TableRow>
                       ))
