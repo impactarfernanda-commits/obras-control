@@ -65,6 +65,7 @@ type FuncionarioNovo = {
   salario: number;
   encargos: number;
   data_admissao: string | null;
+  rowNumber: number;
 };
 type ObraNova = { centroCusto: string; nome: string };
 type AlocacaoImportacao = {
@@ -99,6 +100,10 @@ type Preview = {
   admissoesIgnoradas: string[];
   conflitosNomes: string[];
   funcionariosNaoEncontrados: string[];
+  funcionariosEncontrados: string[];
+  funcionariosDesligados: string[];
+  funcionariosExcluidosConflitantes: string[];
+  funcoesNaoReconhecidas: string[];
   datas: string[];
   bloqueado: boolean;
 };
@@ -241,6 +246,10 @@ function emptyPreview(error: string): Preview {
     admissoesIgnoradas: [],
     conflitosNomes: [],
     funcionariosNaoEncontrados: [],
+    funcionariosEncontrados: [],
+    funcionariosDesligados: [],
+    funcionariosExcluidosConflitantes: [],
+    funcoesNaoReconhecidas: [],
     datas: [],
     bloqueado: true,
   };
@@ -360,11 +369,6 @@ export function ImportarPlanilhaLegadoDialog() {
     const possuiAdmissaoValida = Array.from(funcionariosPorNome.values()).some((f) =>
       Boolean(f.admissao),
     );
-    if (modo === "admissoes" && !possuiAdmissaoValida) {
-      erros.push(
-        "Nenhuma coluna de data válida foi encontrada a partir da coluna E e nenhuma data de admissão válida foi encontrada.",
-      );
-    }
     const { data: funcsData, error: funcsError } = await supabase
       .from("funcionarios_safe" as unknown as "funcionarios")
       .select("id,nome,categoria_mo,ativo,deleted_at,data_admissao");
@@ -378,10 +382,12 @@ export function ImportarPlanilhaLegadoDialog() {
       funcionariosPorNomeExistentes.set(key, grupo);
     }
     const conflitosNomes: string[] = [];
+    const conflitoKeys = new Set<string>();
     const funcMap = new Map<string, FuncionarioExistente>();
     for (const [key, grupo] of funcionariosPorNomeExistentes) {
       const naoExcluidos = grupo.filter((f) => !f.deleted_at);
       if (naoExcluidos.length > 1) {
+        conflitoKeys.add(key);
         conflitosNomes.push(
           `${naoExcluidos[0].nome}: mais de um cadastro não excluído com o mesmo nome normalizado.`,
         );
@@ -391,6 +397,9 @@ export function ImportarPlanilhaLegadoDialog() {
     const admissoesAlterar: AdmissaoAlterar[] = [];
     const admissoesIguais: string[] = [];
     const funcionariosNaoEncontrados: string[] = [];
+    const funcionariosEncontrados: string[] = [];
+    const funcionariosDesligados: string[] = [];
+    const funcionariosExcluidosConflitantes: string[] = [];
     let admissoesLidas = 0;
     for (const [key, item] of funcionariosPorNome) {
       const rawAdmissao = item.row[3];
@@ -401,23 +410,22 @@ export function ImportarPlanilhaLegadoDialog() {
           `${item.nome}: data de admissão inválida (${String(rawAdmissao)}).`,
         );
       else admissoesLidas += 1;
-      if (conflitosNomes.some((c) => normalizeName(c.split(":")[0]) === key)) continue;
+      if (conflitoKeys.has(key)) continue;
       const existente = funcMap.get(key);
       if (modo === "admissoes" && !existente) {
         funcionariosNaoEncontrados.push(`${item.nome}: funcionário não encontrado.`);
       }
       if (existente?.deleted_at) {
-        if (modo === "admissoes") {
-          funcionariosNaoEncontrados.push(
-            `${item.nome}: cadastro excluído não foi considerado como correspondência.`,
-          );
-        } else {
-          erros.push(
-            "Existe um funcionário excluído com este nome: " +
-              item.nome +
-              ". Verifique se o cadastro anterior foi excluído por erro antes de importar.",
-          );
-        }
+        const aviso =
+          "Existe um funcionário excluído com este nome. Verifique se deve criar novo cadastro ou revisar o cadastro excluído: " +
+          item.nome;
+        funcionariosExcluidosConflitantes.push(aviso);
+        erros.push(aviso);
+      }
+      if (existente && !existente.deleted_at) {
+        funcionariosEncontrados.push(`${item.nome}: cadastro existente localizado.`);
+        if (!existente.ativo)
+          funcionariosDesligados.push(`${item.nome}: desligado/inativo, sem reativação.`);
       }
       if (existente && !existente.deleted_at && item.admissao) {
         if (existente.data_admissao === item.admissao)
@@ -457,16 +465,17 @@ export function ImportarPlanilhaLegadoDialog() {
     const funcoesSemSalario = funcoesEncontradas.filter(
       (f) => !findCategoriaConfig(f, categoriaMap),
     );
+    const funcoesNaoReconhecidas: string[] = [];
     const funcionariosSemSalario: string[] = [];
     const rowHasError = new Set<string>();
+    for (const key of conflitoKeys) rowHasError.add(key);
     for (const [funcKey, item] of funcionariosPorNome) {
-      if (
-        modo === "completo" &&
-        !funcMap.has(funcKey) &&
-        !findCategoriaConfig(item.funcao, categoriaMap)
-      ) {
+      if (!funcMap.has(funcKey) && !findCategoriaConfig(item.funcao, categoriaMap)) {
         rowHasError.add(funcKey);
         funcionariosSemSalario.push(item.nome + " - " + item.funcao);
+        funcoesNaoReconhecidas.push(
+          `${item.nome}: função “${item.funcao}” não reconhecida (linha ${item.rowNumber}).`,
+        );
         erros.push(
           "Cargo/função sem salário configurado: " +
             item.funcao +
@@ -542,7 +551,7 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const funcionariosCriar: FuncionarioNovo[] = [];
     for (const [key, item] of funcionariosPorNome)
-      if (modo === "completo" && !funcMap.has(key) && !rowHasError.has(key))
+      if (!funcMap.has(key) && !rowHasError.has(key))
         funcionariosCriar.push({
           key,
           nome: item.nome,
@@ -551,7 +560,13 @@ export function ImportarPlanilhaLegadoDialog() {
           salario: Number(findCategoriaConfig(item.funcao, categoriaMap)!.salario),
           encargos: Number(findCategoriaConfig(item.funcao, categoriaMap)!.encargos),
           data_admissao: item.admissao,
+          rowNumber: item.rowNumber,
         });
+    if (modo === "admissoes" && !possuiAdmissaoValida && funcionariosCriar.length === 0) {
+      erros.push(
+        "Nenhuma coluna de data válida foi encontrada a partir da coluna E, nenhuma admissão válida e nenhum funcionário novo válido foi encontrado.",
+      );
+    }
     const obrasCriar = Array.from(obrasEncontradas)
       .filter((cc) => !obraMap.has(normalizeName(cc)))
       .map((centroCusto) => ({ centroCusto, nome: centroCusto }));
@@ -620,6 +635,10 @@ export function ImportarPlanilhaLegadoDialog() {
       admissoesIgnoradas,
       conflitosNomes,
       funcionariosNaoEncontrados,
+      funcionariosEncontrados,
+      funcionariosDesligados,
+      funcionariosExcluidosConflitantes,
+      funcoesNaoReconhecidas,
       datas,
       bloqueado: erros.length > 0 || inconsistencias.length > 0 || conflitosNomes.length > 0,
     };
@@ -646,6 +665,10 @@ export function ImportarPlanilhaLegadoDialog() {
           salario: f.salario,
           encargos: f.encargos,
           data_admissao: f.data_admissao,
+          ativo: true,
+          data_desligamento: null,
+          deleted_at: null,
+          deleted_by: null,
         });
         if (error) throw error;
       }
@@ -760,13 +783,26 @@ export function ImportarPlanilhaLegadoDialog() {
                   <AlertTitle>Modo detectado: atualização de admissões</AlertTitle>
                   <AlertDescription>
                     Nenhuma coluna de data de alocação foi encontrada, portanto somente as datas de
-                    admissão serão atualizadas.
+                    admissão e os funcionários novos válidos serão processados.
                   </AlertDescription>
                 </Alert>
               )}
               <div className="grid gap-2 sm:grid-cols-3">
                 <Resumo label="Funcionários" value={preview.totalFuncionariosEncontrados} />
+                <Resumo
+                  label="Funcionários encontrados"
+                  value={preview.funcionariosEncontrados.length}
+                />
                 <Resumo label="Funcionários a criar" value={preview.funcionariosCriar.length} />
+                <Resumo
+                  label="Desligados encontrados"
+                  value={preview.funcionariosDesligados.length}
+                />
+                <Resumo
+                  label="Excluídos conflitantes"
+                  value={preview.funcionariosExcluidosConflitantes.length}
+                  tone={preview.funcionariosExcluidosConflitantes.length ? "danger" : "default"}
+                />
                 <Resumo label="Admissões lidas" value={preview.admissoesLidas} />
                 <Resumo
                   label="Admissões a preencher"
@@ -814,6 +850,35 @@ export function ImportarPlanilhaLegadoDialog() {
                   (d) => d.funcionario + ": desligado a partir de " + formatDate(d.data),
                 )}
               />
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-semibold">Conferência de funcionários</div>
+                <PreviewList
+                  title="Funcionários encontrados"
+                  items={preview.funcionariosEncontrados}
+                />
+                <PreviewList
+                  title="Funcionários novos que serão criados"
+                  items={preview.funcionariosCriar.map(
+                    (f) =>
+                      `${f.nome} — ${f.funcao} — admissão: ${f.data_admissao ? formatDate(f.data_admissao) : "não informada"} — linha ${f.rowNumber}.`,
+                  )}
+                />
+                <PreviewList
+                  title="Funcionários desligados encontrados"
+                  items={preview.funcionariosDesligados}
+                />
+                <PreviewList
+                  title="Funcionários excluídos conflitantes"
+                  items={preview.funcionariosExcluidosConflitantes}
+                  danger
+                />
+                <PreviewList title="Funcionários ambíguos" items={preview.conflitosNomes} danger />
+                <PreviewList
+                  title="Funções não reconhecidas"
+                  items={preview.funcoesNaoReconhecidas}
+                  danger
+                />
+              </div>
               <PreviewList title="Funções encontradas" items={preview.funcoesEncontradas} />
               <PreviewList
                 title="Funções reconhecidas no sistema"
