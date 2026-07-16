@@ -76,6 +76,7 @@ type AlocacaoImportacao = {
   tipoMaoObra: TipoMaoObra;
 };
 type Preview = {
+  modo: "completo" | "admissoes";
   totalFuncionariosEncontrados: number;
   funcionariosCriar: FuncionarioNovo[];
   funcoesEncontradas: string[];
@@ -97,6 +98,7 @@ type Preview = {
   admissoesIguais: string[];
   admissoesIgnoradas: string[];
   conflitosNomes: string[];
+  funcionariosNaoEncontrados: string[];
   datas: string[];
   bloqueado: boolean;
 };
@@ -216,6 +218,7 @@ function tipoMaoObraFinal(funcao: string, tipoDaCelula: TipoMaoObra): TipoMaoObr
 }
 function emptyPreview(error: string): Preview {
   return {
+    modo: "completo",
     totalFuncionariosEncontrados: 0,
     funcionariosCriar: [],
     funcoesEncontradas: [],
@@ -237,6 +240,7 @@ function emptyPreview(error: string): Preview {
     admissoesIguais: [],
     admissoesIgnoradas: [],
     conflitosNomes: [],
+    funcionariosNaoEncontrados: [],
     datas: [],
     bloqueado: true,
   };
@@ -257,7 +261,8 @@ export function ImportarPlanilhaLegadoDialog() {
       !preview.bloqueado &&
       (preview.alocacoesValidas.length > 0 ||
         preview.admissoesAlterar.length > 0 ||
-        preview.funcionariosCriar.length > 0),
+        preview.funcionariosCriar.length > 0 ||
+        (preview.modo === "admissoes" && preview.admissoesIguais.length > 0)),
     [isManagerOrAbove, preview],
   );
   function bloquearSemPermissao() {
@@ -316,8 +321,6 @@ export function ImportarPlanilhaLegadoDialog() {
       }
       dateColumns.push({ index: c, date, label: String(header[c]) });
     }
-    if (dateColumns.length === 0)
-      erros.push("Nenhuma coluna de data válida foi encontrada a partir da coluna E.");
     const funcionariosPorNome = new Map<
       string,
       { row: unknown[]; nome: string; funcao: string; admissao: string | null; rowNumber: number }
@@ -353,6 +356,15 @@ export function ImportarPlanilhaLegadoDialog() {
         );
       }
     }
+    const modo: Preview["modo"] = dateColumns.length > 0 ? "completo" : "admissoes";
+    const possuiAdmissaoValida = Array.from(funcionariosPorNome.values()).some((f) =>
+      Boolean(f.admissao),
+    );
+    if (modo === "admissoes" && !possuiAdmissaoValida) {
+      erros.push(
+        "Nenhuma coluna de data válida foi encontrada a partir da coluna E e nenhuma data de admissão válida foi encontrada.",
+      );
+    }
     const { data: funcsData, error: funcsError } = await supabase
       .from("funcionarios_safe" as unknown as "funcionarios")
       .select("id,nome,categoria_mo,ativo,deleted_at,data_admissao");
@@ -378,6 +390,7 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const admissoesAlterar: AdmissaoAlterar[] = [];
     const admissoesIguais: string[] = [];
+    const funcionariosNaoEncontrados: string[] = [];
     let admissoesLidas = 0;
     for (const [key, item] of funcionariosPorNome) {
       const rawAdmissao = item.row[3];
@@ -390,12 +403,21 @@ export function ImportarPlanilhaLegadoDialog() {
       else admissoesLidas += 1;
       if (conflitosNomes.some((c) => normalizeName(c.split(":")[0]) === key)) continue;
       const existente = funcMap.get(key);
+      if (modo === "admissoes" && !existente) {
+        funcionariosNaoEncontrados.push(`${item.nome}: funcionário não encontrado.`);
+      }
       if (existente?.deleted_at) {
-        erros.push(
-          "Existe um funcionário excluído com este nome: " +
-            item.nome +
-            ". Verifique se o cadastro anterior foi excluído por erro antes de importar.",
-        );
+        if (modo === "admissoes") {
+          funcionariosNaoEncontrados.push(
+            `${item.nome}: cadastro excluído não foi considerado como correspondência.`,
+          );
+        } else {
+          erros.push(
+            "Existe um funcionário excluído com este nome: " +
+              item.nome +
+              ". Verifique se o cadastro anterior foi excluído por erro antes de importar.",
+          );
+        }
       }
       if (existente && !existente.deleted_at && item.admissao) {
         if (existente.data_admissao === item.admissao)
@@ -438,7 +460,11 @@ export function ImportarPlanilhaLegadoDialog() {
     const funcionariosSemSalario: string[] = [];
     const rowHasError = new Set<string>();
     for (const [funcKey, item] of funcionariosPorNome) {
-      if (!funcMap.has(funcKey) && !findCategoriaConfig(item.funcao, categoriaMap)) {
+      if (
+        modo === "completo" &&
+        !funcMap.has(funcKey) &&
+        !findCategoriaConfig(item.funcao, categoriaMap)
+      ) {
         rowHasError.add(funcKey);
         funcionariosSemSalario.push(item.nome + " - " + item.funcao);
         erros.push(
@@ -516,7 +542,7 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const funcionariosCriar: FuncionarioNovo[] = [];
     for (const [key, item] of funcionariosPorNome)
-      if (!funcMap.has(key) && !rowHasError.has(key))
+      if (modo === "completo" && !funcMap.has(key) && !rowHasError.has(key))
         funcionariosCriar.push({
           key,
           nome: item.nome,
@@ -571,6 +597,7 @@ export function ImportarPlanilhaLegadoDialog() {
       );
     });
     return {
+      modo,
       totalFuncionariosEncontrados: funcionariosPorNome.size,
       funcionariosCriar,
       funcoesEncontradas,
@@ -592,6 +619,7 @@ export function ImportarPlanilhaLegadoDialog() {
       admissoesIguais,
       admissoesIgnoradas,
       conflitosNomes,
+      funcionariosNaoEncontrados,
       datas,
       bloqueado: erros.length > 0 || inconsistencias.length > 0 || conflitosNomes.length > 0,
     };
@@ -727,6 +755,15 @@ export function ImportarPlanilhaLegadoDialog() {
           )}
           {preview && (
             <div className="space-y-4">
+              {preview.modo === "admissoes" && (
+                <Alert>
+                  <AlertTitle>Modo detectado: atualização de admissões</AlertTitle>
+                  <AlertDescription>
+                    Nenhuma coluna de data de alocação foi encontrada, portanto somente as datas de
+                    admissão serão atualizadas.
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="grid gap-2 sm:grid-cols-3">
                 <Resumo label="Funcionários" value={preview.totalFuncionariosEncontrados} />
                 <Resumo label="Funcionários a criar" value={preview.funcionariosCriar.length} />
@@ -803,6 +840,10 @@ export function ImportarPlanilhaLegadoDialog() {
               <PreviewList title="Admissões já iguais" items={preview.admissoesIguais} />
               <PreviewList title="Admissões ignoradas" items={preview.admissoesIgnoradas} />
               <PreviewList title="Conflitos de nomes" items={preview.conflitosNomes} danger />
+              <PreviewList
+                title="Funcionários não encontrados"
+                items={preview.funcionariosNaoEncontrados}
+              />
               <PreviewList title="Registros ignorados" items={preview.ignorados} />
               <PreviewList title="Inconsistências" items={preview.inconsistencias} danger />
               <PreviewList title="Erros" items={preview.erros} danger />
