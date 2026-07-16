@@ -36,6 +36,13 @@ type FuncionarioExistente = {
   categoria_mo: string | null;
   ativo: boolean;
   deleted_at: string | null;
+  data_admissao: string | null;
+};
+type AdmissaoAlterar = {
+  funcionarioId: string;
+  nome: string;
+  data: string;
+  tipo: "preencher" | "atualizar";
 };
 type ObraExistente = { id: string; nome: string };
 type CategoriaSalarioConfig = {
@@ -85,6 +92,11 @@ type Preview = {
   erros: string[];
   ignorados: string[];
   inconsistencias: string[];
+  admissoesLidas: number;
+  admissoesAlterar: AdmissaoAlterar[];
+  admissoesIguais: string[];
+  admissoesIgnoradas: string[];
+  conflitosNomes: string[];
   datas: string[];
   bloqueado: boolean;
 };
@@ -138,7 +150,16 @@ function parseExcelDate(value: unknown): string | null {
   if (!m) return null;
   const yearRaw = Number(m[3]);
   const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-  return year + "-" + pad(Number(m[2])) + "-" + pad(Number(m[1]));
+  const month = Number(m[2]);
+  const day = Number(m[1]);
+  const candidate = year + "-" + pad(month) + "-" + pad(day);
+  const parsed = new Date(candidate + "T00:00:00");
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.getFullYear() === year &&
+    parsed.getMonth() + 1 === month &&
+    parsed.getDate() === day
+    ? candidate
+    : null;
 }
 function parseHeaderDate(value: unknown, fallbackYear: number) {
   if (value instanceof Date && !Number.isNaN(value.getTime()))
@@ -211,6 +232,11 @@ function emptyPreview(error: string): Preview {
     erros: [error],
     ignorados: [],
     inconsistencias: [],
+    admissoesLidas: 0,
+    admissoesAlterar: [],
+    admissoesIguais: [],
+    admissoesIgnoradas: [],
+    conflitosNomes: [],
     datas: [],
     bloqueado: true,
   };
@@ -225,7 +251,13 @@ export function ImportarPlanilhaLegadoDialog() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const podeImportar = useMemo(
-    () => isManagerOrAbove && preview && !preview.bloqueado && preview.alocacoesValidas.length > 0,
+    () =>
+      isManagerOrAbove &&
+      preview &&
+      !preview.bloqueado &&
+      (preview.alocacoesValidas.length > 0 ||
+        preview.admissoesAlterar.length > 0 ||
+        preview.funcionariosCriar.length > 0),
     [isManagerOrAbove, preview],
   );
   function bloquearSemPermissao() {
@@ -268,6 +300,7 @@ export function ImportarPlanilhaLegadoDialog() {
     const erros: string[] = [];
     const ignorados: string[] = [];
     const inconsistencias: string[] = [];
+    const admissoesIgnoradas: string[] = [];
     const desligamentos = new Map<string, { funcionario: string; data: string }>();
     let celulasVazias = 0;
     let celulasDesligado = 0;
@@ -322,11 +355,40 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const { data: funcsData, error: funcsError } = await supabase
       .from("funcionarios_safe" as unknown as "funcionarios")
-      .select("id,nome,categoria_mo,ativo,deleted_at");
+      .select("id,nome,categoria_mo,ativo,deleted_at,data_admissao");
     if (funcsError) throw funcsError;
     const funcionariosExistentes = (funcsData ?? []) as unknown as FuncionarioExistente[];
-    const funcMap = new Map(funcionariosExistentes.map((f) => [normalizeName(f.nome), f]));
+    const funcionariosPorNomeExistentes = new Map<string, FuncionarioExistente[]>();
+    for (const f of funcionariosExistentes) {
+      const key = normalizeName(f.nome);
+      const grupo = funcionariosPorNomeExistentes.get(key) ?? [];
+      grupo.push(f);
+      funcionariosPorNomeExistentes.set(key, grupo);
+    }
+    const conflitosNomes: string[] = [];
+    const funcMap = new Map<string, FuncionarioExistente>();
+    for (const [key, grupo] of funcionariosPorNomeExistentes) {
+      const naoExcluidos = grupo.filter((f) => !f.deleted_at);
+      if (naoExcluidos.length > 1) {
+        conflitosNomes.push(
+          `${naoExcluidos[0].nome}: mais de um cadastro não excluído com o mesmo nome normalizado.`,
+        );
+      } else if (naoExcluidos.length === 1) funcMap.set(key, naoExcluidos[0]);
+      else if (grupo.length === 1) funcMap.set(key, grupo[0]);
+    }
+    const admissoesAlterar: AdmissaoAlterar[] = [];
+    const admissoesIguais: string[] = [];
+    let admissoesLidas = 0;
     for (const [key, item] of funcionariosPorNome) {
+      const rawAdmissao = item.row[3];
+      const vazia = rawAdmissao == null || String(rawAdmissao).trim() === "";
+      if (vazia) admissoesIgnoradas.push(`${item.nome}: sem data de admissão.`);
+      else if (!item.admissao)
+        admissoesIgnoradas.push(
+          `${item.nome}: data de admissão inválida (${String(rawAdmissao)}).`,
+        );
+      else admissoesLidas += 1;
+      if (conflitosNomes.some((c) => normalizeName(c.split(":")[0]) === key)) continue;
       const existente = funcMap.get(key);
       if (existente?.deleted_at) {
         erros.push(
@@ -334,6 +396,17 @@ export function ImportarPlanilhaLegadoDialog() {
             item.nome +
             ". Verifique se o cadastro anterior foi excluído por erro antes de importar.",
         );
+      }
+      if (existente && !existente.deleted_at && item.admissao) {
+        if (existente.data_admissao === item.admissao)
+          admissoesIguais.push(`${item.nome}: ${formatDate(item.admissao)} mantida.`);
+        else
+          admissoesAlterar.push({
+            funcionarioId: existente.id,
+            nome: item.nome,
+            data: item.admissao,
+            tipo: existente.data_admissao ? "atualizar" : "preencher",
+          });
       }
     }
     const { data: obrasData, error: obrasError } = await supabase.from("obras").select("id,nome");
@@ -460,6 +533,7 @@ export function ImportarPlanilhaLegadoDialog() {
     const competenciasFechadas = await buscarCompetenciasFechadasPorDatas(supabase, datas);
     for (const f of competenciasFechadas)
       erros.push(MENSAGEM_COMPETENCIA_FECHADA + " Competência " + f.competencia + ".");
+    const alocacoesJaExistentes = new Set<string>();
     if (alocacoes.length > 0) {
       const datasAloc = Array.from(new Set(alocacoes.map((a) => a.data)));
       const existingIds = Array.from(
@@ -477,16 +551,25 @@ export function ImportarPlanilhaLegadoDialog() {
           .in("data", datasAloc);
         if (error) throw error;
         const byId = new Map(funcionariosExistentes.map((f) => [f.id, f.nome]));
-        for (const a of (alocExistentes ?? []) as unknown as AlocacaoExistente[])
-          erros.push(
+        for (const a of (alocExistentes ?? []) as unknown as AlocacaoExistente[]) {
+          alocacoesJaExistentes.add(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+          ignorados.push(
             (byId.get(a.funcionario_id) ?? "Funcionário") +
               " já possui alocação em " +
               formatDate(a.data) +
               (a.obras?.nome ? " na obra " + a.obras.nome : "") +
-              ".",
+              "; alocação mantida sem alteração.",
           );
+        }
       }
     }
+    const alocacoesNovas = alocacoes.filter((a) => {
+      const existente = funcMap.get(a.funcionarioKey);
+      const obra = obraMap.get(a.obraKey);
+      return (
+        !existente || !obra || !alocacoesJaExistentes.has(`${existente.id}|${obra.id}|${a.data}`)
+      );
+    });
     return {
       totalFuncionariosEncontrados: funcionariosPorNome.size,
       funcionariosCriar,
@@ -497,15 +580,20 @@ export function ImportarPlanilhaLegadoDialog() {
       duplicadosIgnorados,
       obrasEncontradas: Array.from(obrasEncontradas).sort(),
       obrasCriar,
-      alocacoesValidas: alocacoes,
+      alocacoesValidas: alocacoesNovas,
       celulasVazias,
       celulasDesligado,
       desligamentos: Array.from(desligamentos.values()),
       erros,
       ignorados,
       inconsistencias,
+      admissoesLidas,
+      admissoesAlterar,
+      admissoesIguais,
+      admissoesIgnoradas,
+      conflitosNomes,
       datas,
-      bloqueado: erros.length > 0 || inconsistencias.length > 0,
+      bloqueado: erros.length > 0 || inconsistencias.length > 0 || conflitosNomes.length > 0,
     };
   }
   async function confirmarImportacao() {
@@ -516,6 +604,13 @@ export function ImportarPlanilhaLegadoDialog() {
     if (!preview || preview.bloqueado || !user?.id) return;
     setImporting(true);
     try {
+      for (const admissao of preview.admissoesAlterar) {
+        const { error } = await supabase
+          .from("funcionarios")
+          .update({ data_admissao: admissao.data })
+          .eq("id", admissao.funcionarioId);
+        if (error) throw error;
+      }
       for (const f of preview.funcionariosCriar) {
         const { error } = await supabase.from("funcionarios").insert({
           nome: f.nome,
@@ -557,10 +652,12 @@ export function ImportarPlanilhaLegadoDialog() {
       }));
       if (alocRows.find((r) => !r.funcionario_id || !r.obra_id))
         throw new Error("Não foi possível resolver funcionário ou obra para todas as alocações.");
-      const { error: alocErr } = await table("alocacoes").insert(alocRows as never);
-      if (alocErr) {
-        const amigavel = detalhesErroBancoAlocacao(alocErr);
-        throw new Error(amigavel?.description ?? alocErr.message);
+      if (alocRows.length > 0) {
+        const { error: alocErr } = await table("alocacoes").insert(alocRows as never);
+        if (alocErr) {
+          const amigavel = detalhesErroBancoAlocacao(alocErr);
+          throw new Error(amigavel?.description ?? alocErr.message);
+        }
       }
       const regRows = preview.alocacoesValidas.map((a) => ({
         funcionario_id: funcMap.get(a.funcionarioKey)?.id,
@@ -575,12 +672,15 @@ export function ImportarPlanilhaLegadoDialog() {
         created_by: user.id,
         updated_by: user.id,
       }));
-      const { error: regErr } = await supabase.from("registros_horas").insert(regRows as never);
-      if (regErr) throw regErr;
+      if (regRows.length > 0) {
+        const { error: regErr } = await supabase.from("registros_horas").insert(regRows as never);
+        if (regErr) throw regErr;
+      }
       toast.success("Planilha legado importada com sucesso.");
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["aloc-week"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
       setOpen(false);
       setPreview(null);
       setFileName("");
@@ -630,6 +730,20 @@ export function ImportarPlanilhaLegadoDialog() {
               <div className="grid gap-2 sm:grid-cols-3">
                 <Resumo label="Funcionários" value={preview.totalFuncionariosEncontrados} />
                 <Resumo label="Funcionários a criar" value={preview.funcionariosCriar.length} />
+                <Resumo label="Admissões lidas" value={preview.admissoesLidas} />
+                <Resumo
+                  label="Admissões a preencher"
+                  value={
+                    preview.admissoesAlterar.filter((a) => a.tipo === "preencher").length +
+                    preview.funcionariosCriar.filter((f) => Boolean(f.data_admissao)).length
+                  }
+                />
+                <Resumo
+                  label="Admissões a atualizar"
+                  value={preview.admissoesAlterar.filter((a) => a.tipo === "atualizar").length}
+                />
+                <Resumo label="Admissões iguais" value={preview.admissoesIguais.length} />
+                <Resumo label="Admissões ignoradas" value={preview.admissoesIgnoradas.length} />
                 <Resumo label="Funções encontradas" value={preview.funcoesEncontradas.length} />
                 <Resumo label="Funções reconhecidas" value={preview.funcoesReconhecidas.length} />
                 <Resumo
@@ -679,6 +793,16 @@ export function ImportarPlanilhaLegadoDialog() {
                 danger
               />
               <PreviewList title="Duplicados ignorados" items={preview.duplicadosIgnorados} />
+              <PreviewList
+                title="Admissões que serão preenchidas/atualizadas"
+                items={preview.admissoesAlterar.map(
+                  (a) =>
+                    `${a.nome}: ${formatDate(a.data)} (${a.tipo === "preencher" ? "preencher" : "atualizar"}).`,
+                )}
+              />
+              <PreviewList title="Admissões já iguais" items={preview.admissoesIguais} />
+              <PreviewList title="Admissões ignoradas" items={preview.admissoesIgnoradas} />
+              <PreviewList title="Conflitos de nomes" items={preview.conflitosNomes} danger />
               <PreviewList title="Registros ignorados" items={preview.ignorados} />
               <PreviewList title="Inconsistências" items={preview.inconsistencias} danger />
               <PreviewList title="Erros" items={preview.erros} danger />
