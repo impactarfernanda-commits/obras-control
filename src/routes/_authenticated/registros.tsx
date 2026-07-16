@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Loader2, Check } from "lucide
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/use-auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,11 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover, PopoverContent, PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/registros")({
@@ -34,10 +37,14 @@ function startOfWeek(d: Date): Date {
   date.setHours(0, 0, 0, 0);
   return date;
 }
-function isoDate(d: Date) { return d.toISOString().slice(0, 10); }
+function isoDate(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
 function weekDays(start: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => {
-    const x = new Date(start); x.setDate(start.getDate() + i); return x;
+    const x = new Date(start);
+    x.setDate(start.getDate() + i);
+    return x;
   });
 }
 const DOW_LABELS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -61,8 +68,7 @@ function addCycles(c: PayrollCycle, n: number): PayrollCycle {
   return payrollCycleOf(ref);
 }
 function cycleLabel(c: PayrollCycle): string {
-  const fmt = (d: Date) =>
-    d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  const fmt = (d: Date) => d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
   return `${fmt(c.start)} — ${fmt(c.end)}`;
 }
 
@@ -126,19 +132,20 @@ function RegistrosPage() {
 
   // Mapa global de nomes via view segura (funcionarios_safe não expõe salário p/ assistente/supervisor)
   const { data: funcionariosAll } = useQuery({
-    queryKey: ["funcionarios-min-all"],
+    queryKey: ["funcionarios-registros-historico-global"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("funcionarios_safe" as any)
+        .from("funcionarios_safe" as unknown as "funcionarios")
         .select("id,nome,categoria_mo")
         .order("nome");
       if (error) throw error;
-      return (data as unknown) as Array<{ id: string; nome: string; categoria_mo: string | null }>;
+      return data as unknown as Array<{ id: string; nome: string; categoria_mo: string | null }>;
     },
   });
   const infoById = useMemo(() => {
     const m = new Map<string, { nome: string; categoria_mo: string | null }>();
-    for (const f of funcionariosAll ?? []) m.set(f.id, { nome: f.nome, categoria_mo: f.categoria_mo });
+    for (const f of funcionariosAll ?? [])
+      m.set(f.id, { nome: f.nome, categoria_mo: f.categoria_mo });
     return m;
   }, [funcionariosAll]);
 
@@ -162,7 +169,12 @@ function RegistrosPage() {
     const map = new Map<string, { id: string; nome: string; categoria_mo: string | null }>();
     for (const a of alocacoes ?? []) {
       const info = infoById.get(a.funcionario_id);
-      if (info) map.set(a.funcionario_id, { id: a.funcionario_id, nome: info.nome, categoria_mo: info.categoria_mo });
+      if (info)
+        map.set(a.funcionario_id, {
+          id: a.funcionario_id,
+          nome: info.nome,
+          categoria_mo: info.categoria_mo,
+        });
     }
     return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
   }, [alocacoes, infoById]);
@@ -250,65 +262,78 @@ function RegistrosPage() {
         { event: "*", schema: "public", table: "registros_horas", filter: `obra_id=eq.${obraId}` },
         () => {
           qc.invalidateQueries({ queryKey: ["registros-week", obraId, firstDay, lastDay] });
-          qc.invalidateQueries({ queryKey: ["registros-cycle", obraId, cycleStartISO, cycleEndISO] });
+          qc.invalidateQueries({
+            queryKey: ["registros-cycle", obraId, cycleStartISO, cycleEndISO],
+          });
         },
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [obraId, firstDay, lastDay, cycleStartISO, cycleEndISO, qc]);
 
   // Debounced save
   const timersRef = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({});
-  const saveCell = useCallback(async (key: CellKey, r: Registro) => {
-    setSaving((s) => ({ ...s, [key]: "saving" }));
-    const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
-    // Skip persisting completely empty rows that have no id
-    if (!r.id && !r.ausencia && total === 0 && !r.observacoes?.trim()) {
-      setSaving((s) => ({ ...s, [key]: "idle" }));
-      return;
-    }
-    const payload: any = {
-      funcionario_id: r.funcionario_id,
-      obra_id: r.obra_id,
-      data: r.data,
-      horas_normais: r.ausencia ? 0 : r.horas_normais,
-      horas_extras: r.ausencia ? 0 : r.horas_extras,
-      justificativa_extras: r.justificativa_extras?.trim() || null,
-      ausencia: r.ausencia,
-      motivo_ausencia: r.motivo_ausencia?.trim() || null,
-      observacoes: r.observacoes?.trim() || null,
-      updated_by: user?.id ?? null,
-    };
-    if (!r.id) payload.created_by = user?.id ?? null;
+  const saveCell = useCallback(
+    async (key: CellKey, r: Registro) => {
+      setSaving((s) => ({ ...s, [key]: "saving" }));
+      const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
+      // Skip persisting completely empty rows that have no id
+      if (!r.id && !r.ausencia && total === 0 && !r.observacoes?.trim()) {
+        setSaving((s) => ({ ...s, [key]: "idle" }));
+        return;
+      }
+      const payload: Database["public"]["Tables"]["registros_horas"]["Insert"] = {
+        funcionario_id: r.funcionario_id,
+        obra_id: r.obra_id,
+        data: r.data,
+        horas_normais: r.ausencia ? 0 : r.horas_normais,
+        horas_extras: r.ausencia ? 0 : r.horas_extras,
+        justificativa_extras: r.justificativa_extras?.trim() || null,
+        ausencia: r.ausencia,
+        motivo_ausencia: r.motivo_ausencia?.trim() || null,
+        observacoes: r.observacoes?.trim() || null,
+        updated_by: user?.id ?? null,
+      };
+      if (!r.id) payload.created_by = user?.id ?? null;
 
-    const { data, error } = await supabase
-      .from("registros_horas")
-      .upsert(payload, { onConflict: "funcionario_id,obra_id,data" })
-      .select()
-      .single();
-    if (error) {
-      setSaving((s) => ({ ...s, [key]: "error" }));
-      toast.error(error.message);
-      return;
-    }
-    setCells((prev) => ({ ...prev, [key]: data as Registro }));
-    setSaving((s) => ({ ...s, [key]: "saved" }));
-    setTimeout(() => {
-      setSaving((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s));
-    }, 1200);
-  }, [user?.id]);
+      const { data, error } = await supabase
+        .from("registros_horas")
+        .upsert(payload, { onConflict: "funcionario_id,obra_id,data" })
+        .select()
+        .single();
+      if (error) {
+        setSaving((s) => ({ ...s, [key]: "error" }));
+        toast.error(error.message);
+        return;
+      }
+      setCells((prev) => ({ ...prev, [key]: data as Registro }));
+      setSaving((s) => ({ ...s, [key]: "saved" }));
+      setTimeout(() => {
+        setSaving((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s));
+      }, 1200);
+    },
+    [user?.id],
+  );
 
-  const updateCell = useCallback((key: CellKey, patch: Partial<Registro>, base: Registro) => {
-    const next: Registro = { ...base, ...patch };
-    setCells((prev) => ({ ...prev, [key]: next }));
-    if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
-    timersRef.current[key] = setTimeout(() => saveCell(key, next), 700);
-  }, [saveCell]);
+  const updateCell = useCallback(
+    (key: CellKey, patch: Partial<Registro>, base: Registro) => {
+      const next: Registro = { ...base, ...patch };
+      setCells((prev) => ({ ...prev, [key]: next }));
+      if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
+      timersRef.current[key] = setTimeout(() => saveCell(key, next), 700);
+    },
+    [saveCell],
+  );
 
   // ---------- weekly summary ----------
   const summary = useMemo(() => {
     return funcionarios.map((f) => {
-      let normais = 0, extras = 0, ausencias = 0, dias = 0;
+      let normais = 0,
+        extras = 0,
+        ausencias = 0,
+        dias = 0;
       for (const d of days) {
         const key = ck(f.id, obraId, isoDate(d));
         const r = cells[key];
@@ -329,9 +354,16 @@ function RegistrosPage() {
     const funcMap = new Map<string, { id: string; nome: string; categoria_mo: string | null }>();
     for (const a of alocCycle ?? []) {
       const info = infoById.get(a.funcionario_id);
-      funcMap.set(a.funcionario_id, { id: a.funcionario_id, nome: info?.nome ?? "—", categoria_mo: info?.categoria_mo ?? null });
+      funcMap.set(a.funcionario_id, {
+        id: a.funcionario_id,
+        nome: info?.nome ?? "—",
+        categoria_mo: info?.categoria_mo ?? null,
+      });
     }
-    const byFunc = new Map<string, { normais: number; extras: number; ausencias: number; dias: number }>();
+    const byFunc = new Map<
+      string,
+      { normais: number; extras: number; ausencias: number; dias: number }
+    >();
     for (const r of registrosCycle ?? []) {
       const cur = byFunc.get(r.funcionario_id) ?? { normais: 0, extras: 0, ausencias: 0, dias: 0 };
       if (r.ausencia) cur.ausencias++;
@@ -343,7 +375,11 @@ function RegistrosPage() {
       byFunc.set(r.funcionario_id, cur);
       if (!funcMap.has(r.funcionario_id)) {
         const info = infoById.get(r.funcionario_id);
-        funcMap.set(r.funcionario_id, { id: r.funcionario_id, nome: info?.nome ?? "—", categoria_mo: info?.categoria_mo ?? null });
+        funcMap.set(r.funcionario_id, {
+          id: r.funcionario_id,
+          nome: info?.nome ?? "—",
+          categoria_mo: info?.categoria_mo ?? null,
+        });
       }
     }
     return Array.from(funcMap.values())
@@ -366,47 +402,99 @@ function RegistrosPage() {
           <div className="min-w-[260px]">
             <label className="mb-1 block text-xs text-muted-foreground">Obra</label>
             <Select value={obraId} onValueChange={setObraId}>
-              <SelectTrigger><SelectValue placeholder="Selecione uma obra" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione uma obra" />
+              </SelectTrigger>
               <SelectContent>
-                {(obras ?? []).map((o) => <SelectItem key={o.id} value={o.id}>{o.nome}</SelectItem>)}
+                {(obras ?? []).map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.nome}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">Ciclo de folha (25 → 24)</label>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Ciclo de folha (25 → 24)
+            </label>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={() => {
-                const prev = addCycles(cycle, -1);
-                setWeekStart(startOfWeek(prev.start));
-              }}><ChevronLeft className="h-4 w-4" /></Button>
-              <div className="min-w-[180px] text-center text-sm font-medium">{cycleLabel(cycle)}</div>
-              <Button variant="outline" size="icon" onClick={() => {
-                const next = addCycles(cycle, 1);
-                setWeekStart(startOfWeek(next.start));
-              }}><ChevronRight className="h-4 w-4" /></Button>
-              <Button variant="ghost" size="sm" onClick={() => {
-                const cur = payrollCycleOf(new Date());
-                setWeekStart(startOfWeek(cur.start));
-              }}>Atual</Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  const prev = addCycles(cycle, -1);
+                  setWeekStart(startOfWeek(prev.start));
+                }}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="min-w-[180px] text-center text-sm font-medium">
+                {cycleLabel(cycle)}
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  const next = addCycles(cycle, 1);
+                  setWeekStart(startOfWeek(next.start));
+                }}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const cur = payrollCycleOf(new Date());
+                  setWeekStart(startOfWeek(cur.start));
+                }}
+              >
+                Atual
+              </Button>
             </div>
           </div>
 
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Semana</label>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={() => {
-                const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d);
-              }}><ChevronLeft className="h-4 w-4" /></Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  const d = new Date(weekStart);
+                  d.setDate(d.getDate() - 7);
+                  setWeekStart(d);
+                }}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
               <div className="min-w-[200px] text-center text-sm font-medium">
                 {days[0].toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
                 {" — "}
-                {days[6].toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                {days[6].toLocaleDateString("pt-BR", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
               </div>
-              <Button variant="outline" size="icon" onClick={() => {
-                const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d);
-              }}><ChevronRight className="h-4 w-4" /></Button>
-              <Button variant="ghost" size="sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  const d = new Date(weekStart);
+                  d.setDate(d.getDate() + 7);
+                  setWeekStart(d);
+                }}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setWeekStart(startOfWeek(new Date()))}
+              >
                 Hoje
               </Button>
             </div>
@@ -423,11 +511,15 @@ function RegistrosPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Semana</CardTitle>
-          <Badge variant="outline" className="font-normal">Ciclo: {cycleLabel(cycle)}</Badge>
+          <Badge variant="outline" className="font-normal">
+            Ciclo: {cycleLabel(cycle)}
+          </Badge>
         </CardHeader>
         <CardContent className="p-0">
           {!obraId ? (
-            <div className="py-10 text-center text-muted-foreground">Selecione uma obra para começar.</div>
+            <div className="py-10 text-center text-muted-foreground">
+              Selecione uma obra para começar.
+            </div>
           ) : loadingAloc || loadingReg ? (
             <div className="space-y-2 p-4">
               <Skeleton className="h-10 w-full" />
@@ -448,8 +540,13 @@ function RegistrosPage() {
                     </th>
                     {days.map((d, i) => (
                       <th key={i} className="border-l px-2 py-2 text-center font-medium">
-                        <div className="text-[11px] uppercase text-muted-foreground">{DOW_LABELS[i]}</div>
-                        <div>{d.getDate().toString().padStart(2, "0")}/{(d.getMonth() + 1).toString().padStart(2, "0")}</div>
+                        <div className="text-[11px] uppercase text-muted-foreground">
+                          {DOW_LABELS[i]}
+                        </div>
+                        <div>
+                          {d.getDate().toString().padStart(2, "0")}/
+                          {(d.getMonth() + 1).toString().padStart(2, "0")}
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -460,7 +557,9 @@ function RegistrosPage() {
                       <td className="sticky left-0 z-10 w-56 bg-background px-3 py-2 font-medium">
                         <div>{f.nome}</div>
                         {f.categoria_mo && (
-                          <div className="text-xs font-normal text-muted-foreground">{f.categoria_mo}</div>
+                          <div className="text-xs font-normal text-muted-foreground">
+                            {f.categoria_mo}
+                          </div>
                         )}
                       </td>
                       {days.map((d, i) => {
@@ -500,7 +599,9 @@ function RegistrosPage() {
 
       {obraId && funcionarios.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Resumo semanal</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Resumo semanal</CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
@@ -521,23 +622,34 @@ function RegistrosPage() {
                       <td className="px-3 py-2 font-medium">
                         <div>{row.f.nome}</div>
                         {row.f.categoria_mo && (
-                          <div className="text-xs font-normal text-muted-foreground">{row.f.categoria_mo}</div>
+                          <div className="text-xs font-normal text-muted-foreground">
+                            {row.f.categoria_mo}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{row.dias}</td>
                       <td className="px-3 py-2 text-right">{row.normais.toFixed(2)}h</td>
-                      <td className={cn("px-3 py-2 text-right", row.alerta && "text-rose-600 font-semibold")}>
+                      <td
+                        className={cn(
+                          "px-3 py-2 text-right",
+                          row.alerta && "text-rose-600 font-semibold",
+                        )}
+                      >
                         {row.extras.toFixed(2)}h
                       </td>
                       <td className="px-3 py-2 text-right">{row.ausencias}</td>
-                      <td className="px-3 py-2 text-right">{(row.normais + row.extras).toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-right">
+                        {(row.normais + row.extras).toFixed(2)}h
+                      </td>
                       <td className="px-3 py-2">
                         {row.alerta ? (
                           <Badge variant="destructive" className="gap-1">
                             <AlertTriangle className="h-3 w-3" /> Horas extras excessivas
                           </Badge>
                         ) : row.extras > 0 ? (
-                          <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">Com horas extras</Badge>
+                          <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">
+                            Com horas extras
+                          </Badge>
                         ) : (
                           <Badge variant="outline">OK</Badge>
                         )}
@@ -555,7 +667,9 @@ function RegistrosPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Resumo do ciclo de folha</CardTitle>
-            <Badge variant="outline" className="font-normal">{cycleLabel(cycle)}</Badge>
+            <Badge variant="outline" className="font-normal">
+              {cycleLabel(cycle)}
+            </Badge>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -577,27 +691,40 @@ function RegistrosPage() {
                       <td className="px-3 py-2 font-medium">
                         <div>{row.f.nome}</div>
                         {row.f.categoria_mo && (
-                          <div className="text-xs font-normal text-muted-foreground">{row.f.categoria_mo}</div>
+                          <div className="text-xs font-normal text-muted-foreground">
+                            {row.f.categoria_mo}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{row.dias}</td>
                       <td className="px-3 py-2 text-right">{row.normais.toFixed(2)}h</td>
-                      <td className={cn("px-3 py-2 text-right", row.alerta && "text-rose-600 font-semibold")}>
+                      <td
+                        className={cn(
+                          "px-3 py-2 text-right",
+                          row.alerta && "text-rose-600 font-semibold",
+                        )}
+                      >
                         {row.extras.toFixed(2)}h
                       </td>
                       <td className="px-3 py-2 text-right">{row.ausencias}</td>
-                      <td className="px-3 py-2 text-right">{(row.normais + row.extras).toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-right">
+                        {(row.normais + row.extras).toFixed(2)}h
+                      </td>
                       <td className="px-3 py-2">
                         {row.alerta ? (
                           <Badge variant="destructive" className="gap-1">
                             <AlertTriangle className="h-3 w-3" /> Horas extras excessivas no ciclo
                           </Badge>
                         ) : row.extras > 0 ? (
-                          <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">Com horas extras</Badge>
+                          <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">
+                            Com horas extras
+                          </Badge>
                         ) : row.dias > 0 || row.ausencias > 0 ? (
                           <Badge variant="outline">OK</Badge>
                         ) : (
-                          <Badge variant="outline" className="text-muted-foreground">Sem registros</Badge>
+                          <Badge variant="outline" className="text-muted-foreground">
+                            Sem registros
+                          </Badge>
                         )}
                       </td>
                     </tr>
@@ -618,7 +745,10 @@ function LegendDot({ className }: { className?: string }) {
 }
 
 function DayCell({
-  registro, alocado, status, onChange,
+  registro,
+  alocado,
+  status,
+  onChange,
 }: {
   registro: Registro;
   alocado: boolean;
@@ -628,10 +758,13 @@ function DayCell({
   const s = cellStatus(registro);
   const total = (Number(registro.horas_normais) || 0) + (Number(registro.horas_extras) || 0);
   const bg =
-    s === "ok" ? "bg-emerald-500/10 border-emerald-500/40" :
-    s === "warn" ? "bg-amber-500/10 border-amber-500/40" :
-    s === "error" ? "bg-rose-500/10 border-rose-500/40" :
-    "bg-card border-border";
+    s === "ok"
+      ? "bg-emerald-500/10 border-emerald-500/40"
+      : s === "warn"
+        ? "bg-amber-500/10 border-amber-500/40"
+        : s === "error"
+          ? "bg-rose-500/10 border-rose-500/40"
+          : "bg-card border-border";
 
   const needsJust = registro.horas_extras > 2 && !registro.justificativa_extras?.trim();
   const invalidExtras = registro.horas_extras > 0 && registro.horas_normais < 9;
@@ -664,7 +797,9 @@ function DayCell({
             <span className="text-muted-foreground">—</span>
           )}
           <span className="absolute right-1 top-1">
-            {status === "saving" && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            {status === "saving" && (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+            )}
             {status === "saved" && <Check className="h-3 w-3 text-emerald-600" />}
             {status === "error" && <AlertTriangle className="h-3 w-3 text-rose-600" />}
           </span>
@@ -673,7 +808,9 @@ function DayCell({
       <PopoverContent className="w-80 space-y-3" align="start">
         <div className="text-sm font-semibold">
           {new Date(registro.data + "T00:00:00").toLocaleDateString("pt-BR", {
-            weekday: "long", day: "2-digit", month: "long",
+            weekday: "long",
+            day: "2-digit",
+            month: "long",
           })}
         </div>
 
@@ -682,10 +819,14 @@ function DayCell({
             type="checkbox"
             className="h-4 w-4"
             checked={registro.ausencia}
-            onChange={(e) => onChange({
-              ausencia: e.target.checked,
-              ...(e.target.checked ? { horas_normais: 0, horas_extras: 0, justificativa_extras: null } : {}),
-            })}
+            onChange={(e) =>
+              onChange({
+                ausencia: e.target.checked,
+                ...(e.target.checked
+                  ? { horas_normais: 0, horas_extras: 0, justificativa_extras: null }
+                  : {}),
+              })
+            }
           />
           Marcar ausência
         </label>
@@ -705,23 +846,39 @@ function DayCell({
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Horas normais (máx 9)</label>
                 <Input
-                  type="number" min={0} max={9} step={0.5}
+                  type="number"
+                  min={0}
+                  max={9}
+                  step={0.5}
                   value={registro.horas_normais}
-                  onChange={(e) => onChange({ horas_normais: Math.max(0, Math.min(9, Number(e.target.value) || 0)) })}
+                  onChange={(e) =>
+                    onChange({
+                      horas_normais: Math.max(0, Math.min(9, Number(e.target.value) || 0)),
+                    })
+                  }
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Horas extras</label>
                 <Input
-                  type="number" min={0} max={7} step={0.5}
+                  type="number"
+                  min={0}
+                  max={7}
+                  step={0.5}
                   value={registro.horas_extras}
-                  onChange={(e) => onChange({ horas_extras: Math.max(0, Math.min(7, Number(e.target.value) || 0)) })}
+                  onChange={(e) =>
+                    onChange({
+                      horas_extras: Math.max(0, Math.min(7, Number(e.target.value) || 0)),
+                    })
+                  }
                 />
               </div>
             </div>
 
             {invalidExtras && (
-              <p className="text-xs text-rose-600">Só é possível registrar horas extras se as normais atingirem 9h.</p>
+              <p className="text-xs text-rose-600">
+                Só é possível registrar horas extras se as normais atingirem 9h.
+              </p>
             )}
             {overflow && (
               <p className="text-xs text-rose-600">Total diário não pode ultrapassar 16h.</p>
@@ -738,9 +895,7 @@ function DayCell({
                   onChange={(e) => onChange({ justificativa_extras: e.target.value })}
                   placeholder="Obrigatória quando extras > 2h"
                 />
-                {needsJust && (
-                  <p className="text-xs text-rose-600">Justificativa obrigatória.</p>
-                )}
+                {needsJust && <p className="text-xs text-rose-600">Justificativa obrigatória.</p>}
               </div>
             )}
           </>
@@ -757,7 +912,13 @@ function DayCell({
 
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
-            {status === "saving" ? "Salvando..." : status === "saved" ? "Salvo" : status === "error" ? "Erro ao salvar" : "Edições salvas automaticamente"}
+            {status === "saving"
+              ? "Salvando..."
+              : status === "saved"
+                ? "Salvo"
+                : status === "error"
+                  ? "Erro ao salvar"
+                  : "Edições salvas automaticamente"}
           </span>
           {!alocado && <span className="text-amber-600">Sem alocação neste dia</span>}
         </div>

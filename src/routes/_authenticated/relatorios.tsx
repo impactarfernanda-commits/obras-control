@@ -112,7 +112,7 @@ function RelatoriosPage() {
   const { data: categorias } = useCategorias();
 
   const { data: funcionarios, isLoading: lf } = useQuery({
-    queryKey: ["funcionarios"],
+    queryKey: ["funcionarios-relatorios"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")

@@ -192,11 +192,11 @@ function AlocacoesPage() {
   const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
 
   const { data: funcionarios, error: funcionariosError } = useQuery({
-    queryKey: ["funcionarios-min-all"],
+    queryKey: ["funcionarios-alocacao-selecao"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,ativo,data_desligamento")
+        .select("id,nome,ativo,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<{
@@ -204,6 +204,7 @@ function AlocacoesPage() {
         nome: string;
         ativo: boolean;
         data_desligamento: string | null;
+        deleted_at: string | null;
       }>;
     },
   });
@@ -211,6 +212,7 @@ function AlocacoesPage() {
   const funcionariosSelecionaveis = useMemo(
     () =>
       (funcionarios ?? [])
+        .filter((f) => !f.deleted_at)
         .slice()
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
     [funcionarios],
@@ -299,15 +301,40 @@ function AlocacoesPage() {
     },
   });
 
+  const funcionarioIdsHistoricos = useMemo(
+    () => Array.from(new Set((alocacoes ?? []).map((a) => a.funcionario_id))).sort(),
+    [alocacoes],
+  );
+  const { data: funcionariosHistoricos, error: funcionariosHistoricosError } = useQuery({
+    queryKey: ["funcionarios-historico-alocacoes", funcionarioIdsHistoricos],
+    enabled: funcionarioIdsHistoricos.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("funcionarios_safe" as unknown as "funcionarios")
+        .select("id,nome,ativo,data_desligamento")
+        .in("id", funcionarioIdsHistoricos);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const nomeHistoricoById = useMemo(() => {
+    const nomes = new Map(nomeById);
+    for (const f of funcionariosHistoricos ?? []) nomes.set(f.id, f.nome);
+    return nomes;
+  }, [nomeById, funcionariosHistoricos]);
+
   useEffect(() => {
     const errs = [
       funcionariosError && `Funcionários: ${(funcionariosError as ErrorLike).message}`,
+      funcionariosHistoricosError &&
+        `Funcionários do histórico: ${(funcionariosHistoricosError as ErrorLike).message}`,
       obrasError && `Obras: ${(obrasError as ErrorLike).message}`,
       alocacoesError && `Alocações: ${(alocacoesError as ErrorLike).message}`,
       registrosError && `Registros: ${(registrosError as ErrorLike).message}`,
     ].filter(Boolean) as string[];
     for (const m of errs) toast.error(m);
-  }, [funcionariosError, obrasError, alocacoesError, registrosError]);
+  }, [funcionariosError, funcionariosHistoricosError, obrasError, alocacoesError, registrosError]);
 
   const horasMap = useMemo(() => {
     const m = new Map<string, { hn: number; he: number }>();
@@ -338,7 +365,7 @@ function AlocacoesPage() {
       if (!g.dias.has(a.data)) g.dias.set(a.data, []);
       g.dias.get(a.data)!.push(a);
       const fId = a.funcionario_id;
-      const fNome = nomeById.get(fId) ?? "—";
+      const fNome = nomeHistoricoById.get(fId) ?? "—";
       if (!g.funcs.has(fId)) g.funcs.set(fId, { nome: fNome, dias: new Set(), hn: 0, he: 0 });
       const fEntry = g.funcs.get(fId)!;
       fEntry.dias.add(a.data);
@@ -351,7 +378,7 @@ function AlocacoesPage() {
     return Array.from(out.entries())
       .map(([id, v]) => ({ id, ...v }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, horasMap, nomeById]);
+  }, [alocacoes, horasMap, nomeHistoricoById]);
 
   const competenciaDays = useMemo(() => {
     const days: string[] = [];

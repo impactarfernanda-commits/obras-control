@@ -112,7 +112,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,ativo,data_desligamento")
+        .select("id,nome,ativo,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       const arr = data as unknown as Array<{
@@ -120,8 +120,11 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         nome: string;
         ativo: boolean;
         data_desligamento: string | null;
+        deleted_at: string | null;
       }>;
-      return arr.filter((f) => f.ativo).sort((a, b) => a.nome.localeCompare(b.nome));
+      return arr
+        .filter((f) => !f.deleted_at)
+        .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome));
     },
   });
   const funcSelecionado = useMemo(

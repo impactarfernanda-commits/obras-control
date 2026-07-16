@@ -101,11 +101,11 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
 
   // nomes seguros (visível a assistentes)
   const { data: funcionariosAll } = useQuery({
-    queryKey: ["funcionarios-min-all"],
+    queryKey: ["funcionarios-registros-selecao"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<{
@@ -114,6 +114,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         categoria_mo: string | null;
         ativo: boolean;
         data_desligamento: string | null;
+        deleted_at: string | null;
       }>;
     },
   });
@@ -139,7 +140,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const funcionariosAtivos = useMemo(
     () =>
       (funcionariosAll ?? [])
-        .filter((f) => f.ativo)
+        .filter((f) => f.ativo && !f.deleted_at)
         .slice()
         .sort((a, b) => a.nome.localeCompare(b.nome)),
     [funcionariosAll],
@@ -160,6 +161,34 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
       return data;
     },
   });
+
+  const idsHistoricos = useMemo(
+    () => Array.from(new Set((alocacoes ?? []).map((a) => a.funcionario_id))).sort(),
+    [alocacoes],
+  );
+  const { data: funcionariosHistoricos } = useQuery({
+    queryKey: ["funcionarios-historico-registros-grid", idsHistoricos],
+    enabled: idsHistoricos.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("funcionarios_safe" as unknown as "funcionarios")
+        .select("id,nome,categoria_mo,ativo,data_desligamento")
+        .in("id", idsHistoricos);
+      if (error) throw error;
+      return data;
+    },
+  });
+  const infoHistoricoById = useMemo(() => {
+    const result = new Map(infoById);
+    for (const f of funcionariosHistoricos ?? [])
+      result.set(f.id, {
+        nome: f.nome,
+        categoria_mo: f.categoria_mo,
+        ativo: f.ativo,
+        dataDesligamento: f.data_desligamento,
+      });
+    return result;
+  }, [infoById, funcionariosHistoricos]);
 
   const { data: registrosRemote, isLoading: loadingReg } = useQuery({
     enabled: !!obraId,
@@ -192,7 +221,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
     };
     const map = new Map<string, Row>();
     for (const a of alocacoes ?? []) {
-      const info = infoById.get(a.funcionario_id);
+      const info = infoHistoricoById.get(a.funcionario_id);
       if (info)
         map.set(a.funcionario_id, {
           id: a.funcionario_id,
@@ -204,7 +233,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
     }
     for (const id of extraIds) {
       if (!map.has(id)) {
-        const info = infoById.get(id);
+        const info = infoHistoricoById.get(id);
         if (info)
           map.set(id, {
             id,
@@ -216,7 +245,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, infoById, extraIds]);
+  }, [alocacoes, infoHistoricoById, extraIds]);
 
   const allocSet = useMemo(() => {
     const s = new Set<string>();

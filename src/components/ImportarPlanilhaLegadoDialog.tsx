@@ -35,6 +35,7 @@ type FuncionarioExistente = {
   nome: string;
   categoria_mo: string | null;
   ativo: boolean;
+  deleted_at: string | null;
 };
 type ObraExistente = { id: string; nome: string };
 type CategoriaSalarioConfig = {
@@ -56,6 +57,7 @@ type FuncionarioNovo = {
   categoria: string;
   salario: number;
   encargos: number;
+  data_admissao: string | null;
 };
 type ObraNova = { centroCusto: string; nome: string };
 type AlocacaoImportacao = {
@@ -320,16 +322,17 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const { data: funcsData, error: funcsError } = await supabase
       .from("funcionarios_safe" as unknown as "funcionarios")
-      .select("id,nome,categoria_mo,ativo");
+      .select("id,nome,categoria_mo,ativo,deleted_at");
     if (funcsError) throw funcsError;
     const funcionariosExistentes = (funcsData ?? []) as unknown as FuncionarioExistente[];
     const funcMap = new Map(funcionariosExistentes.map((f) => [normalizeName(f.nome), f]));
     for (const [key, item] of funcionariosPorNome) {
       const existente = funcMap.get(key);
-      if (existente && !existente.ativo) {
+      if (existente?.deleted_at) {
         erros.push(
-          "Existe um funcionário inativo/excluído com este nome: " + item.nome +
-          ". Reative o cadastro existente antes de importar.",
+          "Existe um funcionário excluído com este nome: " +
+            item.nome +
+            ". Verifique se o cadastro anterior foi excluído por erro antes de importar.",
         );
       }
     }
@@ -448,6 +451,7 @@ export function ImportarPlanilhaLegadoDialog() {
           categoria: findCategoriaConfig(item.funcao, categoriaMap)!.categoria,
           salario: Number(findCategoriaConfig(item.funcao, categoriaMap)!.salario),
           encargos: Number(findCategoriaConfig(item.funcao, categoriaMap)!.encargos),
+          data_admissao: item.admissao,
         });
     const obrasCriar = Array.from(obrasEncontradas)
       .filter((cc) => !obraMap.has(normalizeName(cc)))
@@ -518,6 +522,7 @@ export function ImportarPlanilhaLegadoDialog() {
           categoria_mo: f.categoria,
           salario: f.salario,
           encargos: f.encargos,
+          data_admissao: f.data_admissao,
         });
         if (error) throw error;
       }
@@ -529,7 +534,7 @@ export function ImportarPlanilhaLegadoDialog() {
         await Promise.all([
           supabase
             .from("funcionarios_safe" as unknown as "funcionarios")
-            .select("id,nome,categoria_mo,ativo"),
+            .select("id,nome,categoria_mo,ativo,deleted_at"),
           supabase.from("obras").select("id,nome"),
         ]);
       if (funcsError) throw funcsError;
