@@ -53,7 +53,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex h-14 items-center px-2">
-          <TanksBRLogo className={collapsed ? "w-8" : "w-[120px]"} />
+          <TanksBRLogo variant="dark" size="sidebar" className={collapsed ? "w-8" : undefined} />
         </div>
       </SidebarHeader>
       <SidebarContent>

@@ -35,7 +35,7 @@ function Shell() {
           <header className="flex h-14 items-center gap-3 border-b bg-card px-4">
             <SidebarTrigger />
             <div className="flex-1" />
-            <TanksBRLogo className="w-24 sm:w-[108px]" />
+            <TanksBRLogo size="header" />
           </header>
           <main className="flex-1 p-4 md:p-6">
             {loading ? (

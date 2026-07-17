@@ -94,7 +94,7 @@ function ResetPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
-          <TanksBRLogo className="w-[150px]" />
+          <TanksBRLogo size="login" />
           <p className="text-sm text-muted-foreground">Redefinição de senha</p>
         </div>
         <Card className="shadow-brand">
