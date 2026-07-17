@@ -150,6 +150,7 @@ function RelatoriosPage() {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
         .select("id,nome,categoria_mo,ativo,salario,data_admissao,data_desligamento,deleted_at")
+        .is("deleted_at", null)
         .order("nome");
       if (error) throw error;
       return (data ?? []) as unknown as FuncRow[];
@@ -195,22 +196,29 @@ function RelatoriosPage() {
       ),
   });
 
+  // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
+  // O filtro local protege todos os calculos e exportacoes mesmo se a origem deixar de filtrar.
+  const funcionariosRelatorio = useMemo(
+    () => (funcionarios ?? []).filter((f) => !f.deleted_at),
+    [funcionarios],
+  );
+
   const custoPorFunc = useMemo(() => {
     const m = new Map<string, ReturnType<typeof calcularCusto>>();
-    for (const f of funcionarios ?? []) {
+    for (const f of funcionariosRelatorio) {
       m.set(
         f.id,
         calcularCusto(f.salario, beneficios ?? null, segurosVida?.get(f.categoria_mo) ?? 0),
       );
     }
     return m;
-  }, [funcionarios, beneficios, segurosVida]);
+  }, [funcionariosRelatorio, beneficios, segurosVida]);
 
   const diasUteis = useMemo(() => diasUteisNoIntervalo(startDate, endDate), [startDate, endDate]);
 
   const resultadoObras = useMemo(() => {
     const obraMap = new Map((obras ?? []).map((o) => [o.id, o.nome]));
-    const funcMap = new Map((funcionarios ?? []).map((f) => [f.id, f]));
+    const funcMap = new Map(funcionariosRelatorio.map((f) => [f.id, f]));
     const acc = new Map<
       string,
       { nome: string; mod: number; moi: number; total: number; funcs: Set<string> }
@@ -287,7 +295,7 @@ function RelatoriosPage() {
       }))
       .sort((a, b) => b.total - a.total);
     return { obrasComCusto, avisos: Array.from(avisos) };
-  }, [alocacoes, registros, custoPorFunc, funcionarios, categorias, obras, diasUteis]);
+  }, [alocacoes, registros, custoPorFunc, funcionariosRelatorio, categorias, obras, diasUteis]);
 
   const obrasComCusto = resultadoObras.obrasComCusto;
   const avisosObras = resultadoObras.avisos;
@@ -315,9 +323,8 @@ function RelatoriosPage() {
       datas.add(alocacao.data);
       alocacoesPorFuncionario.set(alocacao.funcionario_id, datas);
     }
-    return (funcionarios ?? [])
+    return funcionariosRelatorio
       .filter((f) => {
-        if (f.deleted_at) return false;
         if (f.data_admissao && f.data_admissao > end) return false;
         if (f.data_desligamento && f.data_desligamento < start) return false;
         return true;
@@ -370,11 +377,19 @@ function RelatoriosPage() {
         return true;
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, funcionarios, start, end, pendenciaFilter, categoriaFilter, coberturaFilter]);
+  }, [
+    alocacoes,
+    funcionariosRelatorio,
+    start,
+    end,
+    pendenciaFilter,
+    categoriaFilter,
+    coberturaFilter,
+  ]);
 
   const categoriasPendencias = useMemo(
-    () => Array.from(new Set((funcionarios ?? []).map((f) => f.categoria_mo))).sort(),
-    [funcionarios],
+    () => Array.from(new Set(funcionariosRelatorio.map((f) => f.categoria_mo))).sort(),
+    [funcionariosRelatorio],
   );
 
   function exportarSemAlocacao() {
@@ -401,7 +416,7 @@ function RelatoriosPage() {
     XLSX.writeFile(workbook, `funcionarios-sem-alocacao-${start}-${end}.xlsx`);
   }
   // Mostra ativos + inativos com lançamentos no período (custos pagos mesmo após desligamento).
-  const ativos = (funcionarios ?? []).filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
+  const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce((s, f) => s + (custoPorFunc.get(f.id)?.total ?? 0), 0);
 
   const mesLabel = new Date(year, month, 1).toLocaleDateString("pt-BR", {
