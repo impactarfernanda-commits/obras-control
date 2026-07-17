@@ -106,6 +106,17 @@ function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
   return datas;
 }
 
+function diaUtilAnterior(dataISO: string) {
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  let data = new Date(ano, mes - 1, dia - 1);
+  while (data.getDay() === 0 || data.getDay() === 6) {
+    data = new Date(data.getFullYear(), data.getMonth(), data.getDate() - 1);
+  }
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(
+    data.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 function tipoPorAlocacao(
   alocacao: AlocRow,
   funcionario: FuncRow,
@@ -316,12 +327,14 @@ function RelatoriosPage() {
     return funcionariosRelatorio
       .filter((f) => {
         if (f.data_admissao && f.data_admissao > end) return false;
-        if (f.data_desligamento && f.data_desligamento < start) return false;
         return true;
       })
       .map((f) => {
         const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
-        const fim = f.data_desligamento && f.data_desligamento < end ? f.data_desligamento : end;
+        const fimAnteriorAoDesligamento = f.data_desligamento
+          ? diaUtilAnterior(f.data_desligamento)
+          : end;
+        const fim = fimAnteriorAoDesligamento < end ? fimAnteriorAoDesligamento : end;
         const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
         const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
         const diasComAlocacao = diasDisponiveis.filter((data) => datasAlocadas.has(data));
@@ -343,7 +356,7 @@ function RelatoriosPage() {
           );
         if (desligadoNoPeriodo)
           observacoes.push(
-            `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações até o desligamento.`,
+            `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações até o dia útil anterior ao desligamento.`,
           );
         return {
           ...f,
