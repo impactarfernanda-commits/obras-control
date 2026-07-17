@@ -80,13 +80,17 @@ type RegRow = {
 };
 type ObraRow = { id: string; nome: string };
 
+function dataLocalISO(data: Date) {
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(
+    data.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 function payrollRange(year: number, month: number) {
   // Folha: dia 25 do mês anterior até dia 24 do mês selecionado
   const start = new Date(year, month - 1, 25);
   const end = new Date(year, month, 24);
-  const iso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { start: iso(start), end: iso(end), startDate: start, endDate: end };
+  return { start: dataLocalISO(start), end: dataLocalISO(end), startDate: start, endDate: end };
 }
 
 function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
@@ -98,9 +102,7 @@ function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
   ) {
     const dia = data.getDay();
     if (dia !== 0 && dia !== 6) {
-      datas.push(
-        `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`,
-      );
+      datas.push(dataLocalISO(data));
     }
   }
   return datas;
@@ -112,9 +114,7 @@ function diaUtilAnterior(dataISO: string) {
   while (data.getDay() === 0 || data.getDay() === 6) {
     data = new Date(data.getFullYear(), data.getMonth(), data.getDate() - 1);
   }
-  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(
-    data.getDate(),
-  ).padStart(2, "0")}`;
+  return dataLocalISO(data);
 }
 
 function tipoPorAlocacao(
@@ -164,6 +164,10 @@ function RelatoriosPage() {
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);
+  const ontem = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const ontemISO = dataLocalISO(ontem);
+  const dataLimiteAnalise = end < ontemISO ? end : ontemISO;
+  const competenciaSemDiasVencidos = dataLimiteAnalise < start;
 
   const { data: alocacoes, isLoading: la } = useQuery({
     queryKey: ["alocacoes-mes", start, end],
@@ -318,6 +322,7 @@ function RelatoriosPage() {
   }, [alocacoes, registros]);
 
   const semAlocacao = useMemo(() => {
+    if (competenciaSemDiasVencidos) return [];
     const alocacoesPorFuncionario = new Map<string, Set<string>>();
     for (const alocacao of alocacoes ?? []) {
       const datas = alocacoesPorFuncionario.get(alocacao.funcionario_id) ?? new Set<string>();
@@ -326,15 +331,18 @@ function RelatoriosPage() {
     }
     return funcionariosRelatorio
       .filter((f) => {
-        if (f.data_admissao && f.data_admissao > end) return false;
+        if (f.data_admissao && f.data_admissao > dataLimiteAnalise) return false;
         return true;
       })
       .map((f) => {
         const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
         const fimAnteriorAoDesligamento = f.data_desligamento
           ? diaUtilAnterior(f.data_desligamento)
-          : end;
-        const fim = fimAnteriorAoDesligamento < end ? fimAnteriorAoDesligamento : end;
+          : dataLimiteAnalise;
+        const fim =
+          fimAnteriorAoDesligamento < dataLimiteAnalise
+            ? fimAnteriorAoDesligamento
+            : dataLimiteAnalise;
         const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
         const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
         const diasComAlocacao = diasDisponiveis.filter((data) => datasAlocadas.has(data));
@@ -385,6 +393,8 @@ function RelatoriosPage() {
     funcionariosRelatorio,
     start,
     end,
+    dataLimiteAnalise,
+    competenciaSemDiasVencidos,
     pendenciaFilter,
     categoriaFilter,
     coberturaFilter,
@@ -397,6 +407,7 @@ function RelatoriosPage() {
 
   function exportarSemAlocacao() {
     const rows = semAlocacao.map((f) => ({
+      "Período analisado": `${start} a ${dataLimiteAnalise}`,
       Funcionário: f.nome,
       "Função/Categoria": f.categoria_mo,
       "Data de admissão": f.data_admissao
@@ -427,6 +438,7 @@ function RelatoriosPage() {
     year: "numeric",
   });
   const periodoLabel = `${startDate.toLocaleDateString("pt-BR")} a ${endDate.toLocaleDateString("pt-BR")}`;
+  const dataLimiteLabel = new Date(dataLimiteAnalise + "T00:00:00").toLocaleDateString("pt-BR");
 
   function nav(delta: number) {
     const d = new Date(year, month + delta, 1);
@@ -656,9 +668,14 @@ function RelatoriosPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle>Funcionários sem alocação na competência</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    {periodoLabel} · {semAlocacao.length} pendência(s)
-                  </p>
+                  <div className="text-sm text-muted-foreground">
+                    <p>Competência: {periodoLabel}</p>
+                    <p>
+                      {competenciaSemDiasVencidos
+                        ? "Esta competência ainda não possui dias vencidos para análise."
+                        : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
+                    </p>
+                  </div>
                 </div>
                 <Button
                   variant="outline"
@@ -738,7 +755,9 @@ function RelatoriosPage() {
                     {!semAlocacao.length ? (
                       <TableRow>
                         <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
-                          Nenhum funcionário sem alocação nesta competência.
+                          {competenciaSemDiasVencidos
+                            ? "Esta competência ainda não possui dias vencidos para análise."
+                            : "Nenhum funcionário com pendências vencidas no período analisado."}
                         </TableCell>
                       </TableRow>
                     ) : (
