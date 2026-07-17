@@ -3,14 +3,15 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   variant?: "light" | "dark";
-  size?: "sidebar" | "header" | "login";
+  size?: "sidebar" | "header" | "login" | "compact";
   className?: string;
 }
 
 const sizeClasses = {
-  sidebar: "w-[108px]",
-  header: "w-[108px]",
-  login: "w-[220px]",
+  sidebar: "h-8 w-auto max-w-[140px]",
+  header: "h-6 w-auto max-w-[105px]",
+  login: "h-16 w-auto max-w-[280px]",
+  compact: "h-auto w-10",
 } as const;
 
 export function TanksBRLogo({ variant = "light", size = "header", className }: Props) {
@@ -18,8 +19,8 @@ export function TanksBRLogo({ variant = "light", size = "header", className }: P
     <img
       src={logoTanksBR}
       alt="TanksBR"
-      width={598}
-      height={296}
+      width={1881}
+      height={430}
       data-logo-variant={variant}
       className={cn(
         "block h-auto max-w-full bg-transparent object-contain",

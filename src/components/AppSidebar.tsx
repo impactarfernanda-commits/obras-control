@@ -27,7 +27,12 @@ import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 
-type Item = { title: string; url: string; icon: React.ComponentType<{ className?: string }>; minLevel: 1 | 2 | 3 };
+type Item = {
+  title: string;
+  url: string;
+  icon: React.ComponentType<{ className?: string }>;
+  minLevel: 1 | 2 | 3;
+};
 
 const items: Item[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, minLevel: 2 },
@@ -52,8 +57,12 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex h-14 items-center px-2">
-          <TanksBRLogo variant="dark" size="sidebar" className={collapsed ? "w-8" : undefined} />
+        <div
+          className={
+            collapsed ? "flex h-14 items-center justify-center" : "flex h-14 items-center px-2"
+          }
+        >
+          <TanksBRLogo variant="dark" size={collapsed ? "compact" : "sidebar"} />
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -81,7 +90,9 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border">
         {!collapsed && (
           <div className="px-2 py-1 text-xs">
-            <div className="truncate font-semibold text-sidebar-foreground">{fullName || "Usuário"}</div>
+            <div className="truncate font-semibold text-sidebar-foreground">
+              {fullName || "Usuário"}
+            </div>
             <div className="truncate text-sidebar-foreground/60 capitalize">{role ?? "—"}</div>
           </div>
         )}
