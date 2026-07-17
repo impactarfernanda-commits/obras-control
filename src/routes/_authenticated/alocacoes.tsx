@@ -197,12 +197,13 @@ function AlocacoesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,ativo,data_desligamento,deleted_at")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<{
         id: string;
         nome: string;
+        categoria_mo: string | null;
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
@@ -219,10 +220,14 @@ function AlocacoesPage() {
     [funcionarios],
   );
   const infoById = useMemo(() => {
-    const m = new Map<string, { nome: string; ativo: boolean; dataDesligamento: string | null }>();
+    const m = new Map<
+      string,
+      { nome: string; categoria: string; ativo: boolean; dataDesligamento: string | null }
+    >();
     for (const f of funcionarios ?? [])
       m.set(f.id, {
         nome: f.nome,
+        categoria: f.categoria_mo?.trim() || "Sem função",
         ativo: f.ativo,
         dataDesligamento: f.data_desligamento,
       });
@@ -304,18 +309,24 @@ function AlocacoesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,ativo,data_desligamento")
+        .select("id,nome,categoria_mo,ativo,data_desligamento")
         .in("id", funcionarioIdsHistoricos);
       if (error) throw error;
       return data;
     },
   });
 
-  const nomeHistoricoById = useMemo(() => {
-    const nomes = new Map(nomeById);
-    for (const f of funcionariosHistoricos ?? []) nomes.set(f.id, f.nome);
-    return nomes;
-  }, [nomeById, funcionariosHistoricos]);
+  const infoHistoricoById = useMemo(() => {
+    const infos = new Map(infoById);
+    for (const f of funcionariosHistoricos ?? [])
+      infos.set(f.id, {
+        nome: f.nome,
+        categoria: f.categoria_mo?.trim() || "Sem função",
+        ativo: f.ativo,
+        dataDesligamento: f.data_desligamento,
+      });
+    return infos;
+  }, [infoById, funcionariosHistoricos]);
 
   useEffect(() => {
     const errs = [
@@ -340,14 +351,17 @@ function AlocacoesPage() {
     return m;
   }, [registros]);
 
-  // Group: obraId -> { nome, dias: Map<data, AlocRow[]>, funcs: Map<funcId,{nome,dias,hn,he}> }
+  // Cada funcionario aparece uma vez por obra, ainda que tenha alocacoes em varias datas.
   const porObra = useMemo(() => {
     const out = new Map<
       string,
       {
         nome: string;
         dias: Map<string, AlocRow[]>;
-        funcs: Map<string, { nome: string; dias: Set<string>; hn: number; he: number }>;
+        funcs: Map<
+          string,
+          { nome: string; categoria: string; dias: Set<string>; hn: number; he: number }
+        >;
       }
     >();
     for (const a of alocacoes ?? []) {
@@ -358,8 +372,15 @@ function AlocacoesPage() {
       if (!g.dias.has(a.data)) g.dias.set(a.data, []);
       g.dias.get(a.data)!.push(a);
       const fId = a.funcionario_id;
-      const fNome = nomeHistoricoById.get(fId) ?? "—";
-      if (!g.funcs.has(fId)) g.funcs.set(fId, { nome: fNome, dias: new Set(), hn: 0, he: 0 });
+      const info = infoHistoricoById.get(fId);
+      if (!g.funcs.has(fId))
+        g.funcs.set(fId, {
+          nome: info?.nome ?? "—",
+          categoria: info?.categoria ?? "Sem função",
+          dias: new Set(),
+          hn: 0,
+          he: 0,
+        });
       const fEntry = g.funcs.get(fId)!;
       fEntry.dias.add(a.data);
       const h = horasMap.get(`${fId}|${obraId}|${a.data}`);
@@ -371,7 +392,7 @@ function AlocacoesPage() {
     return Array.from(out.entries())
       .map(([id, v]) => ({ id, ...v }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, horasMap, nomeHistoricoById]);
+  }, [alocacoes, horasMap, infoHistoricoById]);
 
   const competenciaDays = useMemo(() => {
     const days: string[] = [];
@@ -619,7 +640,7 @@ function AlocacoesPage() {
                             <SelectContent>
                               {funcionariosSelecionaveis.map((f) => (
                                 <SelectItem key={f.id} value={f.id}>
-                                  {f.nome}
+                                  {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
                                   {!f.ativo ? " (inativo)" : ""}
                                 </SelectItem>
                               ))}
@@ -823,12 +844,31 @@ function AlocacoesPage() {
             const funcsArr = Array.from(obra.funcs.entries())
               .map(([id, v]) => ({ id, ...v }))
               .sort((a, b) => a.nome.localeCompare(b.nome));
+            const composicaoEquipe = Array.from(
+              funcsArr.reduce((acc, f) => {
+                acc.set(f.categoria, (acc.get(f.categoria) ?? 0) + 1);
+                return acc;
+              }, new Map<string, number>()),
+            ).sort(([categoriaA, totalA], [categoriaB, totalB]) =>
+              totalB === totalA ? categoriaA.localeCompare(categoriaB) : totalB - totalA,
+            );
             return (
               <AccordionItem key={obra.id} value={obra.id} className="rounded-md border bg-card">
                 <AccordionTrigger className="px-4 hover:no-underline">
                   <div className="flex w-full flex-wrap items-center justify-between gap-2 pr-2">
                     <div className="text-left">
                       <div className="font-semibold">{obra.nome}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {composicaoEquipe.map(([categoria, total]) => (
+                          <Badge
+                            key={categoria}
+                            variant="outline"
+                            className="px-1.5 py-0 text-[10px] font-normal"
+                          >
+                            {total} {categoria}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <Badge variant="secondary">
@@ -861,7 +901,12 @@ function AlocacoesPage() {
                               key={f.id}
                               className="flex items-center justify-between gap-2 p-2 text-sm"
                             >
-                              <span className="truncate font-medium">{f.nome}</span>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{f.nome}</div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {f.categoria}
+                                </div>
+                              </div>
                               <div className="flex flex-shrink-0 gap-1.5">
                                 <Badge variant="secondary">{f.dias.size}d</Badge>
                                 <Badge variant="outline">{f.hn}h</Badge>
@@ -957,6 +1002,10 @@ function AlocacoesPage() {
                                                         Inativo
                                                       </span>
                                                     )}
+                                                  </div>
+                                                  <div className="truncate text-xs text-muted-foreground">
+                                                    {infoHistoricoById.get(a.funcionario_id)
+                                                      ?.categoria ?? "Sem função"}
                                                   </div>
                                                   <div className="mt-0.5 flex flex-wrap gap-1">
                                                     {h ? (

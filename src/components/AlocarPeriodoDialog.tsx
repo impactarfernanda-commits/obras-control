@@ -112,12 +112,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,ativo,data_desligamento,deleted_at")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
         .order("nome");
       if (error) throw error;
       const arr = data as unknown as Array<{
         id: string;
         nome: string;
+        categoria_mo: string | null;
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
@@ -423,7 +424,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 <SelectContent>
                   {(funcionariosAtivos ?? []).map((f) => (
                     <SelectItem key={f.id} value={f.id}>
-                      {f.nome}
+                      {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
                       {!f.ativo ? " (inativo)" : ""}
                     </SelectItem>
                   ))}
