@@ -586,9 +586,6 @@ function AlocacoesPage() {
     setMonth(d.getMonth());
   }
 
-  const defaultOpenObra =
-    obraFiltro !== "all" ? [obraFiltro] : porObra.slice(0, 1).map((o) => o.id);
-
   return (
     <div>
       <PageHeader
@@ -837,7 +834,7 @@ function AlocacoesPage() {
           </CardContent>
         </Card>
       ) : (
-        <Accordion type="multiple" defaultValue={defaultOpenObra} className="space-y-3">
+        <Accordion type="multiple" className="space-y-3">
           {porObra.map((obra) => {
             const totalDias = obra.dias.size;
             const totalFuncs = obra.funcs.size;
@@ -852,23 +849,13 @@ function AlocacoesPage() {
             ).sort(([categoriaA, totalA], [categoriaB, totalB]) =>
               totalB === totalA ? categoriaA.localeCompare(categoriaB) : totalB - totalA,
             );
+            const totalFuncoes = composicaoEquipe.length;
             return (
               <AccordionItem key={obra.id} value={obra.id} className="rounded-md border bg-card">
                 <AccordionTrigger className="px-4 hover:no-underline">
                   <div className="flex w-full flex-wrap items-center justify-between gap-2 pr-2">
                     <div className="text-left">
                       <div className="font-semibold">{obra.nome}</div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {composicaoEquipe.map(([categoria, total]) => (
-                          <Badge
-                            key={categoria}
-                            variant="outline"
-                            className="px-1.5 py-0 text-[10px] font-normal"
-                          >
-                            {total} {categoria}
-                          </Badge>
-                        ))}
-                      </div>
                     </div>
                     <div className="flex gap-2">
                       <Badge variant="secondary">
@@ -877,10 +864,25 @@ function AlocacoesPage() {
                       <Badge variant="outline">
                         {totalFuncs} {totalFuncs === 1 ? "funcionário" : "funcionários"}
                       </Badge>
+                      <Badge variant="outline">
+                        {totalFuncoes} {totalFuncoes === 1 ? "função" : "funções"}
+                      </Badge>
                     </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
+                  <div className="mb-4 rounded-md border bg-muted/20 p-3">
+                    <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+                      Composição da equipe
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {composicaoEquipe.map(([categoria, total]) => (
+                        <Badge key={categoria} variant="secondary" className="font-normal">
+                          {categoria}: {total}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                   <Tabs defaultValue="calendario" className="w-full">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <TabsList>
