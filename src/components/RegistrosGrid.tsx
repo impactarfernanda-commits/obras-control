@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { buscarTodasPaginas } from "@/lib/paginacao";
 
 // ---------- helpers ----------
 function startOfWeek(d: Date): Date {
@@ -31,7 +32,9 @@ function startOfWeek(d: Date): Date {
   return date;
 }
 function isoDate(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
 }
 function weekDays(start: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => {
@@ -150,16 +153,19 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const { data: alocacoes, isLoading: loadingAloc } = useQuery({
     enabled: !!obraId,
     queryKey: ["aloc-week", obraId, firstDay, lastDay],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("alocacoes")
-        .select("funcionario_id, data")
-        .eq("obra_id", obraId)
-        .gte("data", firstDay)
-        .lte("data", lastDay);
-      if (error) throw error;
-      return data;
-    },
+    queryFn: async () =>
+      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+        supabase
+          .from("alocacoes")
+          .select("funcionario_id, data")
+          .eq("obra_id", obraId)
+          .gte("data", firstDay)
+          .lte("data", lastDay)
+          .order("data")
+          .order("funcionario_id")
+          .order("obra_id")
+          .range(from, to),
+      ),
   });
 
   const idsHistoricos = useMemo(
@@ -193,16 +199,19 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const { data: registrosRemote, isLoading: loadingReg } = useQuery({
     enabled: !!obraId,
     queryKey: ["registros-week", obraId, firstDay, lastDay],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("registros_horas")
-        .select("*")
-        .eq("obra_id", obraId)
-        .gte("data", firstDay)
-        .lte("data", lastDay);
-      if (error) throw error;
-      return data as Registro[];
-    },
+    queryFn: async () =>
+      buscarTodasPaginas<Registro>((from, to) =>
+        supabase
+          .from("registros_horas")
+          .select("*")
+          .eq("obra_id", obraId)
+          .gte("data", firstDay)
+          .lte("data", lastDay)
+          .order("data")
+          .order("funcionario_id")
+          .order("obra_id")
+          .range(from, to),
+      ),
   });
 
   // funcionários a mostrar: alocados na semana

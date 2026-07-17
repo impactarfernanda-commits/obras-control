@@ -38,6 +38,7 @@ import {
   diasUteisNoIntervalo,
   custoDoDia,
 } from "@/lib/custos";
+import { buscarTodasPaginas } from "@/lib/paginacao";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   beforeLoad: async () => {
@@ -105,21 +106,6 @@ function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
   return datas;
 }
 
-async function fetchAll<T>(
-  queryFactory: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
-) {
-  const pageSize = 1000;
-  const rows: T[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await queryFactory(from, from + pageSize - 1);
-    if (error) throw error;
-    const page = (data ?? []) as T[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-  }
-  return rows;
-}
-
 function tipoPorAlocacao(
   alocacao: AlocRow,
   funcionario: FuncRow,
@@ -171,13 +157,15 @@ function RelatoriosPage() {
   const { data: alocacoes, isLoading: la } = useQuery({
     queryKey: ["alocacoes-mes", start, end],
     queryFn: async () =>
-      fetchAll<AlocRow>((from, to) =>
+      buscarTodasPaginas<AlocRow>((from, to) =>
         supabase
           .from("alocacoes")
           .select("funcionario_id,obra_id,data,tipo_mao_obra" as never)
           .gte("data", start)
           .lte("data", end)
           .order("data", { ascending: true })
+          .order("funcionario_id", { ascending: true })
+          .order("obra_id", { ascending: true })
           .range(from, to),
       ),
   });
@@ -185,13 +173,15 @@ function RelatoriosPage() {
   const { data: registros, isLoading: lr } = useQuery({
     queryKey: ["registros-mes", start, end],
     queryFn: async () =>
-      fetchAll<RegRow>((from, to) =>
+      buscarTodasPaginas<RegRow>((from, to) =>
         supabase
           .from("registros_horas")
           .select("funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia")
           .gte("data", start)
           .lte("data", end)
           .order("data", { ascending: true })
+          .order("funcionario_id", { ascending: true })
+          .order("obra_id", { ascending: true })
           .range(from, to),
       ),
   });

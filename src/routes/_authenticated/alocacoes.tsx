@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
+import { buscarTodasPaginas } from "@/lib/paginacao";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import {
@@ -249,24 +250,20 @@ function AlocacoesPage() {
   } = useQuery({
     queryKey: ["alocacoes-mes", mesKey, obraFiltro],
     queryFn: async () => {
-      const pageSize = 1000;
-      const rows: AlocRow[] = [];
-      for (let from = 0; ; from += pageSize) {
+      return buscarTodasPaginas<AlocRow>(async (from, to) => {
         let q = supabase
           .from("alocacoes")
           .select("id, data, funcionario_id, obra_id, obras(id,nome)")
           .gte("data", startISO)
           .lte("data", endISO)
           .order("data", { ascending: true })
-          .range(from, from + pageSize - 1);
+          .order("funcionario_id", { ascending: true })
+          .order("obra_id", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to);
         if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-        const { data, error } = await q;
-        if (error) throw error;
-        const page = (data ?? []) as unknown as AlocRow[];
-        rows.push(...page);
-        if (page.length < pageSize) break;
-      }
-      return rows;
+        return q;
+      });
     },
   });
 
@@ -274,30 +271,26 @@ function AlocacoesPage() {
     queryKey: ["registros-mes", mesKey, obraFiltro],
     enabled: !!alocacoes && alocacoes.length > 0,
     queryFn: async () => {
-      const pageSize = 1000;
-      const rows: Array<{
+      type RegistroResumo = {
         funcionario_id: string;
         obra_id: string;
         data: string;
         horas_normais: number;
         horas_extras: number;
-      }> = [];
-      for (let from = 0; ; from += pageSize) {
+      };
+      return buscarTodasPaginas<RegistroResumo>(async (from, to) => {
         let q = supabase
           .from("registros_horas")
           .select("funcionario_id, obra_id, data, horas_normais, horas_extras")
           .gte("data", startISO)
           .lte("data", endISO)
           .order("data", { ascending: true })
-          .range(from, from + pageSize - 1);
+          .order("funcionario_id", { ascending: true })
+          .order("obra_id", { ascending: true })
+          .range(from, to);
         if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-        const { data, error } = await q;
-        if (error) throw error;
-        const page = data ?? [];
-        rows.push(...page);
-        if (page.length < pageSize) break;
-      }
-      return rows;
+        return q;
+      });
     },
   });
 
