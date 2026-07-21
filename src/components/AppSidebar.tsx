@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  House,
 } from "lucide-react";
 import {
   Sidebar,
@@ -44,6 +45,8 @@ const items: Item[] = [
   { title: "Configurações", url: "/configuracoes", icon: Settings, minLevel: 3 },
   { title: "Usuários", url: "/admin/usuarios", icon: ShieldCheck, minLevel: 3 },
 ];
+
+const portalTanksUrl = import.meta.env.VITE_PORTAL_TANKS_URL || "https://portal-tks-br.vercel.app/";
 
 export function AppSidebar() {
   const { state } = useSidebar();
@@ -88,6 +91,16 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="Portal Tanks BR">
+              <a href={portalTanksUrl} className="flex items-center gap-3">
+                <House className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>Portal Tanks BR</span>}
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         {!collapsed && (
           <div className="px-2 py-1 text-xs">
             <div className="truncate font-semibold text-sidebar-foreground">
