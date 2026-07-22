@@ -138,6 +138,7 @@ function FuncionariosPage() {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
         .select("*")
+        .eq("visivel_obras_control", true)
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<Funcionario>;
@@ -160,7 +161,7 @@ function FuncionariosPage() {
   const { data: obras } = useQuery({
     queryKey: ["obras"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
+      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
       if (error) throw error;
       return data;
     },

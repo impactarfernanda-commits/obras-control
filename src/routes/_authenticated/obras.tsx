@@ -69,7 +69,7 @@ function ObrasPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["obras"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("obras").select("*").eq("visivel_obras_control", true).order("created_at", { ascending: false });
       if (error) throw error;
       return data as Obra[];
     },

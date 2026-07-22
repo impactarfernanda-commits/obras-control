@@ -219,6 +219,9 @@ export type Database = {
           id: string;
           nome: string;
           salario: number;
+          visivel_obras_control: boolean;
+          visivel_passagens: boolean;
+          escopo_passagens: string;
         };
         Insert: {
           ativo?: boolean;
@@ -232,6 +235,9 @@ export type Database = {
           id?: string;
           nome: string;
           salario?: number;
+          visivel_obras_control?: boolean;
+          visivel_passagens?: boolean;
+          escopo_passagens?: string;
         };
         Update: {
           ativo?: boolean;
@@ -245,6 +251,9 @@ export type Database = {
           id?: string;
           nome?: string;
           salario?: number;
+          visivel_obras_control?: boolean;
+          visivel_passagens?: boolean;
+          escopo_passagens?: string;
         };
         Relationships: [];
       };
@@ -333,6 +342,10 @@ export type Database = {
           id: string;
           nome: string;
           status: string;
+          visivel_obras_control: boolean;
+          visivel_passagens: boolean;
+          escopo_passagens: string;
+          tipo_centro_custo: string | null;
         };
         Insert: {
           created_at?: string;
@@ -340,6 +353,10 @@ export type Database = {
           id?: string;
           nome: string;
           status?: string;
+          visivel_obras_control?: boolean;
+          visivel_passagens?: boolean;
+          escopo_passagens?: string;
+          tipo_centro_custo?: string | null;
         };
         Update: {
           created_at?: string;
@@ -347,6 +364,10 @@ export type Database = {
           id?: string;
           nome?: string;
           status?: string;
+          visivel_obras_control?: boolean;
+          visivel_passagens?: boolean;
+          escopo_passagens?: string;
+          tipo_centro_custo?: string | null;
         };
         Relationships: [];
       };
@@ -506,6 +527,7 @@ export type Database = {
           id: string | null;
           nome: string | null;
           salario: number | null;
+          visivel_obras_control: boolean | null;
         };
         Insert: {
           ativo?: boolean | null;
@@ -519,6 +541,7 @@ export type Database = {
           id?: string | null;
           nome?: string | null;
           salario?: never;
+          visivel_obras_control?: boolean | null;
         };
         Update: {
           ativo?: boolean | null;
@@ -532,6 +555,7 @@ export type Database = {
           id?: string | null;
           nome?: string | null;
           salario?: never;
+          visivel_obras_control?: boolean | null;
         };
         Relationships: [];
       };

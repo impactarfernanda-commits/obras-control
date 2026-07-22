@@ -123,7 +123,7 @@ function RegistrosPage() {
   const { data: obras } = useQuery({
     queryKey: ["obras-min"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
+      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
       if (error) throw error;
       return data;
     },

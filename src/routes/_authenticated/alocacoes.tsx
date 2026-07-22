@@ -197,7 +197,8 @@ function AlocacoesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
+        .eq("visivel_obras_control", true)
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<{
@@ -207,6 +208,7 @@ function AlocacoesPage() {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
+        visivel_obras_control: boolean;
       }>;
     },
   });
@@ -242,7 +244,7 @@ function AlocacoesPage() {
   const { data: obras, error: obrasError } = useQuery({
     queryKey: ["obras-min"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
+      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
       if (error) throw error;
       return data as Array<{ id: string; nome: string }>;
     },

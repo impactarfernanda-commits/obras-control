@@ -108,7 +108,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
         .order("nome");
       if (error) throw error;
       return data as unknown as Array<{
@@ -118,6 +118,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
+        visivel_obras_control: boolean;
       }>;
     },
   });
@@ -143,7 +144,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const funcionariosAtivos = useMemo(
     () =>
       (funcionariosAll ?? [])
-        .filter((f) => f.ativo && !f.deleted_at)
+        .filter((f) => f.ativo && !f.deleted_at && f.visivel_obras_control)
         .slice()
         .sort((a, b) => a.nome.localeCompare(b.nome)),
     [funcionariosAll],

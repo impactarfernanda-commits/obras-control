@@ -112,7 +112,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at")
+        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
+        .eq("visivel_obras_control", true)
         .order("nome");
       if (error) throw error;
       const arr = data as unknown as Array<{
@@ -122,6 +123,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
+        visivel_obras_control: boolean;
       }>;
       return arr
         .filter((f) => !f.deleted_at)
