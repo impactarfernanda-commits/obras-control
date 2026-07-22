@@ -195,11 +195,7 @@ function AlocacoesPage() {
   const { data: funcionarios, error: funcionariosError } = useQuery({
     queryKey: ["funcionarios-alocacao-selecao"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
-        .eq("visivel_obras_control", true)
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
       return data as unknown as Array<{
         id: string;
@@ -208,7 +204,7 @@ function AlocacoesPage() {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
-        visivel_obras_control: boolean;
+        visivel_obras_control: boolean | null;
       }>;
     },
   });
@@ -216,7 +212,13 @@ function AlocacoesPage() {
   const funcionariosSelecionaveis = useMemo(
     () =>
       (funcionarios ?? [])
-        .filter((f) => !f.deleted_at)
+        .filter(
+          (f) =>
+            f.ativo &&
+            !f.deleted_at &&
+            f.visivel_obras_control !== false &&
+            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
+        )
         .slice()
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
     [funcionarios],
@@ -235,18 +237,18 @@ function AlocacoesPage() {
       });
     return m;
   }, [funcionarios]);
-  const nomeById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const f of funcionarios ?? []) m.set(f.id, f.nome);
-    return m;
-  }, [funcionarios]);
-
   const { data: obras, error: obrasError } = useQuery({
     queryKey: ["obras-min"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
+      const { data, error } = await supabase
+        .from("obras")
+        .select("id,nome,visivel_obras_control")
+        .order("nome");
       if (error) throw error;
-      return data as Array<{ id: string; nome: string }>;
+      return data.filter((obra) => obra.visivel_obras_control !== false) as Array<{
+        id: string;
+        nome: string;
+      }>;
     },
   });
 
@@ -309,10 +311,9 @@ function AlocacoesPage() {
     queryKey: ["funcionarios-historico-alocacoes", funcionarioIdsHistoricos],
     enabled: funcionarioIdsHistoricos.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento")
-        .in("id", funcionarioIdsHistoricos);
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_por_ids", {
+        p_ids: funcionarioIdsHistoricos,
+      });
       if (error) throw error;
       return data;
     },
@@ -546,7 +547,7 @@ function AlocacoesPage() {
       if (selErr) throw selErr;
       if (!last) throw new Error("Nenhum lançamento seu para desfazer");
       await garantirCompetenciaAberta(supabase, last.data);
-      const nome = nomeById.get(last.funcionario_id) ?? "funcionário";
+      const nome = infoHistoricoById.get(last.funcionario_id)?.nome ?? "funcionário";
       const dataBr = new Date(last.data + "T00:00:00").toLocaleDateString("pt-BR");
       const ok = window.confirm(`Desfazer o último lançamento?\n\n${nome} em ${dataBr}`);
       if (!ok) return { skipped: true as const };
@@ -998,10 +999,11 @@ function AlocacoesPage() {
                                                 <div className="min-w-0 flex-1">
                                                   <div className="flex items-center gap-1.5 truncate text-sm font-medium">
                                                     <span className="truncate">
-                                                      {nomeById.get(a.funcionario_id) ?? "—"}
+                                                      {infoHistoricoById.get(a.funcionario_id)
+                                                        ?.nome ?? "—"}
                                                     </span>
-                                                    {infoById.get(a.funcionario_id)?.ativo ===
-                                                      false && (
+                                                    {infoHistoricoById.get(a.funcionario_id)
+                                                      ?.ativo === false && (
                                                       <span className="rounded bg-muted px-1 py-0.5 text-[9px] uppercase text-muted-foreground">
                                                         Inativo
                                                       </span>

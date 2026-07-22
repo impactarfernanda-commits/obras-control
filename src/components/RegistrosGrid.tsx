@@ -106,10 +106,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const { data: funcionariosAll } = useQuery({
     queryKey: ["funcionarios-registros-selecao"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
       return data as unknown as Array<{
         id: string;
@@ -118,7 +115,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
-        visivel_obras_control: boolean;
+        visivel_obras_control: boolean | null;
       }>;
     },
   });
@@ -144,7 +141,13 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const funcionariosAtivos = useMemo(
     () =>
       (funcionariosAll ?? [])
-        .filter((f) => f.ativo && !f.deleted_at && f.visivel_obras_control)
+        .filter(
+          (f) =>
+            f.ativo &&
+            !f.deleted_at &&
+            f.visivel_obras_control !== false &&
+            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
+        )
         .slice()
         .sort((a, b) => a.nome.localeCompare(b.nome)),
     [funcionariosAll],
@@ -177,10 +180,9 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
     queryKey: ["funcionarios-historico-registros-grid", idsHistoricos],
     enabled: idsHistoricos.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento")
-        .in("id", idsHistoricos);
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_por_ids", {
+        p_ids: idsHistoricos,
+      });
       if (error) throw error;
       return data;
     },

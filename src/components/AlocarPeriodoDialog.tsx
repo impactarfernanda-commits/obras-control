@@ -110,11 +110,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const { data: funcionariosAtivos } = useQuery({
     queryKey: ["funcionarios-min-all"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,data_desligamento,deleted_at,visivel_obras_control")
-        .eq("visivel_obras_control", true)
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
       const arr = data as unknown as Array<{
         id: string;
@@ -123,10 +119,16 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         ativo: boolean;
         data_desligamento: string | null;
         deleted_at: string | null;
-        visivel_obras_control: boolean;
+        visivel_obras_control: boolean | null;
       }>;
       return arr
-        .filter((f) => !f.deleted_at)
+        .filter(
+          (f) =>
+            f.ativo &&
+            !f.deleted_at &&
+            f.visivel_obras_control !== false &&
+            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
+        )
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome));
     },
   });
@@ -510,8 +512,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               <div className="mt-1 text-xs text-muted-foreground">
                 {conflitosUniao.length}{" "}
                 {conflitosUniao.length === 1 ? "dia possui" : "dias possuem"} alocação ou horas
-                lançadas para este funcionário. Dias em outro centro de custo ou competência fechada serão
-                sempre pulados.
+                lançadas para este funcionário. Dias em outro centro de custo ou competência fechada
+                serão sempre pulados.
               </div>
               <ul className="mt-2 max-h-32 space-y-0.5 overflow-y-auto text-xs">
                 {conflitosUniao.map((d) => (
@@ -565,9 +567,9 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                   <div>
                     <div className="font-medium">Sobrescrever</div>
                     <div className="text-xs text-muted-foreground">
-                      Substitui horas existentes deste centro de custo pelas horas padrão. Dias em competência
-                      fechada ou outro centro de custo serão pulados ({diasDisponiveisParaSobrescrever}{" "}
-                      possíveis).
+                      Substitui horas existentes deste centro de custo pelas horas padrão. Dias em
+                      competência fechada ou outro centro de custo serão pulados (
+                      {diasDisponiveisParaSobrescrever} possíveis).
                     </div>
                   </div>
                 </label>

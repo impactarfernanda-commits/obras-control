@@ -123,34 +123,18 @@ function RegistrosPage() {
   const { data: obras } = useQuery({
     queryKey: ["obras-min"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
+      const { data, error } = await supabase
+        .from("obras")
+        .select("id,nome,visivel_obras_control")
+        .order("nome");
       if (error) throw error;
-      return data;
+      return data.filter((obra) => obra.visivel_obras_control !== false);
     },
   });
 
   useEffect(() => {
     if (!obraId && obras && obras.length > 0) setObraId(obras[0].id);
   }, [obras, obraId]);
-
-  // Mapa global de nomes via view segura (funcionarios_safe não expõe salário p/ assistente/supervisor)
-  const { data: funcionariosAll } = useQuery({
-    queryKey: ["funcionarios-registros-historico-global"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo")
-        .order("nome");
-      if (error) throw error;
-      return data as unknown as Array<{ id: string; nome: string; categoria_mo: string | null }>;
-    },
-  });
-  const infoById = useMemo(() => {
-    const m = new Map<string, { nome: string; categoria_mo: string | null }>();
-    for (const f of funcionariosAll ?? [])
-      m.set(f.id, { nome: f.nome, categoria_mo: f.categoria_mo });
-    return m;
-  }, [funcionariosAll]);
 
   // Funcionários alocados nesta obra na semana
   const { data: alocacoes, isLoading: loadingAloc } = useQuery({
@@ -170,20 +154,6 @@ function RegistrosPage() {
           .range(from, to),
       ),
   });
-
-  const funcionarios = useMemo(() => {
-    const map = new Map<string, { id: string; nome: string; categoria_mo: string | null }>();
-    for (const a of alocacoes ?? []) {
-      const info = infoById.get(a.funcionario_id);
-      if (info)
-        map.set(a.funcionario_id, {
-          id: a.funcionario_id,
-          nome: info.nome,
-          categoria_mo: info.categoria_mo,
-        });
-    }
-    return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, infoById]);
 
   const allocSet = useMemo(() => {
     const s = new Set<string>();
@@ -246,6 +216,49 @@ function RegistrosPage() {
           .range(from, to),
       ),
   });
+
+  const idsHistoricos = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(alocacoes ?? []).map((a) => a.funcionario_id),
+          ...(registrosRemote ?? []).map((r) => r.funcionario_id),
+          ...(alocCycle ?? []).map((a) => a.funcionario_id),
+          ...(registrosCycle ?? []).map((r) => r.funcionario_id),
+        ]),
+      ).sort(),
+    [alocacoes, registrosRemote, alocCycle, registrosCycle],
+  );
+  const { data: funcionariosHistoricos } = useQuery({
+    queryKey: ["funcionarios-registros-historico", idsHistoricos],
+    enabled: idsHistoricos.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_por_ids", {
+        p_ids: idsHistoricos,
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+  const infoById = useMemo(() => {
+    const m = new Map<string, { nome: string; categoria_mo: string | null }>();
+    for (const f of funcionariosHistoricos ?? [])
+      m.set(f.id, { nome: f.nome, categoria_mo: f.categoria_mo });
+    return m;
+  }, [funcionariosHistoricos]);
+  const funcionarios = useMemo(() => {
+    const map = new Map<string, { id: string; nome: string; categoria_mo: string | null }>();
+    for (const a of alocacoes ?? []) {
+      const info = infoById.get(a.funcionario_id);
+      if (info)
+        map.set(a.funcionario_id, {
+          id: a.funcionario_id,
+          nome: info.nome,
+          categoria_mo: info.categoria_mo,
+        });
+    }
+    return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [alocacoes, infoById]);
 
   // Estado local editável
   const [cells, setCells] = useState<Record<CellKey, Registro>>({});

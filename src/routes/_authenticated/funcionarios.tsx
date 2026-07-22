@@ -90,6 +90,8 @@ type Funcionario = {
   data_admissao: string | null;
   data_desligamento: string | null;
   deleted_at: string | null;
+  deleted_by: string | null;
+  visivel_obras_control: boolean | null;
 };
 
 function Row({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
@@ -132,16 +134,16 @@ function FuncionariosPage() {
   const moi = useMemo(() => (categorias ?? []).filter((c) => c.tipo === "MOI"), [categorias]);
   const mod = useMemo(() => (categorias ?? []).filter((c) => c.tipo === "MOD"), [categorias]);
 
-  const { data: funcionarios, isLoading } = useQuery({
+  const {
+    data: funcionarios,
+    isLoading,
+    error: funcionariosError,
+  } = useQuery({
     queryKey: ["funcionarios-cadastro"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("*")
-        .eq("visivel_obras_control", true)
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
-      return data as unknown as Array<Funcionario>;
+      return data satisfies Array<Funcionario>;
     },
   });
 
@@ -161,9 +163,12 @@ function FuncionariosPage() {
   const { data: obras } = useQuery({
     queryKey: ["obras"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").eq("visivel_obras_control", true).order("nome");
+      const { data, error } = await supabase
+        .from("obras")
+        .select("id,nome,visivel_obras_control")
+        .order("nome");
       if (error) throw error;
-      return data;
+      return data.filter((obra) => obra.visivel_obras_control !== false);
     },
   });
 
@@ -190,23 +195,35 @@ function FuncionariosPage() {
   });
 
   const filtered = useMemo(() => {
-    const list = (funcionarios ?? []).filter((f) => !f.deleted_at);
-    return list.filter((f) => {
-      if (search && !f.nome.toLowerCase().includes(search.toLowerCase())) return false;
-      if (tipoFilter !== "all" && tipoCategoria(f.categoria_mo, categorias) !== tipoFilter)
-        return false;
-      if (statusFilter === "ativo" && !f.ativo) return false;
-      if (statusFilter === "inativo" && f.ativo) return false;
-      if (obraFilter !== "all") {
-        const cur = currentAlocs?.get(f.id);
-        if (!cur || cur.obra_id !== obraFilter) return false;
-      }
+    const brutos = funcionarios ?? [];
+    const naoExcluidos = brutos.filter((f) => f.deleted_at == null);
+    const visiveis = naoExcluidos.filter((f) => f.visivel_obras_control !== false);
+    const porStatus = visiveis.filter((f) => {
+      if (statusFilter === "ativo") return f.ativo === true;
+      if (statusFilter === "inativo") return f.ativo === false;
       return true;
     });
+    const porCategoria = porStatus.filter(
+      (f) => tipoFilter === "all" || tipoCategoria(f.categoria_mo, categorias) === tipoFilter,
+    );
+    const porCentroCusto =
+      obraFilter === "all"
+        ? porCategoria
+        : porCategoria.filter((f) => currentAlocs?.get(f.id)?.obra_id === obraFilter);
+    const termo = search.trim().toLocaleLowerCase("pt-BR");
+    const porBusca = porCentroCusto.filter(
+      (f) => !termo || f.nome.toLocaleLowerCase("pt-BR").includes(termo),
+    );
+
+    return porBusca;
   }, [funcionarios, search, tipoFilter, statusFilter, obraFilter, currentAlocs, categorias]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+
+  useEffect(() => {
+    if (page >= totalPages) setPage(totalPages - 1);
+  }, [page, totalPages]);
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida({ enabled: canSeeSalario });
@@ -619,7 +636,13 @@ function FuncionariosPage() {
         </CardContent>
       </Card>
 
-      {isLoading ? (
+      {funcionariosError ? (
+        <Card>
+          <CardContent className="py-10 text-center text-destructive">
+            Não foi possível carregar os funcionários: {databaseError(funcionariosError).message}
+          </CardContent>
+        </Card>
+      ) : isLoading ? (
         <div className="space-y-2">
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />

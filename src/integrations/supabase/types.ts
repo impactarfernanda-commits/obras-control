@@ -561,6 +561,35 @@ export type Database = {
       };
     };
     Functions: {
+      obras_control_funcionarios_por_ids: {
+        Args: { p_ids: string[] };
+        Returns: {
+          ativo: boolean;
+          categoria_mo: string | null;
+          data_desligamento: string | null;
+          deleted_at: string | null;
+          id: string;
+          nome: string;
+          visivel_obras_control: boolean | null;
+        }[];
+      };
+      obras_control_funcionarios_safe: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          ativo: boolean;
+          categoria_mo: string;
+          created_at: string;
+          data_admissao: string | null;
+          data_desligamento: string | null;
+          deleted_at: string | null;
+          deleted_by: string | null;
+          encargos: number | null;
+          id: string;
+          nome: string;
+          salario: number | null;
+          visivel_obras_control: boolean | null;
+        }[];
+      };
       can_view_salario: { Args: { _user_id: string }; Returns: boolean };
       get_funcionario_salario_masked: {
         Args: { _id: string };
