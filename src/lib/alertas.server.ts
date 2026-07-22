@@ -98,7 +98,7 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
         alerts.push({
           tipo: "nunca_alocado",
           titulo: `Funcionário nunca alocado: ${f.nome}`,
-          mensagem: `${f.nome} está cadastrado como ativo mas nunca foi alocado a nenhuma obra. Faça a primeira alocação ou desative o cadastro.`,
+          mensagem: `${f.nome} está cadastrado como ativo mas nunca foi alocado a nenhum centro de custo. Faça a primeira alocação ou desative o cadastro.`,
           severidade: "warning",
           metadata: { funcionario_id: f.id, funcionario_nome: f.nome },
           dedupe_key: `nunca_alocado:${f.id}:${hojeStr}`,
@@ -169,8 +169,8 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       if (pct > DEFAULTS.pct_acima_media) {
         alerts.push({
           tipo: "custo_acima_media",
-          titulo: `Custo elevado: ${obraNome.get(oid) ?? "obra"}`,
-          mensagem: `Custos indiretos do mês em ${obraNome.get(oid) ?? "obra"} atingiram R$ ${atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (${pct.toFixed(0)}% da média histórica de R$ ${media.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}).`,
+          titulo: `Custo elevado: ${obraNome.get(oid) ?? "centro de custo"}`,
+          mensagem: `Custos indiretos do mês em ${obraNome.get(oid) ?? "centro de custo"} atingiram R$ ${atual.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (${pct.toFixed(0)}% da média histórica de R$ ${media.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}).`,
           severidade: pct > 150 ? "critical" : "warning",
           metadata: { obra_id: oid, obra_nome: obraNome.get(oid), valor_atual: atual, media },
           dedupe_key: `custo_acima_media:${oid}:${mesAtual}`,
@@ -238,10 +238,10 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       if (diff > DEFAULTS.dias_sem_lancamento) {
         alerts.push({
           tipo: "obra_sem_lancamento",
-          titulo: `Obra sem lançamentos: ${o.nome}`,
+          titulo: `Centro de custo sem lançamentos: ${o.nome}`,
           mensagem: ult
-            ? `A obra ${o.nome} não recebe registros de horas há ${diff} dias (último: ${new Date(ult).toLocaleDateString("pt-BR")}).`
-            : `A obra ${o.nome} nunca recebeu registros de horas.`,
+            ? `O centro de custo ${o.nome} não recebe registros de horas há ${diff} dias (último: ${new Date(ult).toLocaleDateString("pt-BR")}).`
+            : `O centro de custo ${o.nome} nunca recebeu registros de horas.`,
           severidade: diff > 7 ? "critical" : "warning",
           metadata: { obra_id: o.id, obra_nome: o.nome, dias: diff },
           dedupe_key: `obra_sem_lancamento:${o.id}:${hojeStr}`,

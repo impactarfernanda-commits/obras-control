@@ -154,7 +154,7 @@ export function FechamentoCompetenciaCard() {
         <div>
           <CardTitle>Fechamento de Competência</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Fechamento global 25–24 para bloquear lançamentos, edições e remoções em todas as obras.
+            Fechamento global 25–24 para bloquear lançamentos, edições e remoções em todos os centros de custo.
           </p>
         </div>
       </CardHeader>

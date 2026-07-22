@@ -452,7 +452,7 @@ function RelatoriosPage() {
     <div>
       <PageHeader
         title="Relatórios"
-        description="Custos consolidados de mão de obra por funcionário e por obra."
+        description="Custos consolidados de mão de obra por funcionário e por centro de custo."
         actions={
           <div className="flex items-center gap-1 rounded-md border bg-card p-1">
             <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Mês anterior">
@@ -483,7 +483,7 @@ function RelatoriosPage() {
       <Tabs defaultValue="funcionarios" className="space-y-4">
         <TabsList>
           <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>
-          <TabsTrigger value="obras">Custo por obra</TabsTrigger>
+          <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>
           <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
@@ -583,7 +583,7 @@ function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle>
-                Custo de mão de obra por obra — {mesLabel}{" "}
+                Custo de mão de obra por centro de custo — {mesLabel}{" "}
                 <span className="text-sm font-normal text-muted-foreground">({periodoLabel})</span>
               </CardTitle>
               <p className="text-sm text-muted-foreground">
@@ -615,7 +615,7 @@ function RelatoriosPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Obra</TableHead>
+                        <TableHead>Centro de custo</TableHead>
                         <TableHead className="text-right">MOD</TableHead>
                         <TableHead className="text-right">MOI</TableHead>
                         <TableHead className="text-right">Total</TableHead>

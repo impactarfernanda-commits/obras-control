@@ -24,8 +24,8 @@ type AlocacaoComObra = {
 };
 
 function nomeObra(obras: AlocacaoComObra["obras"]) {
-  if (Array.isArray(obras)) return obras[0]?.nome ?? "obra sem nome";
-  return obras?.nome ?? "obra sem nome";
+  if (Array.isArray(obras)) return obras[0]?.nome ?? "centro de custo sem nome";
+  return obras?.nome ?? "centro de custo sem nome";
 }
 
 function mapRow(row: AlocacaoComObra): AlocacaoConflito {
@@ -50,14 +50,14 @@ export function detalhesConflitoAlocacao(
   if (conflito) {
     return {
       title: TITULO_CONFLITO_ALOCACAO,
-      description: `Este funcionário já está alocado na obra ${conflito.obraNome} em ${formatarDataBR(conflito.data)}. Remova ou ajuste a alocação existente antes de lançar uma nova.`,
+      description: `Este funcionário já está alocado no centro de custo ${conflito.obraNome} em ${formatarDataBR(conflito.data)}. Remova ou ajuste a alocação existente antes de lançar uma nova.`,
     };
   }
 
   return {
     title: TITULO_CONFLITO_ALOCACAO,
     description:
-      "Este funcionário já está alocado em outra obra nesta data. Remova ou ajuste a alocação existente antes de lançar uma nova.",
+      "Este funcionário já está alocado em outro centro de custo nesta data. Remova ou ajuste a alocação existente antes de lançar uma nova.",
   };
 }
 

@@ -46,7 +46,7 @@ const TIPO_LABEL: Record<string, string> = {
   horas_extras: "Horas extras",
   custo_acima_media: "Custo elevado",
   ausencia_consecutiva: "Ausência prolongada",
-  obra_sem_lancamento: "Obra sem lançamento",
+  obra_sem_lancamento: "Centro de custo sem lançamento",
 };
 
 const sevColor: Record<string, string> = {

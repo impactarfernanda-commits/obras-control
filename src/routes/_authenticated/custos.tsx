@@ -240,7 +240,7 @@ function CustosPage() {
     <div>
       <PageHeader
         title="Custos indiretos"
-        description="Registre e analise custos indiretos por obra."
+        description="Registre e analise custos indiretos por centro de custo."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setCatOpen(true)}>
@@ -280,7 +280,7 @@ function CustosPage() {
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div>
-            <Label className="text-xs">Obra</Label>
+            <Label className="text-xs">Centro de custo</Label>
             <Select value={fObra} onValueChange={setFObra}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -374,7 +374,7 @@ function CustosPage() {
       </div>
 
       <Card className="mb-4">
-        <CardHeader><CardTitle className="text-base">Custos por obra</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Custos por centro de custo</CardTitle></CardHeader>
         <CardContent>
           {porObra.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Sem dados.</p>
@@ -405,7 +405,7 @@ function CustosPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
-                  <TableHead>Obra</TableHead>
+                  <TableHead>Centro de custo</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead>Descrição</TableHead>
                   <TableHead className="text-right">Valor</TableHead>
@@ -521,7 +521,7 @@ function LancamentoDialog({
         </DialogHeader>
         <div className="grid gap-3">
           <div>
-            <Label>Obra</Label>
+            <Label>Centro de custo</Label>
             <Select value={obra} onValueChange={setObra}>
               <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
               <SelectContent>

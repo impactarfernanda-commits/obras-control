@@ -155,7 +155,7 @@ function AuthPage() {
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <TanksBRLogo size="login" />
-          <p className="text-sm text-muted-foreground">Sistema de gestão de obras e equipes</p>
+          <p className="text-sm text-muted-foreground">Sistema de gestão de centros de custo e equipes</p>
         </div>
         <Card className="shadow-brand">
           <CardHeader>

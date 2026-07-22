@@ -38,7 +38,7 @@ type Item = {
 const items: Item[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, minLevel: 2 },
   { title: "Funcionários", url: "/funcionarios", icon: Users, minLevel: 1 },
-  { title: "Obras", url: "/obras", icon: Building2, minLevel: 1 },
+  { title: "Centros de custo", url: "/obras", icon: Building2, minLevel: 1 },
   { title: "Alocações", url: "/alocacoes", icon: CalendarRange, minLevel: 1 },
   { title: "Custos", url: "/custos", icon: DollarSign, minLevel: 1 },
   { title: "Relatórios", url: "/relatorios", icon: BarChart3, minLevel: 2 },

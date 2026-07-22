@@ -225,7 +225,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           .join("; ");
         toast.warning(TITULO_CONFLITO_ALOCACAO, {
           description:
-            "Algumas datas não foram alocadas porque o funcionário já possui alocação em outra obra." +
+            "Algumas datas não foram alocadas porque o funcionário já possui alocação em outro centro de custo." +
             (resumo
               ? " Conflitos: " + resumo + (conflitosObraDiferente.length > 3 ? "; ..." : "")
               : ""),
@@ -508,7 +508,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               <div className="mt-1 text-xs text-muted-foreground">
                 {conflitosUniao.length}{" "}
                 {conflitosUniao.length === 1 ? "dia possui" : "dias possuem"} alocação ou horas
-                lançadas para este funcionário. Dias em outra obra ou competência fechada serão
+                lançadas para este funcionário. Dias em outro centro de custo ou competência fechada serão
                 sempre pulados.
               </div>
               <ul className="mt-2 max-h-32 space-y-0.5 overflow-y-auto text-xs">
@@ -525,10 +525,10 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                       {competenciasFechadasSet.has(calcularCompetencia(d).competencia)
                         ? `competência fechada: ${calcularCompetencia(d).competencia}`
                         : conflitosOutraObraPorData.has(d)
-                          ? `outra obra: ${conflitosOutraObraPorData.get(d)?.obraNome}`
+                          ? `outro centro de custo: ${conflitosOutraObraPorData.get(d)?.obraNome}`
                           : conflitosReg.has(d)
-                            ? "horas lançadas nesta obra"
-                            : "alocado nesta obra"}
+                            ? "horas lançadas neste centro de custo"
+                            : "alocado neste centro de custo"}
                     </span>
                   </li>
                 ))}
@@ -563,8 +563,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                   <div>
                     <div className="font-medium">Sobrescrever</div>
                     <div className="text-xs text-muted-foreground">
-                      Substitui horas existentes desta obra pelas horas padrão. Dias em competência
-                      fechada ou outra obra serão pulados ({diasDisponiveisParaSobrescrever}{" "}
+                      Substitui horas existentes deste centro de custo pelas horas padrão. Dias em competência
+                      fechada ou outro centro de custo serão pulados ({diasDisponiveisParaSobrescrever}{" "}
                       possíveis).
                     </div>
                   </div>

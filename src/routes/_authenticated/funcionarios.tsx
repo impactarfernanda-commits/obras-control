@@ -594,7 +594,7 @@ function FuncionariosPage() {
             </Select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Obra atual</label>
+            <label className="text-xs text-muted-foreground">Centro de custo atual</label>
             <Select
               value={obraFilter}
               onValueChange={(v) => {
@@ -633,7 +633,7 @@ function FuncionariosPage() {
                   <TableHead>Nome</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Obra atual</TableHead>
+                  <TableHead>Centro de custo atual</TableHead>
                   <TableHead>Admissão</TableHead>
                   {canSeeSalario && <TableHead className="text-right">Salário</TableHead>}
                   {canSeeSalario && <TableHead className="text-right">Custo total</TableHead>}

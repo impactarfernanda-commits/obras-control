@@ -118,7 +118,7 @@ function calcHoras(entrada: string, saida: string, dateISO: string) {
 const schema = z
   .object({
     funcionario_id: z.string().uuid("Selecione um funcionário"),
-    obra_id: z.string().uuid("Selecione uma obra"),
+    obra_id: z.string().uuid("Selecione um centro de custo"),
     data: z.string().min(1, "Data obrigatória"),
     hora_entrada: z.string().regex(timeRegex, "Horário inválido"),
     hora_saida: z.string().regex(timeRegex, "Horário inválido"),
@@ -333,7 +333,7 @@ function AlocacoesPage() {
       funcionariosError && `Funcionários: ${(funcionariosError as ErrorLike).message}`,
       funcionariosHistoricosError &&
         `Funcionários do histórico: ${(funcionariosHistoricosError as ErrorLike).message}`,
-      obrasError && `Obras: ${(obrasError as ErrorLike).message}`,
+      obrasError && `Centros de custo: ${(obrasError as ErrorLike).message}`,
       alocacoesError && `Alocações: ${(alocacoesError as ErrorLike).message}`,
       registrosError && `Registros: ${(registrosError as ErrorLike).message}`,
     ].filter(Boolean) as string[];
@@ -590,7 +590,7 @@ function AlocacoesPage() {
     <div>
       <PageHeader
         title="Alocações"
-        description="Visualize as alocações agrupadas por obra na competência 25-24."
+        description="Visualize as alocações agrupadas por centro de custo na competência 25-24."
         actions={
           <div className="flex gap-2">
             {isManagerOrAbove && <ImportarPlanilhaLegadoDialog />}
@@ -652,7 +652,7 @@ function AlocacoesPage() {
                       name="obra_id"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Obra</FormLabel>
+                          <FormLabel>Centro de custo</FormLabel>
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
@@ -804,13 +804,13 @@ function AlocacoesPage() {
             </Button>
           </div>
           <div className="min-w-[220px]">
-            <label className="text-xs text-muted-foreground">Filtrar por obra</label>
+            <label className="text-xs text-muted-foreground">Filtrar por centro de custo</label>
             <Select value={obraFiltro} onValueChange={setObraFiltro}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas as obras</SelectItem>
+                <SelectItem value="all">Todos os centros de custo</SelectItem>
                 {(obras ?? []).map((o) => (
                   <SelectItem key={o.id} value={o.id}>
                     {o.nome}

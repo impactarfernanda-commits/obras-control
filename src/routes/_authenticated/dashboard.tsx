@@ -362,13 +362,13 @@ function DashboardPage() {
     });
 
     autoTable(doc, {
-      head: [["Obra", "MO", "Indiretos", "Total"]],
+      head: [["Centro de custo", "MO", "Indiretos", "Total"]],
       body: rankingObras.map((r) => [r.nome, fmtBRL(r.mo), fmtBRL(r.indiretos), fmtBRL(r.total)]),
     });
 
     if (obrasExtras.length) {
       autoTable(doc, {
-        head: [["Obra com excesso de horas extras", "Extras (h)", "% extras"]],
+        head: [["Centro de custo com excesso de horas extras", "Extras (h)", "% extras"]],
         body: obrasExtras.map((r) => [r.nome, r.extras.toFixed(1), `${r.pct.toFixed(1)}%`]),
       });
     }
@@ -390,10 +390,10 @@ function DashboardPage() {
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kpis), "KPIs");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(evolucaoMensal), "Evolução");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankingObras), "Ranking obras");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankingObras), "Ranking centros de custo");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(distCustosInd), "Custos indiretos");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(horasExtrasPeriodo), "Horas");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(obrasExtras), "Alertas obras");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(obrasExtras), "Alertas centros de custo");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(funcsSobrecarregados), "Alertas funcionários");
 
     XLSX.writeFile(wb, `dashboard-${dataIni}-${dataFim}.xlsx`);
@@ -458,7 +458,7 @@ function DashboardPage() {
             </Select>
           </div>
           <div>
-            <Label className="text-xs">Obras ({obraSel.size || "todas"})</Label>
+            <Label className="text-xs">Centros de custo ({obraSel.size || "todos"})</Label>
             <div className="flex max-h-24 flex-wrap gap-1 overflow-auto rounded border p-2">
               {(obras ?? []).map((o) => (
                 <Badge key={o.id}
@@ -468,7 +468,7 @@ function DashboardPage() {
                   {o.nome}
                 </Badge>
               ))}
-              {(obras ?? []).length === 0 && <span className="text-xs text-muted-foreground">Sem obras</span>}
+              {(obras ?? []).length === 0 && <span className="text-xs text-muted-foreground">Sem centros de custo</span>}
             </div>
           </div>
         </CardContent>
@@ -492,7 +492,7 @@ function DashboardPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Operacional</h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <Card className="transition-all hover:-translate-y-0.5 hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Funcionários ativos por obra</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Funcionários ativos por centro de custo</CardTitle></CardHeader>
             <CardContent>
               {ativosPorObra.length === 0 ? <Empty /> : (
                 <ResponsiveContainer width="100%" height={Math.max(180, ativosPorObra.length * 28)}>
@@ -569,7 +569,7 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Ranking obras por custo</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Ranking de centros de custo por custo</CardTitle></CardHeader>
             <CardContent>
               {rankingObras.length === 0 ? <Empty /> : (
                 <ResponsiveContainer width="100%" height={Math.max(220, rankingObras.length * 34)}>
@@ -633,7 +633,7 @@ function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <AlertTriangle className="h-4 w-4 text-destructive" />
-                Obras com excesso de horas extras
+                Centros de custo com excesso de horas extras
               </CardTitle>
               <CardDescription>&gt; 15% do total ou &gt; 40h no período</CardDescription>
             </CardHeader>

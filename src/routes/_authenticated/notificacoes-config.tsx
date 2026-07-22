@@ -20,7 +20,7 @@ const TIPOS = [
   { key: "horas_extras", label: "Horas extras acima do limite semanal" },
   { key: "custo_acima_media", label: "Custos mensais acima da média histórica" },
   { key: "ausencia_consecutiva", label: "Ausências consecutivas prolongadas" },
-  { key: "obra_sem_lancamento", label: "Obra sem lançamentos recentes" },
+  { key: "obra_sem_lancamento", label: "Centro de custo sem lançamentos recentes" },
 ];
 
 const DEFAULTS = {
@@ -127,7 +127,7 @@ function ConfigPage() {
               onChange={(e) => setThr({ ...thr, dias_ausencia: Number(e.target.value) })} />
           </div>
           <div>
-            <Label>Dias sem lançamento (obra)</Label>
+            <Label>Dias sem lançamento (centro de custo)</Label>
             <Input type="number" value={thr.dias_sem_lancamento}
               onChange={(e) => setThr({ ...thr, dias_sem_lancamento: Number(e.target.value) })} />
           </div>

@@ -412,16 +412,16 @@ function RegistrosPage() {
     <div className="space-y-4">
       <PageHeader
         title="Registros de horas"
-        description="Apontamento diário por obra com salvamento automático e colaboração em tempo real."
+        description="Apontamento diário por centro de custo com salvamento automático e colaboração em tempo real."
       />
 
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
           <div className="min-w-[260px]">
-            <label className="mb-1 block text-xs text-muted-foreground">Obra</label>
+            <label className="mb-1 block text-xs text-muted-foreground">Centro de custo</label>
             <Select value={obraId} onValueChange={setObraId}>
               <SelectTrigger>
-                <SelectValue placeholder="Selecione uma obra" />
+                <SelectValue placeholder="Selecione um centro de custo" />
               </SelectTrigger>
               <SelectContent>
                 {(obras ?? []).map((o) => (
@@ -536,7 +536,7 @@ function RegistrosPage() {
         <CardContent className="p-0">
           {!obraId ? (
             <div className="py-10 text-center text-muted-foreground">
-              Selecione uma obra para começar.
+              Selecione um centro de custo para começar.
             </div>
           ) : loadingAloc || loadingReg ? (
             <div className="space-y-2 p-4">
@@ -546,7 +546,7 @@ function RegistrosPage() {
             </div>
           ) : funcionarios.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">
-              Nenhum funcionário alocado nesta obra na semana selecionada.
+              Nenhum funcionário alocado neste centro de custo na semana selecionada.
             </div>
           ) : (
             <div className="overflow-x-auto">

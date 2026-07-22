@@ -598,7 +598,7 @@ export function ImportarPlanilhaLegadoDialog() {
             (byId.get(a.funcionario_id) ?? "Funcionário") +
               " já possui alocação em " +
               formatDate(a.data) +
-              (a.obras?.nome ? " na obra " + a.obras.nome : "") +
+              (a.obras?.nome ? " no centro de custo " + a.obras.nome : "") +
               "; alocação mantida sem alteração.",
           );
         }
@@ -702,7 +702,7 @@ export function ImportarPlanilhaLegadoDialog() {
         created_by: user.id,
       }));
       if (alocRows.find((r) => !r.funcionario_id || !r.obra_id))
-        throw new Error("Não foi possível resolver funcionário ou obra para todas as alocações.");
+        throw new Error("Não foi possível resolver funcionário ou centro de custo para todas as alocações.");
       if (alocRows.length > 0) {
         const { error: alocErr } = await table("alocacoes").insert(alocRows as never);
         if (alocErr) {
@@ -826,7 +826,7 @@ export function ImportarPlanilhaLegadoDialog() {
                 />
                 <Resumo label="Duplicados ignorados" value={preview.duplicadosIgnorados.length} />
                 <Resumo label="Centros de custo" value={preview.obrasEncontradas.length} />
-                <Resumo label="Obras a criar" value={preview.obrasCriar.length} />
+                <Resumo label="Centros de custo a criar" value={preview.obrasCriar.length} />
                 <Resumo label="Alocações válidas" value={preview.alocacoesValidas.length} />
                 <Resumo label="Células vazias" value={preview.celulasVazias} />
                 <Resumo label="Células D/desligado" value={preview.celulasDesligado} />

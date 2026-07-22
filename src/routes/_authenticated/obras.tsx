@@ -107,7 +107,7 @@ function ObrasPage() {
       }
     },
     onSuccess: () => {
-      toast.success(editing ? "Obra atualizada" : "Obra cadastrada");
+      toast.success(editing ? "Centro de custo atualizado" : "Centro de custo cadastrado");
       qc.invalidateQueries({ queryKey: ["obras"] });
       qc.invalidateQueries({ queryKey: ["obras-min"] });
       setOpen(false);
@@ -122,7 +122,7 @@ function ObrasPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("Obra removida");
+      toast.success("Centro de custo removido");
       qc.invalidateQueries({ queryKey: ["obras"] });
       qc.invalidateQueries({ queryKey: ["obras-min"] });
     },
@@ -144,11 +144,11 @@ function ObrasPage() {
   return (
     <div>
       <PageHeader
-        title="Obras"
-        description="Obras em andamento e alocação de equipes."
+        title="Centros de custo"
+        description="Centros de custo e alocação de equipes."
         actions={
           <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />Nova obra
+            <Plus className="mr-2 h-4 w-4" />Novo centro de custo
           </Button>
         }
       />
@@ -156,8 +156,8 @@ function ObrasPage() {
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar obra" : "Cadastrar obra"}</DialogTitle>
-            <DialogDescription>Informe os dados principais da obra.</DialogDescription>
+            <DialogTitle>{editing ? "Editar centro de custo" : "Cadastrar centro de custo"}</DialogTitle>
+            <DialogDescription>Informe os dados principais do centro de custo.</DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))} className="space-y-4">
@@ -206,7 +206,7 @@ function ObrasPage() {
             <label className="text-xs text-muted-foreground">Buscar</label>
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input className="pl-8" placeholder="Nome da obra" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
+              <Input className="pl-8" placeholder="Nome do centro de custo" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
             </div>
           </div>
           <div>
@@ -244,7 +244,7 @@ function ObrasPage() {
                 {pageItems.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
-                      Nenhuma obra encontrada.
+                      Nenhum centro de custo encontrado.
                     </TableCell>
                   </TableRow>
                 ) : pageItems.map((o) => (
@@ -267,9 +267,9 @@ function ObrasPage() {
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Remover obra?</AlertDialogTitle>
+                              <AlertDialogTitle>Remover centro de custo?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                Esta ação não pode ser desfeita. A obra "{o.nome}" será removida permanentemente.
+                                Esta ação não pode ser desfeita. O centro de custo "{o.nome}" será removido permanentemente.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -289,7 +289,7 @@ function ObrasPage() {
       )}
 
       <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-        <div>{filtered.length} obra(s)</div>
+        <div>{filtered.length} centro(s) de custo</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
           <span>Página {page + 1} de {totalPages}</span>
