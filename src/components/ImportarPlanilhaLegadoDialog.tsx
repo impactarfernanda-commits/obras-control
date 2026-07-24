@@ -26,6 +26,7 @@ import {
   MENSAGEM_COMPETENCIA_FECHADA,
 } from "@/lib/competencias";
 import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";
+import { buscarTodasPaginas } from "@/lib/paginacao";
 
 type TipoMaoObra = "montagem" | "civil" | "indireta";
 type LegacyCell = { centroCusto: string; tipoMaoObra: TipoMaoObra; raw: string };
@@ -56,6 +57,12 @@ type AlocacaoExistente = {
   obra_id: string;
   data: string;
   obras?: { nome: string } | null;
+};
+type AlocacaoAnterior = {
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
+  tipo_mao_obra: TipoMaoObra | null;
 };
 type FuncionarioNovo = {
   key: string;
@@ -90,6 +97,9 @@ type Preview = {
   alocacoesValidas: AlocacaoImportacao[];
   celulasVazias: number;
   celulasDesligado: number;
+  sedesEncontradas: number;
+  sedesResolvidas: string[];
+  sedesSemCentroAnterior: string[];
   desligamentos: Array<{ funcionario: string; data: string }>;
   erros: string[];
   ignorados: string[];
@@ -188,12 +198,20 @@ function parseHeaderDate(value: unknown, fallbackYear: number) {
   if (month === 12 && day >= 25) year -= 1;
   return year + "-" + pad(month) + "-" + pad(day);
 }
-function parseCell(value: unknown): "empty" | "desligado" | LegacyCell | { error: string } {
-  const raw = String(value ?? "")
+function normalizarCelulaLegado(value: unknown) {
+  return String(value ?? "")
     .trim()
-    .toUpperCase();
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+function parseCell(
+  value: unknown,
+): "empty" | "desligado" | "sede" | LegacyCell | { error: string } {
+  const normalizado = normalizarCelulaLegado(value);
+  const raw = normalizado.toUpperCase();
   if (!raw) return "empty";
-  if (raw === "D") return "desligado";
+  if (normalizado === "d" || normalizado === "desligado") return "desligado";
+  if (normalizado === "sede") return "sede";
   const m = raw.match(/^(\d+)(?:-([MC]))?$/);
   if (!m) return { error: "Formato desconhecido: " + raw };
   const suffix = m[2];
@@ -236,6 +254,9 @@ function emptyPreview(error: string): Preview {
     alocacoesValidas: [],
     celulasVazias: 0,
     celulasDesligado: 0,
+    sedesEncontradas: 0,
+    sedesResolvidas: [],
+    sedesSemCentroAnterior: [],
     desligamentos: [],
     erros: [error],
     ignorados: [],
@@ -318,6 +339,9 @@ export function ImportarPlanilhaLegadoDialog() {
     const desligamentos = new Map<string, { funcionario: string; data: string }>();
     let celulasVazias = 0;
     let celulasDesligado = 0;
+    let sedesEncontradas = 0;
+    const sedesResolvidas: string[] = [];
+    const sedesSemCentroAnterior: string[] = [];
     const header = rows[0] ?? [];
     const dateColumns: DateColumn[] = [];
     const fallbackYear = new Date().getFullYear();
@@ -330,6 +354,7 @@ export function ImportarPlanilhaLegadoDialog() {
       }
       dateColumns.push({ index: c, date, label: String(header[c]) });
     }
+    dateColumns.sort((a, b) => a.date.localeCompare(b.date));
     const funcionariosPorNome = new Map<
       string,
       { row: unknown[]; nome: string; funcao: string; admissao: string | null; rowNumber: number }
@@ -444,6 +469,7 @@ export function ImportarPlanilhaLegadoDialog() {
     const obrasExistentes = (obrasData ?? []) as ObraExistente[];
     const obraMap = new Map<string, ObraExistente>();
     for (const obra of obrasExistentes) obraMap.set(normalizeName(obra.nome), obra);
+    const obraPorId = new Map(obrasExistentes.map((obra) => [obra.id, obra]));
     const { data: salData, error: salError } = await supabase
       .from("categoria_salarios")
       .select("categoria,salario,encargos,seguro_vida");
@@ -486,11 +512,48 @@ export function ImportarPlanilhaLegadoDialog() {
     const alocacoes: AlocacaoImportacao[] = [];
     const obrasEncontradas = new Set<string>();
     const planilhaFuncionarioData = new Map<string, AlocacaoImportacao>();
+    const ultimaAlocacaoPorFuncionario = new Map<string, AlocacaoAnterior>();
+    const idsExistentes = Array.from(
+      new Set(Array.from(funcMap.values(), (funcionario) => funcionario.id)),
+    );
+    const primeiraData = dateColumns[0]?.date;
+    if (idsExistentes.length > 0 && primeiraData) {
+      const anteriores = await buscarTodasPaginas<AlocacaoAnterior>((from, to) =>
+        supabase
+          .from("alocacoes")
+          .select("funcionario_id,obra_id,data,tipo_mao_obra")
+          .in("funcionario_id", idsExistentes)
+          .lt("data", primeiraData)
+          .order("data", { ascending: false })
+          .order("funcionario_id")
+          .range(from, to),
+      );
+      for (const alocacao of anteriores) {
+        if (
+          !ultimaAlocacaoPorFuncionario.has(alocacao.funcionario_id) &&
+          obraPorId.has(alocacao.obra_id)
+        ) {
+          ultimaAlocacaoPorFuncionario.set(alocacao.funcionario_id, alocacao);
+        }
+      }
+    }
     for (const [funcKey, item] of funcionariosPorNome) {
       let desligadoDesde: string | null = null;
+      const funcionarioExistente = funcMap.get(funcKey);
+      const alocacaoAnterior = funcionarioExistente
+        ? ultimaAlocacaoPorFuncionario.get(funcionarioExistente.id)
+        : undefined;
+      const obraAnterior = alocacaoAnterior ? obraPorId.get(alocacaoAnterior.obra_id) : undefined;
+      let ultimoCentroResolvido: LegacyCell | null = obraAnterior
+        ? {
+            centroCusto: obraAnterior.nome,
+            tipoMaoObra: alocacaoAnterior?.tipo_mao_obra ?? "indireta",
+            raw: obraAnterior.nome,
+          }
+        : null;
       const alocacoesLinha: AlocacaoImportacao[] = [];
       for (const col of dateColumns) {
-        const parsed = parseCell(item.row[col.index]);
+        let parsed = parseCell(item.row[col.index]);
         if (parsed === "empty") {
           celulasVazias += 1;
           continue;
@@ -502,6 +565,20 @@ export function ImportarPlanilhaLegadoDialog() {
             desligamentos.set(funcKey, { funcionario: item.nome, data: col.date });
           }
           continue;
+        }
+        if (parsed === "sede") {
+          sedesEncontradas += 1;
+          if (!ultimoCentroResolvido) {
+            const mensagem = `${item.nome} em ${formatDate(col.date)}: SEDE sem centro de custo anterior encontrado para o funcionário.`;
+            sedesSemCentroAnterior.push(mensagem);
+            erros.push(mensagem);
+            rowHasError.add(funcKey);
+            continue;
+          }
+          parsed = { ...ultimoCentroResolvido, raw: "SEDE" };
+          sedesResolvidas.push(
+            `${item.nome} em ${formatDate(col.date)}: SEDE resolvido pelo último centro de custo anterior: ${parsed.centroCusto}.`,
+          );
         }
         if ("error" in parsed) {
           rowHasError.add(funcKey);
@@ -541,6 +618,11 @@ export function ImportarPlanilhaLegadoDialog() {
           centroCusto: parsed.centroCusto,
           data: col.date,
           tipoMaoObra: tipoMaoObraFinal(item.funcao, parsed.tipoMaoObra),
+        };
+        ultimoCentroResolvido = {
+          centroCusto: parsed.centroCusto,
+          tipoMaoObra: parsed.tipoMaoObra,
+          raw: parsed.raw,
         };
         planilhaFuncionarioData.set(keyData, aloc);
         alocacoesLinha.push(aloc);
@@ -625,6 +707,9 @@ export function ImportarPlanilhaLegadoDialog() {
       alocacoesValidas: alocacoesNovas,
       celulasVazias,
       celulasDesligado,
+      sedesEncontradas,
+      sedesResolvidas,
+      sedesSemCentroAnterior,
       desligamentos: Array.from(desligamentos.values()),
       erros,
       ignorados,
@@ -830,6 +915,13 @@ export function ImportarPlanilhaLegadoDialog() {
                 <Resumo label="Alocações válidas" value={preview.alocacoesValidas.length} />
                 <Resumo label="Células vazias" value={preview.celulasVazias} />
                 <Resumo label="Células D/desligado" value={preview.celulasDesligado} />
+                <Resumo label="Sedes encontradas" value={preview.sedesEncontradas} />
+                <Resumo label="Sedes resolvidas" value={preview.sedesResolvidas.length} />
+                <Resumo
+                  label="Sedes sem centro anterior"
+                  value={preview.sedesSemCentroAnterior.length}
+                  tone={preview.sedesSemCentroAnterior.length > 0 ? "danger" : "default"}
+                />
                 <Resumo
                   label="Erros"
                   value={preview.erros.length}
@@ -849,6 +941,12 @@ export function ImportarPlanilhaLegadoDialog() {
                 items={preview.desligamentos.map(
                   (d) => d.funcionario + ": desligado a partir de " + formatDate(d.data),
                 )}
+              />
+              <PreviewList title="Sedes resolvidas" items={preview.sedesResolvidas} />
+              <PreviewList
+                title="Sedes sem centro de custo anterior"
+                items={preview.sedesSemCentroAnterior}
+                danger
               />
               <div className="rounded-md border p-3">
                 <div className="mb-2 text-sm font-semibold">Conferência de funcionários</div>
