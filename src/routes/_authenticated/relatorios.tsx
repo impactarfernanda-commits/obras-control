@@ -62,6 +62,7 @@ type FuncRow = {
   data_admissao: string | null;
   data_desligamento: string | null;
   deleted_at: string | null;
+  visivel_obras_control: boolean | null;
 };
 type TipoMaoObra = "montagem" | "civil" | "indireta" | null;
 type AlocRow = {
@@ -144,13 +145,9 @@ function RelatoriosPage() {
   const { data: funcionarios, isLoading: lf } = useQuery({
     queryKey: ["funcionarios-relatorios"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as unknown as "funcionarios")
-        .select("id,nome,categoria_mo,ativo,salario,data_admissao,data_desligamento,deleted_at")
-        .is("deleted_at", null)
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
-      return (data ?? []) as unknown as FuncRow[];
+      return (data ?? []) satisfies FuncRow[];
     },
   });
 
@@ -204,7 +201,8 @@ function RelatoriosPage() {
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
   // O filtro local protege todos os calculos e exportacoes mesmo se a origem deixar de filtrar.
   const funcionariosRelatorio = useMemo(
-    () => (funcionarios ?? []).filter((f) => !f.deleted_at),
+    () =>
+      (funcionarios ?? []).filter((f) => f.deleted_at == null && f.visivel_obras_control !== false),
     [funcionarios],
   );
 

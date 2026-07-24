@@ -65,7 +65,15 @@ const monthsBack = (n: number) => {
 };
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-type FuncRow = { id: string; nome: string; categoria_mo: string; ativo: boolean; salario: number | null };
+type FuncRow = {
+  id: string;
+  nome: string;
+  categoria_mo: string;
+  ativo: boolean;
+  salario: number | null;
+  deleted_at: string | null;
+  visivel_obras_control: boolean | null;
+};
 type AlocRow = { funcionario_id: string; obra_id: string; data: string };
 type ObraRow = { id: string; nome: string };
 type RegRow = {
@@ -101,12 +109,9 @@ function DashboardPage() {
   const { data: funcionarios, isLoading: lf } = useQuery({
     queryKey: ["funcionarios-dash"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("funcionarios_safe" as any)
-        .select("id,nome,categoria_mo,ativo,salario")
-        .order("nome");
+      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
-      return (data as unknown) as FuncRow[];
+      return data satisfies FuncRow[];
     },
   });
 
@@ -162,13 +167,23 @@ function DashboardPage() {
   // ---------- Maps & filters applied ----------
   const obrasMap = useMemo(() => new Map((obras ?? []).map((o) => [o.id, o.nome])), [obras]);
   const ciCatMap = useMemo(() => new Map((categoriasCI ?? []).map((c) => [c.id, c.nome])), [categoriasCI]);
-  const funcMap = useMemo(() => new Map((funcionarios ?? []).map((f) => [f.id, f])), [funcionarios]);
+  const funcionariosOperacionais = useMemo(
+    () =>
+      (funcionarios ?? []).filter(
+        (f) => f.deleted_at == null && f.visivel_obras_control !== false,
+      ),
+    [funcionarios],
+  );
+  const funcMap = useMemo(
+    () => new Map(funcionariosOperacionais.map((f) => [f.id, f])),
+    [funcionariosOperacionais],
+  );
 
   const obraAllowed = (id: string) => obraSel.size === 0 || obraSel.has(id);
   const funcTipo = (f: FuncRow) => tipoCategoria(f.categoria_mo, categoriasMO);
   const funcAllowed = (f: FuncRow) => tipoMO === "all" || funcTipo(f) === tipoMO;
 
-  const funcsAtivos = (funcionarios ?? []).filter((f) => f.ativo && funcAllowed(f));
+  const funcsAtivos = funcionariosOperacionais.filter((f) => f.ativo && funcAllowed(f));
   const allocFiltered = (alocacoes ?? []).filter((a) => {
     if (!obraAllowed(a.obra_id)) return false;
     const f = funcMap.get(a.funcionario_id); if (!f) return false;

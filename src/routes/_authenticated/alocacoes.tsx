@@ -58,6 +58,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import {
@@ -202,6 +203,7 @@ function AlocacoesPage() {
         nome: string;
         categoria_mo: string | null;
         ativo: boolean;
+        data_admissao: string | null;
         data_desligamento: string | null;
         deleted_at: string | null;
         visivel_obras_control: boolean | null;
@@ -212,16 +214,10 @@ function AlocacoesPage() {
   const funcionariosSelecionaveis = useMemo(
     () =>
       (funcionarios ?? [])
-        .filter(
-          (f) =>
-            f.ativo &&
-            !f.deleted_at &&
-            f.visivel_obras_control !== false &&
-            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
-        )
+        .filter((f) => funcionarioElegivelNoPeriodo(f, startISO, endISO))
         .slice()
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
-    [funcionarios],
+    [funcionarios, startISO, endISO],
   );
   const infoById = useMemo(() => {
     const m = new Map<
@@ -641,7 +637,11 @@ function AlocacoesPage() {
                               {funcionariosSelecionaveis.map((f) => (
                                 <SelectItem key={f.id} value={f.id}>
                                   {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
-                                  {!f.ativo ? " (inativo)" : ""}
+                                  {f.data_desligamento
+                                    ? ` — desligado em ${new Date(
+                                        f.data_desligamento + "T00:00:00",
+                                      ).toLocaleDateString("pt-BR")}`
+                                    : ""}
                                 </SelectItem>
                               ))}
                             </SelectContent>

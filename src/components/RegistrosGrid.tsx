@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 
 // ---------- helpers ----------
 function startOfWeek(d: Date): Date {
@@ -113,6 +114,7 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
         nome: string;
         categoria_mo: string | null;
         ativo: boolean;
+        data_admissao: string | null;
         data_desligamento: string | null;
         deleted_at: string | null;
         visivel_obras_control: boolean | null;
@@ -141,16 +143,10 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   const funcionariosAtivos = useMemo(
     () =>
       (funcionariosAll ?? [])
-        .filter(
-          (f) =>
-            f.ativo &&
-            !f.deleted_at &&
-            f.visivel_obras_control !== false &&
-            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
-        )
+        .filter((f) => funcionarioElegivelNoPeriodo(f, firstDay, lastDay))
         .slice()
         .sort((a, b) => a.nome.localeCompare(b.nome)),
-    [funcionariosAll],
+    [funcionariosAll, firstDay, lastDay],
   );
 
   // alocações da obra na semana

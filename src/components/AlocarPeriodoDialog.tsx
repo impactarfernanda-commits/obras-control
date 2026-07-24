@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarRange, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import {
   type FechamentoCompetencia,
 } from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
+import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,8 +108,10 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [verificando, setVerificando] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
-  const { data: funcionariosAtivos } = useQuery({
-    queryKey: ["funcionarios-min-all"],
+  const { data: funcionarios } = useQuery({
+    queryKey: ["funcionarios-alocar-periodo-base-segura"],
+    enabled: open,
+    refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
       if (error) throw error;
@@ -117,34 +120,38 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         nome: string;
         categoria_mo: string | null;
         ativo: boolean;
+        data_admissao: string | null;
         data_desligamento: string | null;
         deleted_at: string | null;
         visivel_obras_control: boolean | null;
       }>;
-      return arr
-        .filter(
-          (f) =>
-            f.ativo &&
-            !f.deleted_at &&
-            f.visivel_obras_control !== false &&
-            (!f.data_desligamento || f.data_desligamento > new Date().toISOString().slice(0, 10)),
-        )
-        .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome));
+      return arr;
     },
   });
+  const funcionariosElegiveis = useMemo(
+    () =>
+      (funcionarios ?? [])
+        .filter((f) => funcionarioElegivelNoPeriodo(f, dataInicio, dataFim))
+        .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
+    [funcionarios, dataInicio, dataFim],
+  );
+  useEffect(() => {
+    if (funcionarioId && !funcionariosElegiveis.some((f) => f.id === funcionarioId)) {
+      setFuncionarioId("");
+    }
+  }, [funcionarioId, funcionariosElegiveis]);
   const funcSelecionado = useMemo(
-    () => (funcionariosAtivos ?? []).find((f) => f.id === funcionarioId) ?? null,
-    [funcionariosAtivos, funcionarioId],
+    () => funcionariosElegiveis.find((f) => f.id === funcionarioId) ?? null,
+    [funcionariosElegiveis, funcionarioId],
   );
 
   const dias = useMemo(() => {
     const all = enumerarDiasUteis(dataInicio, dataFim);
-    const limite =
-      funcSelecionado && !funcSelecionado.ativo ? funcSelecionado.data_desligamento : null;
+    const limite = funcSelecionado?.data_desligamento ?? null;
     return limite ? all.filter((d) => d <= limite) : all;
   }, [dataInicio, dataFim, funcSelecionado]);
   const diasExcluidosPorDesligamento = useMemo(() => {
-    if (!funcSelecionado || funcSelecionado.ativo || !funcSelecionado.data_desligamento) return 0;
+    if (!funcSelecionado?.data_desligamento) return 0;
     return enumerarDiasUteis(dataInicio, dataFim).filter(
       (d) => d > funcSelecionado.data_desligamento!,
     ).length;
@@ -426,10 +433,14 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                   <SelectValue placeholder="Selecione" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(funcionariosAtivos ?? []).map((f) => (
+                  {funcionariosElegiveis.map((f) => (
                     <SelectItem key={f.id} value={f.id}>
                       {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
-                      {!f.ativo ? " (inativo)" : ""}
+                      {f.data_desligamento
+                        ? ` — desligado em ${new Date(
+                            f.data_desligamento + "T00:00:00",
+                          ).toLocaleDateString("pt-BR")}`
+                        : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -463,25 +474,23 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 <>
                   <strong>{dias.length}</strong> {dias.length === 1 ? "dia útil" : "dias úteis"} no
                   intervalo (fins de semana ignorados).
-                  {funcSelecionado &&
-                    !funcSelecionado.ativo &&
-                    funcSelecionado.data_desligamento && (
-                      <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                        Funcionário inativo — desligado em{" "}
-                        {new Date(
-                          funcSelecionado.data_desligamento + "T00:00:00",
-                        ).toLocaleDateString("pt-BR")}
-                        .
-                        {diasExcluidosPorDesligamento > 0 && (
-                          <>
-                            {" "}
-                            {diasExcluidosPorDesligamento}{" "}
-                            {diasExcluidosPorDesligamento === 1 ? "dia foi" : "dias foram"}{" "}
-                            excluídos do intervalo (posteriores ao desligamento).
-                          </>
-                        )}
-                      </div>
-                    )}
+                  {funcSelecionado?.data_desligamento && (
+                    <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      Desligamento em{" "}
+                      {new Date(funcSelecionado.data_desligamento + "T00:00:00").toLocaleDateString(
+                        "pt-BR",
+                      )}
+                      .
+                      {diasExcluidosPorDesligamento > 0 && (
+                        <>
+                          {" "}
+                          {diasExcluidosPorDesligamento}{" "}
+                          {diasExcluidosPorDesligamento === 1 ? "dia foi" : "dias foram"} excluídos
+                          do intervalo (posteriores ao desligamento).
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
