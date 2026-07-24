@@ -369,9 +369,9 @@ export function ImportarPlanilhaLegadoDialog() {
     const possuiAdmissaoValida = Array.from(funcionariosPorNome.values()).some((f) =>
       Boolean(f.admissao),
     );
-    const { data: funcsData, error: funcsError } = await supabase
-      .from("funcionarios_safe" as unknown as "funcionarios")
-      .select("id,nome,categoria_mo,ativo,deleted_at,data_admissao");
+    const { data: funcsData, error: funcsError } = await supabase.rpc(
+      "obras_control_funcionarios_safe",
+    );
     if (funcsError) throw funcsError;
     const funcionariosExistentes = (funcsData ?? []) as unknown as FuncionarioExistente[];
     const funcionariosPorNomeExistentes = new Map<string, FuncionarioExistente[]>();
@@ -678,9 +678,7 @@ export function ImportarPlanilhaLegadoDialog() {
       }
       const [{ data: funcsData, error: funcsError }, { data: obrasData, error: obrasError }] =
         await Promise.all([
-          supabase
-            .from("funcionarios_safe" as unknown as "funcionarios")
-            .select("id,nome,categoria_mo,ativo,deleted_at"),
+          supabase.rpc("obras_control_funcionarios_safe"),
           supabase.from("obras").select("id,nome"),
         ]);
       if (funcsError) throw funcsError;
@@ -702,7 +700,9 @@ export function ImportarPlanilhaLegadoDialog() {
         created_by: user.id,
       }));
       if (alocRows.find((r) => !r.funcionario_id || !r.obra_id))
-        throw new Error("Não foi possível resolver funcionário ou centro de custo para todas as alocações.");
+        throw new Error(
+          "Não foi possível resolver funcionário ou centro de custo para todas as alocações.",
+        );
       if (alocRows.length > 0) {
         const { error: alocErr } = await table("alocacoes").insert(alocRows as never);
         if (alocErr) {
