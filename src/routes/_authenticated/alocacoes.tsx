@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
+  Pencil,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -116,6 +117,10 @@ function calcHoras(entrada: string, saida: string, dateISO: string) {
   };
 }
 
+function formatarHorasBR(horas: number): string {
+  return horas.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
 const schema = z
   .object({
     funcionario_id: z.string().uuid("Selecione um funcionário"),
@@ -171,6 +176,10 @@ type AlocRow = {
   data: string;
   funcionario_id: string;
   obra_id: string;
+  created_by: string | null;
+  hora_entrada: string | null;
+  hora_saida: string | null;
+  intervalo_padrao_minutos: number;
   obras: { id: string; nome: string } | null;
 };
 
@@ -178,6 +187,10 @@ function AlocacoesPage() {
   const { user, isManagerOrAbove } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [alocacaoEmEdicao, setAlocacaoEmEdicao] = useState<AlocRow | null>(null);
+  const [editEntrada, setEditEntrada] = useState("07:00");
+  const [editSaida, setEditSaida] = useState("17:00");
+  const [editJustificativa, setEditJustificativa] = useState("");
   const [obraFiltro, setObraFiltro] = useState<string>("all");
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
@@ -258,7 +271,9 @@ function AlocacoesPage() {
       return buscarTodasPaginas<AlocRow>(async (from, to) => {
         let q = supabase
           .from("alocacoes")
-          .select("id, data, funcionario_id, obra_id, obras(id,nome)")
+          .select(
+            "id, data, funcionario_id, obra_id, created_by, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
+          )
           .gte("data", startISO)
           .lte("data", endISO)
           .order("data", { ascending: true })
@@ -282,11 +297,15 @@ function AlocacoesPage() {
         data: string;
         horas_normais: number;
         horas_extras: number;
+        created_by: string | null;
+        justificativa_extras: string | null;
       };
       return buscarTodasPaginas<RegistroResumo>(async (from, to) => {
         let q = supabase
           .from("registros_horas")
-          .select("funcionario_id, obra_id, data, horas_normais, horas_extras")
+          .select(
+            "funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, justificativa_extras",
+          )
           .gte("data", startISO)
           .lte("data", endISO)
           .order("data", { ascending: true })
@@ -340,11 +359,21 @@ function AlocacoesPage() {
   }, [funcionariosError, funcionariosHistoricosError, obrasError, alocacoesError, registrosError]);
 
   const horasMap = useMemo(() => {
-    const m = new Map<string, { hn: number; he: number }>();
+    const m = new Map<
+      string,
+      {
+        hn: number;
+        he: number;
+        createdBy: string | null;
+        justificativaExtras: string | null;
+      }
+    >();
     for (const r of registros ?? []) {
       m.set(`${r.funcionario_id}|${r.obra_id}|${r.data}`, {
         hn: Number(r.horas_normais),
         he: Number(r.horas_extras),
+        createdBy: r.created_by,
+        justificativaExtras: r.justificativa_extras,
       });
     }
     return m;
@@ -449,6 +478,9 @@ function AlocacoesPage() {
             obra_id: v.obra_id,
             data: v.data,
             created_by: user?.id ?? null,
+            hora_entrada: v.hora_entrada,
+            hora_saida: v.hora_saida,
+            intervalo_padrao_minutos: 60,
           },
         ],
         { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
@@ -528,6 +560,95 @@ function AlocacoesPage() {
       qc.invalidateQueries({ queryKey: ["registros"] });
     },
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao remover"),
+  });
+
+  const editPrevia = useMemo(
+    () =>
+      calcHoras(
+        editEntrada,
+        editSaida,
+        alocacaoEmEdicao?.data ?? new Date().toISOString().slice(0, 10),
+      ),
+    [alocacaoEmEdicao?.data, editEntrada, editSaida],
+  );
+  const editHorariosValidos =
+    timeRegex.test(editEntrada) &&
+    timeRegex.test(editSaida) &&
+    parseTimeToMinutes(editSaida) > parseTimeToMinutes(editEntrada) &&
+    editPrevia.total > 0;
+  const editJustificativaValida = editPrevia.he <= 2 || editJustificativa.trim().length > 0;
+  const editPodeSalvar = editHorariosValidos && editJustificativaValida;
+
+  function abrirEdicao(a: AlocRow) {
+    const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+    const entrada = a.hora_entrada?.slice(0, 5) || "07:00";
+    const totalAtual = (registro?.hn ?? 0) + (registro?.he ?? 0);
+    const saidaInferida = Math.min(parseTimeToMinutes(entrada) + (totalAtual + 1) * 60, 1439);
+    setEditEntrada(entrada);
+    setEditSaida(
+      a.hora_saida?.slice(0, 5) ||
+        `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
+    );
+    setEditJustificativa(registro?.justificativaExtras ?? "");
+    setAlocacaoEmEdicao(a);
+  }
+
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      const a = alocacaoEmEdicao;
+      if (!a) throw new Error("Alocação não selecionada");
+      if (!editPodeSalvar) throw new Error("Confira os horários informados");
+
+      await garantirCompetenciaAberta(supabase, a.data);
+
+      const { error: alocErr } = await supabase
+        .from("alocacoes")
+        .update({
+          hora_entrada: editEntrada,
+          hora_saida: editSaida,
+          intervalo_padrao_minutos: 60,
+        })
+        .eq("id", a.id);
+      if (alocErr) throw new Error(mensagemErroCompetenciaFechada(alocErr) ?? alocErr.message);
+
+      const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+      const registroPayload = {
+        horas_normais: editPrevia.hn,
+        horas_extras: editPrevia.he,
+        justificativa_extras: editPrevia.he > 0 ? editJustificativa.trim() || null : null,
+        ausencia: false,
+        updated_by: user?.id ?? null,
+      };
+      const resultadoRegistro = registro
+        ? await supabase.from("registros_horas").update(registroPayload).match({
+            funcionario_id: a.funcionario_id,
+            obra_id: a.obra_id,
+            data: a.data,
+          })
+        : await supabase.from("registros_horas").insert({
+            ...registroPayload,
+            funcionario_id: a.funcionario_id,
+            obra_id: a.obra_id,
+            data: a.data,
+            created_by: user?.id ?? null,
+          });
+      if (resultadoRegistro.error)
+        throw new Error(
+          mensagemErroCompetenciaFechada(resultadoRegistro.error) ??
+            resultadoRegistro.error.message,
+        );
+      return editPrevia.total;
+    },
+    onSuccess: (total) => {
+      toast.success(`Horas atualizadas para ${formatarHorasBR(total)}h`);
+      setAlocacaoEmEdicao(null);
+      qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
+      qc.invalidateQueries({ queryKey: ["registros-mes"] });
+      qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
+      qc.invalidateQueries({ queryKey: ["registros"] });
+      qc.invalidateQueries({ queryKey: ["registros-week"] });
+    },
+    onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao editar as horas da alocação"),
   });
 
   const undoLastMutation = useMutation({
@@ -779,6 +900,132 @@ function AlocacoesPage() {
         }
       />
 
+      <Dialog
+        open={alocacaoEmEdicao !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !editMutation.isPending) setAlocacaoEmEdicao(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar alocação</DialogTitle>
+            <DialogDescription>Ajuste a jornada somente do registro selecionado.</DialogDescription>
+          </DialogHeader>
+          {alocacaoEmEdicao && (
+            <div className="space-y-4">
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/30 p-3 text-sm">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Funcionário</dt>
+                  <dd className="font-medium">
+                    {infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.nome ?? "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Função</dt>
+                  <dd className="font-medium">
+                    {infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.categoria ??
+                      "Sem função"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Centro de custo</dt>
+                  <dd className="font-medium">{alocacaoEmEdicao.obras?.nome ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Data</dt>
+                  <dd className="font-medium">
+                    {new Date(alocacaoEmEdicao.data + "T00:00:00").toLocaleDateString("pt-BR")}
+                  </dd>
+                </div>
+              </dl>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <label htmlFor="edit-hora-entrada" className="text-sm font-medium">
+                    Hora de entrada
+                  </label>
+                  <Input
+                    id="edit-hora-entrada"
+                    type="time"
+                    value={editEntrada}
+                    onChange={(e) => setEditEntrada(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="edit-hora-saida" className="text-sm font-medium">
+                    Hora de saída
+                  </label>
+                  <Input
+                    id="edit-hora-saida"
+                    type="time"
+                    value={editSaida}
+                    onChange={(e) => setEditSaida(e.target.value)}
+                  />
+                </div>
+              </div>
+              {!editHorariosValidos && (
+                <p className="text-sm text-destructive">
+                  Informe horários válidos; a saída deve permitir mais de 1h de jornada bruta.
+                </p>
+              )}
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="text-xs text-muted-foreground">
+                  Intervalo padrão considerado: 1h
+                </div>
+                <div className="mt-1 font-semibold">
+                  Horas calculadas: {formatarHorasBR(editPrevia.total)}h
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {formatarHorasBR(editPrevia.hn)}h normais
+                  {editPrevia.he > 0 ? ` + ${formatarHorasBR(editPrevia.he)}h extras` : ""}
+                </div>
+              </div>
+              {editPrevia.total > 12 && (
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Confira a carga horária</AlertTitle>
+                  <AlertDescription>
+                    Carga horária superior a 12h. Confira antes de salvar.
+                  </AlertDescription>
+                </Alert>
+              )}
+              {editPrevia.he > 2 && (
+                <div className="space-y-2">
+                  <label htmlFor="edit-justificativa" className="text-sm font-medium">
+                    Justificativa para extras &gt; 2h
+                  </label>
+                  <Textarea
+                    id="edit-justificativa"
+                    rows={2}
+                    value={editJustificativa}
+                    onChange={(e) => setEditJustificativa(e.target.value)}
+                  />
+                  {!editJustificativaValida && (
+                    <p className="text-sm text-destructive">Informe a justificativa.</p>
+                  )}
+                </div>
+              )}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setAlocacaoEmEdicao(null)}
+                  disabled={editMutation.isPending}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => editMutation.mutate()}
+                  disabled={!editPodeSalvar || editMutation.isPending}
+                >
+                  {editMutation.isPending ? "Salvando..." : "Salvar alteração"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {alocacaoFeedback && (
         <Alert variant="destructive" className="mb-4">
           <AlertTriangle className="h-4 w-4" />
@@ -991,6 +1238,10 @@ function AlocacoesPage() {
                                             const h = horasMap.get(
                                               `${a.funcionario_id}|${a.obra_id}|${a.data}`,
                                             );
+                                            const podeEditar =
+                                              isManagerOrAbove ||
+                                              (a.created_by === user?.id &&
+                                                (!h || h.createdBy === user?.id));
                                             return (
                                               <li
                                                 key={a.id}
@@ -1038,21 +1289,33 @@ function AlocacoesPage() {
                                                     )}
                                                   </div>
                                                 </div>
-                                                <Button
-                                                  size="icon"
-                                                  variant="ghost"
-                                                  onClick={() =>
-                                                    deleteMutation.mutate({
-                                                      id: a.id,
-                                                      funcionario_id: a.funcionario_id,
-                                                      obra_id: a.obra_id,
-                                                      data: a.data,
-                                                    })
-                                                  }
-                                                  aria-label="Remover"
-                                                >
-                                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                                </Button>
+                                                <div className="flex flex-shrink-0 items-center gap-1">
+                                                  {podeEditar && (
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => abrirEdicao(a)}
+                                                    >
+                                                      <Pencil className="mr-1 h-3.5 w-3.5" />
+                                                      Editar
+                                                    </Button>
+                                                  )}
+                                                  <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    onClick={() =>
+                                                      deleteMutation.mutate({
+                                                        id: a.id,
+                                                        funcionario_id: a.funcionario_id,
+                                                        obra_id: a.obra_id,
+                                                        data: a.data,
+                                                      })
+                                                    }
+                                                    aria-label="Remover"
+                                                  >
+                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                  </Button>
+                                                </div>
                                               </li>
                                             );
                                           })}

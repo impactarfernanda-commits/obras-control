@@ -14,7 +14,10 @@ export type Database = {
           created_by: string | null;
           data: string;
           funcionario_id: string;
+          hora_entrada: string | null;
+          hora_saida: string | null;
           id: string;
+          intervalo_padrao_minutos: number;
           obra_id: string;
         };
         Insert: {
@@ -22,7 +25,10 @@ export type Database = {
           created_by?: string | null;
           data: string;
           funcionario_id: string;
+          hora_entrada?: string | null;
+          hora_saida?: string | null;
           id?: string;
+          intervalo_padrao_minutos?: number;
           obra_id: string;
         };
         Update: {
@@ -30,7 +36,10 @@ export type Database = {
           created_by?: string | null;
           data?: string;
           funcionario_id?: string;
+          hora_entrada?: string | null;
+          hora_saida?: string | null;
           id?: string;
+          intervalo_padrao_minutos?: number;
           obra_id?: string;
         };
         Relationships: [
