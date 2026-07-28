@@ -205,8 +205,10 @@ function formatAuditDate(value: string | null | undefined) {
 }
 
 function AlocacoesPage() {
-  const { user, role, isManagerOrAbove } = useAuth();
+  const { user, role } = useAuth();
   const canViewAllocationAudit = role === "coordenador" || role === "gerente" || role === "diretor";
+  const canEditAllocationHoursByRole =
+    role === "coordenador" || role === "gerente" || role === "diretor";
   const canImportarLegado = canImportarPlanilhaLegado(user?.email);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -1340,7 +1342,7 @@ function AlocacoesPage() {
                                               `${a.funcionario_id}|${a.obra_id}|${a.data}`,
                                             );
                                             const podeEditar =
-                                              isManagerOrAbove ||
+                                              canEditAllocationHoursByRole ||
                                               (a.created_by === user?.id &&
                                                 (!h || h.createdBy === user?.id));
                                             const creatorName = a.created_by
