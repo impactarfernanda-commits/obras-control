@@ -1,0 +1,75 @@
+warning: in the working copy of 'src/components/ImportarPlanilhaLegadoDialog.tsx', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/components/ImportarPlanilhaLegadoDialog.tsx b/src/components/ImportarPlanilhaLegadoDialog.tsx[m
+[1mindex b7a9548..d3b4fd3 100644[m
+[1m--- a/src/components/ImportarPlanilhaLegadoDialog.tsx[m
+[1m+++ b/src/components/ImportarPlanilhaLegadoDialog.tsx[m
+[36m@@ -26,6 +26,7 @@[m [mimport {[m
+   MENSAGEM_COMPETENCIA_FECHADA,[m
+ } from "@/lib/competencias";[m
+ import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";[m
+[32m+[m[32mimport { canImportarPlanilhaLegado } from "@/lib/importacao-legado";[m
+ import { buscarTodasPaginas } from "@/lib/paginacao";[m
+ [m
+ type TipoMaoObra = "montagem" | "civil" | "indireta";[m
+[36m@@ -119,7 +120,7 @@[m [mtype Preview = {[m
+ };[m
+ type ErrorLike = { message?: string };[m
+ const MENSAGEM_SEM_PERMISSAO_IMPORTAR =[m
+[31m-  "Você não tem permissão para importar planilhas. Esta ação é restrita a gerentes e diretores.";[m
+[32m+[m[32m  "Importação legado disponível apenas para a conta autorizada.";[m
+ const MONTHS: Record<string, number> = {[m
+   jan: 1,[m
+   fev: 2,[m
+[36m@@ -277,7 +278,9 @@[m [mfunction emptyPreview(error: string): Preview {[m
+ }[m
+ [m
+ export function ImportarPlanilhaLegadoDialog() {[m
+[31m-  const { user, isManagerOrAbove } = useAuth();[m
+[32m+[m[32m  const { user } = useAuth();[m
+[32m+[m[32m  // Restrição nominal de frontend; uma proteção futura deve confirmar a importação em RPC.[m
+[32m+[m[32m  const canImportar = canImportarPlanilhaLegado(user?.email);[m
+   const qc = useQueryClient();[m
+   const [open, setOpen] = useState(false);[m
+   const [fileName, setFileName] = useState("");[m
+[36m@@ -286,28 +289,28 @@[m [mexport function ImportarPlanilhaLegadoDialog() {[m
+   const [importing, setImporting] = useState(false);[m
+   const podeImportar = useMemo([m
+     () =>[m
+[31m-      isManagerOrAbove &&[m
+[32m+[m[32m      canImportar &&[m
+       preview &&[m
+       !preview.bloqueado &&[m
+       (preview.alocacoesValidas.length > 0 ||[m
+         preview.admissoesAlterar.length > 0 ||[m
+         preview.funcionariosCriar.length > 0 ||[m
+         (preview.modo === "admissoes" && preview.admissoesIguais.length > 0)),[m
+[31m-    [isManagerOrAbove, preview],[m
+[32m+[m[32m    [canImportar, preview],[m
+   );[m
+   function bloquearSemPermissao() {[m
+     setPreview(emptyPreview(MENSAGEM_SEM_PERMISSAO_IMPORTAR));[m
+     toast.error(MENSAGEM_SEM_PERMISSAO_IMPORTAR);[m
+   }[m
+   function handleOpenChange(nextOpen: boolean) {[m
+[31m-    if (nextOpen && !isManagerOrAbove) {[m
+[32m+[m[32m    if (nextOpen && !canImportar) {[m
+       bloquearSemPermissao();[m
+       return;[m
+     }[m
+     setOpen(nextOpen);[m
+   }[m
+   async function carregarArquivo(file: File) {[m
+[31m-    if (!isManagerOrAbove) {[m
+[32m+[m[32m    if (!canImportar) {[m
+       bloquearSemPermissao();[m
+       return;[m
+     }[m
+[36m@@ -729,7 +732,7 @@[m [mexport function ImportarPlanilhaLegadoDialog() {[m
+     };[m
+   }[m
+   async function confirmarImportacao() {[m
+[31m-    if (!isManagerOrAbove) {[m
+[32m+[m[32m    if (!canImportar) {[m
+       bloquearSemPermissao();[m
+       return;[m
+     }[m
