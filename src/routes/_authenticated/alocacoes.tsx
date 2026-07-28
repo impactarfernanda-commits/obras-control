@@ -1149,30 +1149,56 @@ function AlocacoesPage() {
                         <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">
                           Funcionários na competência
                         </div>
-                        <ul className="divide-y rounded-md border">
-                          {funcsArr.map((f) => (
-                            <li
-                              key={f.id}
-                              className="flex items-center justify-between gap-2 p-2 text-sm"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">{f.nome}</div>
-                                <div className="truncate text-xs text-muted-foreground">
+                        <div className="overflow-hidden rounded-md border bg-background">
+                          <div className="hidden grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid">
+                            <div>Funcionário</div>
+                            <div>Função</div>
+                            <div>Dias</div>
+                            <div>Horas normais</div>
+                            <div>Horas extras</div>
+                          </div>
+                          <ul className="divide-y">
+                            {funcsArr.map((f) => (
+                              <li
+                                key={f.id}
+                                className="grid grid-cols-3 items-center gap-x-3 gap-y-2 px-3 py-2.5 text-sm sm:grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem]"
+                              >
+                                <div className="col-span-3 min-w-0 sm:col-span-1">
+                                  <div className="truncate font-medium">{f.nome}</div>
+                                </div>
+                                <div className="col-span-3 min-w-0 truncate text-xs text-muted-foreground sm:col-span-1 sm:text-sm">
                                   {f.categoria}
                                 </div>
-                              </div>
-                              <div className="flex flex-shrink-0 gap-1.5">
-                                <Badge variant="secondary">{f.dias.size}d</Badge>
-                                <Badge variant="outline">{f.hn}h</Badge>
-                                {f.he > 0 && (
-                                  <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                                    +{f.he}h
+                                <div>
+                                  <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
+                                    Dias
+                                  </div>
+                                  <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400">
+                                    {f.dias.size}d
                                   </Badge>
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
+                                </div>
+                                <div>
+                                  <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
+                                    Horas normais
+                                  </div>
+                                  <Badge variant="secondary">{f.hn}h</Badge>
+                                </div>
+                                <div>
+                                  <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
+                                    Horas extras
+                                  </div>
+                                  {f.he > 0 ? (
+                                    <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
+                                      +{f.he}h
+                                    </Badge>
+                                  ) : (
+                                    <span className="pl-2 text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       </div>
 
                       <div>
