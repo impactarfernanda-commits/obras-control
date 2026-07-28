@@ -62,6 +62,7 @@ import { buscarTodasPaginas } from "@/lib/paginacao";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
+import { canImportarPlanilhaLegado } from "@/lib/importacao-legado";
 import {
   buscarConflitoAlocacao,
   criarErroConflitoAlocacao,
@@ -185,6 +186,7 @@ type AlocRow = {
 
 function AlocacoesPage() {
   const { user, isManagerOrAbove } = useAuth();
+  const canImportarLegado = canImportarPlanilhaLegado(user?.email);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [alocacaoEmEdicao, setAlocacaoEmEdicao] = useState<AlocRow | null>(null);
@@ -713,7 +715,7 @@ function AlocacoesPage() {
         description="Visualize as alocações agrupadas por centro de custo na competência 25-24."
         actions={
           <div className="flex gap-2">
-            {isManagerOrAbove && <ImportarPlanilhaLegadoDialog />}
+            {canImportarLegado && <ImportarPlanilhaLegadoDialog />}
             <Button
               variant="outline"
               onClick={() => undoLastMutation.mutate()}

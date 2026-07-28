@@ -26,6 +26,7 @@ import {
   MENSAGEM_COMPETENCIA_FECHADA,
 } from "@/lib/competencias";
 import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";
+import { canImportarPlanilhaLegado } from "@/lib/importacao-legado";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 
 type TipoMaoObra = "montagem" | "civil" | "indireta";
@@ -119,7 +120,7 @@ type Preview = {
 };
 type ErrorLike = { message?: string };
 const MENSAGEM_SEM_PERMISSAO_IMPORTAR =
-  "Você não tem permissão para importar planilhas. Esta ação é restrita a gerentes e diretores.";
+  "Importação legado disponível apenas para a conta autorizada.";
 const MONTHS: Record<string, number> = {
   jan: 1,
   fev: 2,
@@ -277,7 +278,9 @@ function emptyPreview(error: string): Preview {
 }
 
 export function ImportarPlanilhaLegadoDialog() {
-  const { user, isManagerOrAbove } = useAuth();
+  const { user } = useAuth();
+  // Restrição nominal de frontend; uma proteção futura deve confirmar a importação em RPC.
+  const canImportar = canImportarPlanilhaLegado(user?.email);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -286,28 +289,28 @@ export function ImportarPlanilhaLegadoDialog() {
   const [importing, setImporting] = useState(false);
   const podeImportar = useMemo(
     () =>
-      isManagerOrAbove &&
+      canImportar &&
       preview &&
       !preview.bloqueado &&
       (preview.alocacoesValidas.length > 0 ||
         preview.admissoesAlterar.length > 0 ||
         preview.funcionariosCriar.length > 0 ||
         (preview.modo === "admissoes" && preview.admissoesIguais.length > 0)),
-    [isManagerOrAbove, preview],
+    [canImportar, preview],
   );
   function bloquearSemPermissao() {
     setPreview(emptyPreview(MENSAGEM_SEM_PERMISSAO_IMPORTAR));
     toast.error(MENSAGEM_SEM_PERMISSAO_IMPORTAR);
   }
   function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen && !isManagerOrAbove) {
+    if (nextOpen && !canImportar) {
       bloquearSemPermissao();
       return;
     }
     setOpen(nextOpen);
   }
   async function carregarArquivo(file: File) {
-    if (!isManagerOrAbove) {
+    if (!canImportar) {
       bloquearSemPermissao();
       return;
     }
@@ -729,7 +732,7 @@ export function ImportarPlanilhaLegadoDialog() {
     };
   }
   async function confirmarImportacao() {
-    if (!isManagerOrAbove) {
+    if (!canImportar) {
       bloquearSemPermissao();
       return;
     }
