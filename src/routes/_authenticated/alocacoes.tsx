@@ -1410,15 +1410,16 @@ function AlocacoesPage() {
                                                   </div>
                                                   {canViewAllocationAudit && (
                                                     <div className="mt-1.5 border-t pt-1.5 text-[10px] leading-4 text-muted-foreground">
-                                                      <div>
-                                                        Lançado por: {creatorName}
-                                                        {createdAt && <> em {createdAt}</>}
-                                                      </div>
-                                                      {editorName && (
-                                                        <div>
+                                                      {editorName ? (
+                                                        <>
                                                           Última edição: {editorName}
                                                           {updatedAt && <> em {updatedAt}</>}
-                                                        </div>
+                                                        </>
+                                                      ) : (
+                                                        <>
+                                                          Lançado por: {creatorName}
+                                                          {createdAt && <> em {createdAt}</>}
+                                                        </>
                                                       )}
                                                     </div>
                                                   )}
