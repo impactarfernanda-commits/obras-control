@@ -178,14 +178,35 @@ type AlocRow = {
   funcionario_id: string;
   obra_id: string;
   created_by: string | null;
+  created_at: string | null;
   hora_entrada: string | null;
   hora_saida: string | null;
   intervalo_padrao_minutos: number;
   obras: { id: string; nome: string } | null;
 };
 
+type AllocationAuditUser = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
+function formatAuditDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function AlocacoesPage() {
-  const { user, isManagerOrAbove } = useAuth();
+  const { user, role, isManagerOrAbove } = useAuth();
+  const canViewAllocationAudit = role === "coordenador" || role === "gerente" || role === "diretor";
   const canImportarLegado = canImportarPlanilhaLegado(user?.email);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -274,7 +295,7 @@ function AlocacoesPage() {
         let q = supabase
           .from("alocacoes")
           .select(
-            "id, data, funcionario_id, obra_id, created_by, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
+            "id, data, funcionario_id, obra_id, created_by, created_at, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
           )
           .gte("data", startISO)
           .lte("data", endISO)
@@ -300,13 +321,16 @@ function AlocacoesPage() {
         horas_normais: number;
         horas_extras: number;
         created_by: string | null;
+        created_at: string;
+        updated_by: string | null;
+        updated_at: string;
         justificativa_extras: string | null;
       };
       return buscarTodasPaginas<RegistroResumo>(async (from, to) => {
         let q = supabase
           .from("registros_horas")
           .select(
-            "funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, justificativa_extras",
+            "funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, created_at, updated_by, updated_at, justificativa_extras",
           )
           .gte("data", startISO)
           .lte("data", endISO)
@@ -348,6 +372,41 @@ function AlocacoesPage() {
     return infos;
   }, [infoById, funcionariosHistoricos]);
 
+  const auditUserIds = useMemo(() => {
+    if (!canViewAllocationAudit) return [];
+    const ids = new Set<string>();
+    for (const allocation of alocacoes ?? []) {
+      if (allocation.created_by) ids.add(allocation.created_by);
+    }
+    for (const record of registros ?? []) {
+      if (record.updated_by) ids.add(record.updated_by);
+    }
+    return Array.from(ids).sort();
+  }, [alocacoes, canViewAllocationAudit, registros]);
+
+  const { data: auditUsers, error: auditUsersError } = useQuery({
+    queryKey: ["allocation-audit-users", auditUserIds],
+    enabled: canViewAllocationAudit && auditUserIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_allocation_audit_users", {
+        p_user_ids: auditUserIds,
+      });
+      if (error) throw error;
+      return data as AllocationAuditUser[];
+    },
+  });
+
+  const auditUserById = useMemo(() => {
+    const users = new Map<string, string>();
+    for (const profile of auditUsers ?? []) {
+      users.set(
+        profile.id,
+        profile.full_name?.trim() || profile.email?.trim() || "Usuário não identificado",
+      );
+    }
+    return users;
+  }, [auditUsers]);
+
   useEffect(() => {
     const errs = [
       funcionariosError && `Funcionários: ${(funcionariosError as ErrorLike).message}`,
@@ -356,9 +415,17 @@ function AlocacoesPage() {
       obrasError && `Centros de custo: ${(obrasError as ErrorLike).message}`,
       alocacoesError && `Alocações: ${(alocacoesError as ErrorLike).message}`,
       registrosError && `Registros: ${(registrosError as ErrorLike).message}`,
+      auditUsersError && `Auditoria de alocações: ${(auditUsersError as ErrorLike).message}`,
     ].filter(Boolean) as string[];
     for (const m of errs) toast.error(m);
-  }, [funcionariosError, funcionariosHistoricosError, obrasError, alocacoesError, registrosError]);
+  }, [
+    funcionariosError,
+    funcionariosHistoricosError,
+    obrasError,
+    alocacoesError,
+    registrosError,
+    auditUsersError,
+  ]);
 
   const horasMap = useMemo(() => {
     const m = new Map<
@@ -367,6 +434,9 @@ function AlocacoesPage() {
         hn: number;
         he: number;
         createdBy: string | null;
+        createdAt: string;
+        updatedBy: string | null;
+        updatedAt: string;
         justificativaExtras: string | null;
       }
     >();
@@ -375,6 +445,9 @@ function AlocacoesPage() {
         hn: Number(r.horas_normais),
         he: Number(r.horas_extras),
         createdBy: r.created_by,
+        createdAt: r.created_at,
+        updatedBy: r.updated_by,
+        updatedAt: r.updated_at,
         justificativaExtras: r.justificativa_extras,
       });
     }
@@ -1270,6 +1343,25 @@ function AlocacoesPage() {
                                               isManagerOrAbove ||
                                               (a.created_by === user?.id &&
                                                 (!h || h.createdBy === user?.id));
+                                            const creatorName = a.created_by
+                                              ? (auditUserById.get(a.created_by) ??
+                                                "Usuário não identificado")
+                                              : "Usuário não identificado";
+                                            const createdAt = formatAuditDate(a.created_at);
+                                            const hasRecordedEdit =
+                                              !!h?.updatedBy &&
+                                              !!h.updatedAt &&
+                                              !!h.createdAt &&
+                                              new Date(h.updatedAt).getTime() >
+                                                new Date(h.createdAt).getTime() + 1000;
+                                            const editorName =
+                                              hasRecordedEdit && h?.updatedBy
+                                                ? (auditUserById.get(h.updatedBy) ??
+                                                  "Usuário não identificado")
+                                                : null;
+                                            const updatedAt = hasRecordedEdit
+                                              ? formatAuditDate(h?.updatedAt)
+                                              : null;
                                             return (
                                               <li
                                                 key={a.id}
@@ -1316,6 +1408,20 @@ function AlocacoesPage() {
                                                       </Badge>
                                                     )}
                                                   </div>
+                                                  {canViewAllocationAudit && (
+                                                    <div className="mt-1.5 border-t pt-1.5 text-[10px] leading-4 text-muted-foreground">
+                                                      <div>
+                                                        Lançado por: {creatorName}
+                                                        {createdAt && <> em {createdAt}</>}
+                                                      </div>
+                                                      {editorName && (
+                                                        <div>
+                                                          Última edição: {editorName}
+                                                          {updatedAt && <> em {updatedAt}</>}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
                                                 </div>
                                                 <div className="flex flex-shrink-0 items-center gap-1">
                                                   {podeEditar && (

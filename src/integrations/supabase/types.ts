@@ -608,6 +608,14 @@ export type Database = {
         }[];
       };
       get_user_level: { Args: { _user_id: string }; Returns: number };
+      get_allocation_audit_users: {
+        Args: { p_user_ids: string[] };
+        Returns: {
+          email: string | null;
+          full_name: string | null;
+          id: string;
+        }[];
+      };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];
