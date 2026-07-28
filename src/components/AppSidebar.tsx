@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/sidebar";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { useAuth } from "@/hooks/use-auth";
+import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 import { Button } from "@/components/ui/button";
 
 type Item = {
@@ -33,6 +34,7 @@ type Item = {
   url: string;
   icon: React.ComponentType<{ className?: string }>;
   minLevel: 1 | 2 | 3;
+  requiresUserManagement?: boolean;
 };
 
 const items: Item[] = [
@@ -43,7 +45,13 @@ const items: Item[] = [
   { title: "Custos", url: "/custos", icon: DollarSign, minLevel: 1 },
   { title: "Relatórios", url: "/relatorios", icon: BarChart3, minLevel: 2 },
   { title: "Configurações", url: "/configuracoes", icon: Settings, minLevel: 3 },
-  { title: "Usuários", url: "/admin/usuarios", icon: ShieldCheck, minLevel: 3 },
+  {
+    title: "Usuários",
+    url: "/admin/usuarios",
+    icon: ShieldCheck,
+    minLevel: 1,
+    requiresUserManagement: true,
+  },
 ];
 
 const portalTanksUrl = import.meta.env.VITE_PORTAL_TANKS_URL || "https://portal-tks-br.vercel.app/";
@@ -52,10 +60,13 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { role, fullName, isDirector, isManagerOrAbove, signOut } = useAuth();
+  const { user, role, fullName, isDirector, isManagerOrAbove, signOut } = useAuth();
 
   const level = isDirector ? 3 : isManagerOrAbove ? 2 : 1;
-  const visible = items.filter((i) => level >= i.minLevel);
+  const canManageUsers = canGerenciarUsuarios(user?.email);
+  const visible = items.filter((i) =>
+    i.requiresUserManagement ? canManageUsers : level >= i.minLevel,
+  );
 
   return (
     <Sidebar collapsible="icon">

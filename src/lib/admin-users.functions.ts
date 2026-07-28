@@ -1,25 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 
 const ROLES: Role[] = ["assistente", "supervisor", "coordenador", "gerente", "diretor"];
 
-type AuthRpcClient = {
-  rpc: (
-    fn: "has_role",
-    args: { _user_id: string; _role: Role },
-  ) => PromiseLike<{ data: boolean | null; error: { message: string } | null }>;
-};
-
-async function assertDirector(ctx: { supabase: AuthRpcClient; userId: string }) {
-  const { data, error } = await ctx.supabase.rpc("has_role", {
-    _user_id: ctx.userId,
-    _role: "diretor",
-  });
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Forbidden: apenas diretores");
+function assertAuthorizedAccount(ctx: { claims: { email?: string | null } }) {
+  if (!canGerenciarUsuarios(ctx.claims.email ?? undefined)) {
+    throw new Error("Forbidden: gerenciamento disponível apenas para a conta autorizada");
+  }
 }
 
 export type AdminUser = {
@@ -34,7 +25,7 @@ export type AdminUser = {
 export const listAdminUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<AdminUser[]> => {
-    await assertDirector(context);
+    assertAuthorizedAccount(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.listUsers({
@@ -93,7 +84,7 @@ export const adminCreateUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => createSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await assertDirector(context);
+    assertAuthorizedAccount(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
@@ -130,7 +121,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => updateUserSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await assertDirector(context);
+    assertAuthorizedAccount(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     if (data.role !== "diretor") {
@@ -170,7 +161,7 @@ export const adminResetPassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => resetSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await assertDirector(context);
+    assertAuthorizedAccount(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
       password: data.password,
@@ -188,7 +179,7 @@ export const adminSetUserActive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => activeSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await assertDirector(context);
+    assertAuthorizedAccount(context);
 
     if (!data.active && data.user_id === context.userId) {
       throw new Error("Você não pode desativar a si mesmo.");

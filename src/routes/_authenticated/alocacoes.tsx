@@ -62,7 +62,7 @@ import { buscarTodasPaginas } from "@/lib/paginacao";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
-import { canImportarPlanilhaLegado } from "@/lib/importacao-legado";
+import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import {
   buscarConflitoAlocacao,
   criarErroConflitoAlocacao,

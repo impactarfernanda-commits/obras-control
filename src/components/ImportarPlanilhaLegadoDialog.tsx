@@ -26,7 +26,7 @@ import {
   MENSAGEM_COMPETENCIA_FECHADA,
 } from "@/lib/competencias";
 import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";
-import { canImportarPlanilhaLegado } from "@/lib/importacao-legado";
+import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 
 type TipoMaoObra = "montagem" | "civil" | "indireta";

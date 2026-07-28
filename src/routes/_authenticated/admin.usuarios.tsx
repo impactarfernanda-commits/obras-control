@@ -58,6 +58,7 @@ import {
   ROLES,
   type AdminUser,
 } from "@/lib/admin-users.functions";
+import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 
 export const Route = createFileRoute("/_authenticated/admin/usuarios")({
   component: AdminUsuariosPage,
@@ -87,7 +88,9 @@ const roleColor: Record<string, string> = {
 };
 
 function AdminUsuariosPage() {
-  const { isDirector, user } = useAuth();
+  const { user } = useAuth();
+  // Restrição nominal de frontend; a proteção futura deve migrar para RPC/RLS dedicada.
+  const canManageUsers = canGerenciarUsuarios(user?.email);
   const qc = useQueryClient();
 
   const list = useServerFn(listAdminUsers);
@@ -111,7 +114,7 @@ function AdminUsuariosPage() {
   const { data: users, isLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => list(),
-    enabled: !!isDirector,
+    enabled: canManageUsers,
   });
 
   const filtered = useMemo(() => {
@@ -134,7 +137,11 @@ function AdminUsuariosPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (d: CreateForm) => create({ data: d }),
+    mutationFn: (d: CreateForm) => {
+      if (!canManageUsers)
+        throw new Error("Gerenciamento de usuários disponível apenas para a conta autorizada.");
+      return create({ data: d });
+    },
     onSuccess: (_r, vars) => {
       toast.success("Usuário criado");
       setCreatedPassword(vars.password);
@@ -146,8 +153,11 @@ function AdminUsuariosPage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: (v: { user_id: string; full_name: string; role: CreateForm["role"] }) =>
-      updateUser({ data: v }),
+    mutationFn: (v: { user_id: string; full_name: string; role: CreateForm["role"] }) => {
+      if (!canManageUsers)
+        throw new Error("Gerenciamento de usuários disponível apenas para a conta autorizada.");
+      return updateUser({ data: v });
+    },
     onSuccess: () => {
       toast.success("Usuário atualizado");
       setRoleTarget(null);
@@ -157,7 +167,11 @@ function AdminUsuariosPage() {
   });
 
   const resetMut = useMutation({
-    mutationFn: (v: { user_id: string; password: string }) => resetPwd({ data: v }),
+    mutationFn: (v: { user_id: string; password: string }) => {
+      if (!canManageUsers)
+        throw new Error("Gerenciamento de usuários disponível apenas para a conta autorizada.");
+      return resetPwd({ data: v });
+    },
     onSuccess: (_r, v) => {
       toast.success("Senha redefinida");
       setResetShown({ email: resetTarget!.email, password: v.password });
@@ -168,7 +182,11 @@ function AdminUsuariosPage() {
   });
 
   const toggleMut = useMutation({
-    mutationFn: (v: { user_id: string; active: boolean }) => setActive({ data: v }),
+    mutationFn: (v: { user_id: string; active: boolean }) => {
+      if (!canManageUsers)
+        throw new Error("Gerenciamento de usuários disponível apenas para a conta autorizada.");
+      return setActive({ data: v });
+    },
     onSuccess: () => {
       toast.success("Status atualizado");
       setToggleTarget(null);
@@ -177,10 +195,13 @@ function AdminUsuariosPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!isDirector) {
+  if (!canManageUsers) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Administração" description="Acesso restrito a diretores." />
+        <PageHeader
+          title="Administração"
+          description="Acesso restrito. Esta área está disponível apenas para a conta autorizada."
+        />
       </div>
     );
   }
