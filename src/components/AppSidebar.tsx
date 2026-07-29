@@ -3,7 +3,6 @@ import {
   Users,
   Building2,
   CalendarRange,
-  DollarSign,
   BarChart3,
   LayoutDashboard,
   Settings,
@@ -42,7 +41,6 @@ const items: Item[] = [
   { title: "Funcionários", url: "/funcionarios", icon: Users, minLevel: 1 },
   { title: "Centros de custo", url: "/obras", icon: Building2, minLevel: 1 },
   { title: "Alocações", url: "/alocacoes", icon: CalendarRange, minLevel: 1 },
-  { title: "Custos", url: "/custos", icon: DollarSign, minLevel: 1 },
   { title: "Relatórios", url: "/relatorios", icon: BarChart3, minLevel: 2 },
   { title: "Configurações", url: "/configuracoes", icon: Settings, minLevel: 3 },
   {

@@ -19,6 +19,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -39,6 +46,11 @@ import {
   custoDoDia,
 } from "@/lib/custos";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import {
+  calcularCustoHorasExtras,
+  formatarHorasDecimais,
+  type CustoHoraExtra,
+} from "@/lib/horas-extras";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   beforeLoad: async () => {
@@ -70,6 +82,8 @@ type AlocRow = {
   obra_id: string;
   data: string;
   tipo_mao_obra: TipoMaoObra;
+  hora_entrada: string | null;
+  hora_saida: string | null;
 };
 type RegRow = {
   funcionario_id: string;
@@ -137,6 +151,7 @@ function RelatoriosPage() {
   >("all");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
+  const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida();
@@ -172,7 +187,7 @@ function RelatoriosPage() {
       buscarTodasPaginas<AlocRow>((from, to) =>
         supabase
           .from("alocacoes")
-          .select("funcionario_id,obra_id,data,tipo_mao_obra" as never)
+          .select("funcionario_id,obra_id,data,tipo_mao_obra,hora_entrada,hora_saida" as never)
           .gte("data", start)
           .lte("data", end)
           .order("data", { ascending: true })
@@ -219,6 +234,32 @@ function RelatoriosPage() {
 
   const diasUteis = useMemo(() => diasUteisNoIntervalo(startDate, endDate), [startDate, endDate]);
 
+  const horasExtrasPorFunc = useMemo(() => {
+    const registrosPorFunc = new Map<string, RegRow[]>();
+    for (const registro of registros ?? []) {
+      const lista = registrosPorFunc.get(registro.funcionario_id) ?? [];
+      lista.push(registro);
+      registrosPorFunc.set(registro.funcionario_id, lista);
+    }
+
+    const resultado = new Map<string, CustoHoraExtra>();
+    for (const funcionario of funcionariosRelatorio) {
+      const custo = custoPorFunc.get(funcionario.id);
+      if (!custo) continue;
+      resultado.set(
+        funcionario.id,
+        calcularCustoHorasExtras(
+          custo,
+          (registrosPorFunc.get(funcionario.id) ?? []).map((registro) => ({
+            data: registro.data,
+            horasExtras: registro.horas_extras,
+          })),
+        ),
+      );
+    }
+    return resultado;
+  }, [custoPorFunc, funcionariosRelatorio, registros]);
+
   const resultadoObras = useMemo(() => {
     const obraMap = new Map((obras ?? []).map((o) => [o.id, o.nome]));
     const funcMap = new Map(funcionariosRelatorio.map((f) => [f.id, f]));
@@ -232,6 +273,12 @@ function RelatoriosPage() {
     for (const r of registros ?? []) {
       regIndex.set(`${r.funcionario_id}|${r.obra_id}|${r.data}`, r);
     }
+    const alocIndex = new Map(
+      (alocacoes ?? []).map((alocacao) => [
+        `${alocacao.funcionario_id}|${alocacao.obra_id}|${alocacao.data}`,
+        alocacao,
+      ]),
+    );
 
     for (const a of alocacoes ?? []) {
       const func = funcMap.get(a.funcionario_id);
@@ -267,7 +314,7 @@ function RelatoriosPage() {
         diasUteis,
         dataISO: a.data,
         horasNormais: reg?.horas_normais ?? null,
-        horasExtras: reg?.horas_extras ?? null,
+        horasExtras: 0,
         ausencia: reg?.ausencia ?? null,
       });
       if (valor <= 0) continue;
@@ -285,6 +332,36 @@ function RelatoriosPage() {
       e.total += valor;
       e.funcs.add(a.funcionario_id);
       acc.set(a.obra_id, e);
+    }
+
+    // A HE é agregada a partir dos registros em lote e atribuída ao centro do próprio registro.
+    // Assim, o mesmo custo adicional usado por funcionário é conciliado por centro de custo.
+    for (const reg of registros ?? []) {
+      if (Number(reg.horas_extras || 0) <= 0) continue;
+      const func = funcMap.get(reg.funcionario_id);
+      const custo = custoPorFunc.get(reg.funcionario_id);
+      if (!func || !custo) continue;
+      const custoHoraExtra = calcularCustoHorasExtras(custo, [
+        { data: reg.data, horasExtras: reg.horas_extras },
+      ]).custoTotal;
+      if (custoHoraExtra <= 0) continue;
+
+      const alocacao = alocIndex.get(`${reg.funcionario_id}|${reg.obra_id}|${reg.data}`);
+      const tipo = alocacao
+        ? tipoPorAlocacao(alocacao, func, categorias)
+        : (tipoCategoria(func.categoria_mo, categorias) ?? "MOD");
+      const e = acc.get(reg.obra_id) ?? {
+        nome: obraMap.get(reg.obra_id) ?? "-",
+        mod: 0,
+        moi: 0,
+        total: 0,
+        funcs: new Set<string>(),
+      };
+      if (tipo === "MOI") e.moi += custoHoraExtra;
+      else e.mod += custoHoraExtra;
+      e.total += custoHoraExtra;
+      e.funcs.add(reg.funcionario_id);
+      acc.set(reg.obra_id, e);
     }
 
     const obrasComCusto = Array.from(acc.entries())
@@ -429,7 +506,63 @@ function RelatoriosPage() {
   }
   // Mostra ativos + inativos com lançamentos no período (custos pagos mesmo após desligamento).
   const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
-  const totalFolhaAtiva = ativos.reduce((s, f) => s + (custoPorFunc.get(f.id)?.total ?? 0), 0);
+  const totalFolhaAtiva = ativos.reduce(
+    (s, f) =>
+      s + (custoPorFunc.get(f.id)?.total ?? 0) + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0),
+    0,
+  );
+
+  const obraMap = useMemo(
+    () => new Map((obras ?? []).map((obra) => [obra.id, obra.nome])),
+    [obras],
+  );
+  const alocacaoMap = useMemo(
+    () =>
+      new Map(
+        (alocacoes ?? []).map((alocacao) => [
+          `${alocacao.funcionario_id}|${alocacao.obra_id}|${alocacao.data}`,
+          alocacao,
+        ]),
+      ),
+    [alocacoes],
+  );
+  const funcionarioDetalhe =
+    ativos.find((funcionario) => funcionario.id === funcionarioDetalheId) ?? null;
+  const custoDetalhe = funcionarioDetalhe ? custoPorFunc.get(funcionarioDetalhe.id) : null;
+  const horasExtrasDetalhe = funcionarioDetalhe
+    ? horasExtrasPorFunc.get(funcionarioDetalhe.id)
+    : null;
+  const registrosDetalhe = funcionarioDetalhe
+    ? (registros ?? [])
+        .filter((registro) => registro.funcionario_id === funcionarioDetalhe.id)
+        .map((registro) => {
+          const alocacao = alocacaoMap.get(
+            `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
+          );
+          return {
+            ...registro,
+            obraNome: obraMap.get(registro.obra_id) ?? "—",
+            horaEntrada: alocacao?.hora_entrada?.slice(0, 5) ?? "—",
+            horaSaida: alocacao?.hora_saida?.slice(0, 5) ?? "—",
+            custoHoraExtra: custoDetalhe
+              ? calcularCustoHorasExtras(custoDetalhe, [
+                  { data: registro.data, horasExtras: registro.horas_extras },
+                ]).custoTotal
+              : 0,
+          };
+        })
+        .sort((a, b) => a.data.localeCompare(b.data))
+    : [];
+  const resumoHorasDetalhe = registrosDetalhe.reduce(
+    (acc, registro) => ({
+      dias:
+        acc.dias +
+        (Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0) > 0 ? 1 : 0),
+      normais: acc.normais + Number(registro.horas_normais || 0),
+      total: acc.total + Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0),
+    }),
+    { dias: 0, normais: 0, total: 0 },
+  );
 
   const mesLabel = new Date(year, month, 1).toLocaleDateString("pt-BR", {
     month: "long",
@@ -513,8 +646,8 @@ function RelatoriosPage() {
                       <TableHead className="text-right">Prov. 13º</TableHead>
                       <TableHead className="text-right">Prov. aviso</TableHead>
                       <TableHead className="text-right">Prov. férias</TableHead>
-                      <TableHead className="text-right">Benefícios</TableHead>
-                      <TableHead className="text-right">Seguro vida</TableHead>
+                      <TableHead className="text-right">Benefícios e seguro</TableHead>
+                      <TableHead className="text-right">Horas extras</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -533,14 +666,18 @@ function RelatoriosPage() {
                         return (
                           <TableRow key={f.id}>
                             <TableCell className="font-medium">
-                              <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="flex cursor-pointer items-center gap-2 text-left hover:underline"
+                                onClick={() => setFuncionarioDetalheId(f.id)}
+                              >
                                 <span>{f.nome}</span>
                                 {!f.ativo && (
                                   <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                                     Inativo
                                   </span>
                                 )}
-                              </div>
+                              </button>
                             </TableCell>
                             <TableCell>{f.categoria_mo}</TableCell>
                             <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
@@ -551,10 +688,31 @@ function RelatoriosPage() {
                               {fmtBRL(c.provAvisoPrevio)}
                             </TableCell>
                             <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.beneficios)}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.seguroVida)}</TableCell>
+                            <TableCell className="text-right">
+                              <div>{fmtBRL(c.beneficios)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Seguro: {fmtBRL(c.seguroVida)}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
+                              {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
+                                (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
+                                0 && (
+                                <div className="whitespace-nowrap text-xs text-muted-foreground">
+                                  {formatarHorasDecimais(
+                                    horasExtrasPorFunc.get(f.id)?.horas50 ?? 0,
+                                  )}{" "}
+                                  a 50% ·{" "}
+                                  {formatarHorasDecimais(
+                                    horasExtrasPorFunc.get(f.id)?.horas100 ?? 0,
+                                  )}{" "}
+                                  a 100%
+                                </div>
+                              )}
+                            </TableCell>
                             <TableCell className="text-right font-semibold">
-                              {fmtBRL(c.total)}
+                              {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0))}
                             </TableCell>
                           </TableRow>
                         );
@@ -586,7 +744,7 @@ function RelatoriosPage() {
               </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Custo proporcional: (custo mensal ÷ {diasUteis} dias úteis) × dias alocados, com
-                horas extras (1,5×) somadas quando registradas.
+                horas extras a 50% ou 100% e seus encargos/provisões somados quando registradas.
               </p>
             </CardHeader>
             <CardContent className="p-0">
@@ -803,6 +961,111 @@ function RelatoriosPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={Boolean(funcionarioDetalhe)}
+        onOpenChange={(open) => {
+          if (!open) setFuncionarioDetalheId(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Detalhamento do funcionário</DialogTitle>
+            <DialogDescription>
+              {funcionarioDetalhe?.nome} · {funcionarioDetalhe?.categoria_mo} · {periodoLabel}
+            </DialogDescription>
+          </DialogHeader>
+
+          {funcionarioDetalhe && custoDetalhe && horasExtrasDetalhe && (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["Dias trabalhados", String(resumoHorasDetalhe.dias)],
+                  ["Horas normais", formatarHorasDecimais(resumoHorasDetalhe.normais)],
+                  ["HE 50%", formatarHorasDecimais(horasExtrasDetalhe.horas50)],
+                  ["HE 100%", formatarHorasDecimais(horasExtrasDetalhe.horas100)],
+                  ["Total de horas", formatarHorasDecimais(resumoHorasDetalhe.total)],
+                  ["Custo mensal base", fmtBRL(custoDetalhe.total)],
+                  ["Remuneração das HE", fmtBRL(horasExtrasDetalhe.remuneracao)],
+                  [
+                    "Encargos e provisões das HE",
+                    fmtBRL(
+                      horasExtrasDetalhe.encargos +
+                        horasExtrasDetalhe.provisao13 +
+                        horasExtrasDetalhe.provisaoAviso +
+                        horasExtrasDetalhe.provisaoFerias,
+                    ),
+                  ],
+                  ["Custo total das HE", fmtBRL(horasExtrasDetalhe.custoTotal)],
+                  [
+                    "Custo total na competência",
+                    fmtBRL(custoDetalhe.total + horasExtrasDetalhe.custoTotal),
+                  ],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border p-3">
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                    <div className="font-semibold">{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Data</TableHead>
+                      <TableHead>Centro de custo</TableHead>
+                      <TableHead>Entrada</TableHead>
+                      <TableHead>Saída</TableHead>
+                      <TableHead className="text-right">Horas normais</TableHead>
+                      <TableHead className="text-right">HE 50%</TableHead>
+                      <TableHead className="text-right">HE 100%</TableHead>
+                      <TableHead className="text-right">Custo da HE</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {registrosDetalhe.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                          Nenhum registro de horas encontrado nesta competência.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      registrosDetalhe.map((registro) => {
+                        const domingo = new Date(`${registro.data}T00:00:00`).getDay() === 0;
+                        return (
+                          <TableRow
+                            key={`${registro.funcionario_id}|${registro.obra_id}|${registro.data}`}
+                          >
+                            <TableCell>
+                              {new Date(`${registro.data}T00:00:00`).toLocaleDateString("pt-BR")}
+                            </TableCell>
+                            <TableCell>{registro.obraNome}</TableCell>
+                            <TableCell>{registro.horaEntrada}</TableCell>
+                            <TableCell>{registro.horaSaida}</TableCell>
+                            <TableCell className="text-right">
+                              {formatarHorasDecimais(registro.horas_normais)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatarHorasDecimais(domingo ? 0 : registro.horas_extras)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatarHorasDecimais(domingo ? registro.horas_extras : 0)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {fmtBRL(registro.custoHoraExtra)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
