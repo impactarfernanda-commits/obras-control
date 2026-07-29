@@ -464,13 +464,18 @@ function ObrasPage() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="w-[100px] text-right">Ações</TableHead>
+                  {isManagerOrAbove && (
+                    <TableHead className="w-[100px] text-right">Ações</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="py-10 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={isManagerOrAbove ? 3 : 2}
+                      className="py-10 text-center text-muted-foreground"
+                    >
                       Nenhum centro de custo encontrado.
                     </TableCell>
                   </TableRow>
@@ -508,8 +513,8 @@ function ObrasPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="text-right">
-                        {isManagerOrAbove ? (
+                      {isManagerOrAbove && (
+                        <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             <Button
                               size="icon"
@@ -542,8 +547,8 @@ function ObrasPage() {
                               </AlertDialogContent>
                             </AlertDialog>
                           </div>
-                        ) : null}
-                      </TableCell>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
