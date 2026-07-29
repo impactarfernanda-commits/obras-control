@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -44,6 +45,7 @@ import {
   useSegurosVida,
   diasUteisNoIntervalo,
   custoDoDia,
+  horasPadraoDoDia,
 } from "@/lib/custos";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import {
@@ -51,6 +53,7 @@ import {
   formatarHorasDecimais,
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
+import { consolidarCustosCentros } from "@/lib/relatorio-centro-custo";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   beforeLoad: async () => {
@@ -133,7 +136,7 @@ function diaUtilAnterior(dataISO: string) {
 }
 
 function tipoPorAlocacao(
-  alocacao: AlocRow,
+  alocacao: Pick<AlocRow, "tipo_mao_obra">,
   funcionario: FuncRow,
   categorias: Parameters<typeof tipoCategoria>[1],
 ) {
@@ -152,6 +155,7 @@ function RelatoriosPage() {
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
   const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
+  const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida();
@@ -261,124 +265,26 @@ function RelatoriosPage() {
   }, [custoPorFunc, funcionariosRelatorio, registros]);
 
   const resultadoObras = useMemo(() => {
-    const obraMap = new Map((obras ?? []).map((o) => [o.id, o.nome]));
-    const funcMap = new Map(funcionariosRelatorio.map((f) => [f.id, f]));
-    const acc = new Map<
-      string,
-      { nome: string; mod: number; moi: number; total: number; funcs: Set<string> }
-    >();
-    const avisos = new Set<string>();
-
-    const regIndex = new Map<string, RegRow>();
-    for (const r of registros ?? []) {
-      regIndex.set(`${r.funcionario_id}|${r.obra_id}|${r.data}`, r);
-    }
-    const alocIndex = new Map(
-      (alocacoes ?? []).map((alocacao) => [
-        `${alocacao.funcionario_id}|${alocacao.obra_id}|${alocacao.data}`,
-        alocacao,
-      ]),
-    );
-
-    for (const a of alocacoes ?? []) {
-      const func = funcMap.get(a.funcionario_id);
-      if (!func) {
-        avisos.add("Ha alocacoes sem funcionario correspondente carregado no relatorio.");
-        continue;
-      }
-      const custo = custoPorFunc.get(a.funcionario_id);
-      if (!custo || custo.total <= 0) {
-        avisos.add("Ha alocacoes com funcionario sem custo mensal calculado.");
-        continue;
-      }
-
-      const reg = regIndex.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
-      if (!reg) {
-        avisos.add(
-          "Ha alocacoes sem registro de horas correspondente; foi usada a jornada padrao do dia.",
-        );
-      } else if (
-        !reg.ausencia &&
-        Number(reg.horas_normais || 0) + Number(reg.horas_extras || 0) <= 0
-      ) {
-        avisos.add("Ha registros de horas sem horas normais/extras; essas linhas nao geram custo.");
-      }
-      if (!a.tipo_mao_obra) {
-        avisos.add(
-          "Ha alocacoes sem tipo de mao de obra; foi usado o tipo padrao da categoria ou MOD como fallback.",
-        );
-      }
-
-      const valor = custoDoDia({
-        custoMensal: custo.total,
-        diasUteis,
-        dataISO: a.data,
-        horasNormais: reg?.horas_normais ?? null,
-        horasExtras: 0,
-        ausencia: reg?.ausencia ?? null,
-      });
-      if (valor <= 0) continue;
-
-      const tipo = tipoPorAlocacao(a, func, categorias);
-      const e = acc.get(a.obra_id) ?? {
-        nome: obraMap.get(a.obra_id) ?? "-",
-        mod: 0,
-        moi: 0,
-        total: 0,
-        funcs: new Set<string>(),
-      };
-      if (tipo === "MOI") e.moi += valor;
-      else e.mod += valor;
-      e.total += valor;
-      e.funcs.add(a.funcionario_id);
-      acc.set(a.obra_id, e);
-    }
-
-    // A HE é agregada a partir dos registros em lote e atribuída ao centro do próprio registro.
-    // Assim, o mesmo custo adicional usado por funcionário é conciliado por centro de custo.
-    for (const reg of registros ?? []) {
-      if (Number(reg.horas_extras || 0) <= 0) continue;
-      const func = funcMap.get(reg.funcionario_id);
-      const custo = custoPorFunc.get(reg.funcionario_id);
-      if (!func || !custo) continue;
-      const custoHoraExtra = calcularCustoHorasExtras(custo, [
-        { data: reg.data, horasExtras: reg.horas_extras },
-      ]).custoTotal;
-      if (custoHoraExtra <= 0) continue;
-
-      const alocacao = alocIndex.get(`${reg.funcionario_id}|${reg.obra_id}|${reg.data}`);
-      const tipo = alocacao
-        ? tipoPorAlocacao(alocacao, func, categorias)
-        : (tipoCategoria(func.categoria_mo, categorias) ?? "MOD");
-      const e = acc.get(reg.obra_id) ?? {
-        nome: obraMap.get(reg.obra_id) ?? "-",
-        mod: 0,
-        moi: 0,
-        total: 0,
-        funcs: new Set<string>(),
-      };
-      if (tipo === "MOI") e.moi += custoHoraExtra;
-      else e.mod += custoHoraExtra;
-      e.total += custoHoraExtra;
-      e.funcs.add(reg.funcionario_id);
-      acc.set(reg.obra_id, e);
-    }
-
-    const obrasComCusto = Array.from(acc.entries())
-      .map(([id, v]) => ({
-        id,
-        nome: v.nome,
-        mod: v.mod,
-        moi: v.moi,
-        total: v.total,
-        funcs: v.funcs.size,
-      }))
-      .sort((a, b) => b.total - a.total);
-    return { obrasComCusto, avisos: Array.from(avisos) };
+    const resultado = consolidarCustosCentros({
+      alocacoes: alocacoes ?? [],
+      registros: registros ?? [],
+      funcionarios: funcionariosRelatorio,
+      custos: custoPorFunc,
+      obras: new Map((obras ?? []).map((obra) => [obra.id, obra.nome])),
+      diasUteis,
+      resolverTipo: (alocacao, funcionario) =>
+        alocacao
+          ? tipoPorAlocacao(alocacao, funcionario as FuncRow, categorias)
+          : (tipoCategoria(funcionario.categoria_mo, categorias) ?? "MOD"),
+      calcularCustoBase: (input) => custoDoDia({ ...input, horasExtras: 0 }),
+      horasNormaisPadrao: horasPadraoDoDia,
+    });
+    return { obrasComCusto: resultado.centros, avisos: resultado.avisos };
   }, [alocacoes, registros, custoPorFunc, funcionariosRelatorio, categorias, obras, diasUteis]);
 
   const obrasComCusto = resultadoObras.obrasComCusto;
   const avisosObras = resultadoObras.avisos;
+  const centroDetalhe = obrasComCusto.find((obra) => obra.id === centroDetalheId) ?? null;
 
   const totaisObra = useMemo(
     () =>
@@ -787,7 +693,15 @@ function RelatoriosPage() {
                       ) : (
                         obrasComCusto.map((o) => (
                           <TableRow key={o.id}>
-                            <TableCell className="font-medium">{o.nome}</TableCell>
+                            <TableCell className="font-medium">
+                              <button
+                                type="button"
+                                className="cursor-pointer text-left hover:underline"
+                                onClick={() => setCentroDetalheId(o.id)}
+                              >
+                                {o.nome}
+                              </button>
+                            </TableCell>
                             <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
                             <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
                             <TableCell className="text-right font-semibold">
@@ -961,6 +875,145 @@ function RelatoriosPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={Boolean(centroDetalhe)}
+        onOpenChange={(open) => {
+          if (!open) setCentroDetalheId(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>Detalhamento do centro de custo</DialogTitle>
+            <DialogDescription>
+              <span className="block font-medium text-foreground">{centroDetalhe?.nome}</span>
+              <span className="capitalize">
+                {mesLabel} — {periodoLabel}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          {centroDetalhe && (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                {[
+                  ["Custo total", fmtBRL(centroDetalhe.total)],
+                  ["MOD", fmtBRL(centroDetalhe.mod)],
+                  ["MOI", fmtBRL(centroDetalhe.moi)],
+                  ["Funcionários", String(centroDetalhe.funcs)],
+                  ["Dias alocados — soma da equipe", String(centroDetalhe.dias)],
+                  ["Custo das horas extras", fmtBRL(centroDetalhe.custoHE)],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border p-3">
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                    <div className="font-semibold">{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Funcionário</TableHead>
+                      <TableHead>Função</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead className="text-right">Dias</TableHead>
+                      <TableHead className="text-right">Horas normais</TableHead>
+                      <TableHead className="text-right">HE 50%</TableHead>
+                      <TableHead className="text-right">HE 100%</TableHead>
+                      <TableHead className="text-right">Custo base</TableHead>
+                      <TableHead className="text-right">Custo HE</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {centroDetalhe.linhas.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                          Nenhum funcionário ou custo encontrado para este centro de custo na
+                          competência selecionada.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      centroDetalhe.linhas.map((linha) => (
+                        <TableRow key={`${linha.funcionarioId}|${linha.tipo}`}>
+                          <TableCell className="font-medium">
+                            <button
+                              type="button"
+                              className="cursor-pointer text-left hover:underline"
+                              onClick={() => setFuncionarioDetalheId(linha.funcionarioId)}
+                            >
+                              {linha.funcionarioNome}
+                            </button>
+                          </TableCell>
+                          <TableCell>{linha.funcao}</TableCell>
+                          <TableCell>
+                            <span
+                              title={
+                                linha.tipoInferido
+                                  ? "Tipo definido pela categoria do funcionário porque a alocação não possuía classificação explícita."
+                                  : undefined
+                              }
+                            >
+                              {linha.tipo}
+                              {linha.tipoInferido ? "*" : ""}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">{linha.dias}</TableCell>
+                          <TableCell className="text-right">
+                            {formatarHorasDecimais(linha.horasNormais)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatarHorasDecimais(linha.horas50)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatarHorasDecimais(linha.horas100)}
+                          </TableCell>
+                          <TableCell className="text-right">{fmtBRL(linha.custoBase)}</TableCell>
+                          <TableCell className="text-right">{fmtBRL(linha.custoHE)}</TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {fmtBRL(linha.total)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                  <TableFooter>
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-right font-medium">
+                        Total
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {fmtBRL(
+                          centroDetalhe.linhas.reduce((total, linha) => total + linha.custoBase, 0),
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">{fmtBRL(centroDetalhe.custoHE)}</TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {fmtBRL(centroDetalhe.total)}
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
+                </Table>
+              </div>
+
+              {centroDetalhe.linhas.some((linha) => linha.tipoInferido) && (
+                <p className="text-xs text-muted-foreground">
+                  * Tipo definido pela categoria do funcionário porque a alocação não possuía
+                  classificação explícita.
+                </p>
+              )}
+
+              <div className="flex justify-end">
+                <DialogClose asChild>
+                  <Button variant="outline">Fechar</Button>
+                </DialogClose>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(funcionarioDetalhe)}
