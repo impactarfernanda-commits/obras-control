@@ -28,9 +28,19 @@ import {
 import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";
 import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import {
+  conciliarCentroCusto,
+  criarIndiceCentrosExistentes,
+  interpretarCentroCusto,
+  type TipoMaoObraLegado,
+} from "@/lib/importacao-legado-centros";
+import {
+  conciliarCelulasComAlocacoesExistentes,
+  criarSourceCellKey,
+} from "@/lib/importacao-legado-auditoria";
 
-type TipoMaoObra = "montagem" | "civil" | "indireta";
-type LegacyCell = { centroCusto: string; tipoMaoObra: TipoMaoObra; raw: string };
+type TipoMaoObra = TipoMaoObraLegado;
+type LegacyCell = { codigoBase: string; tipoMaoObra: TipoMaoObra; raw: string };
 type DateColumn = { index: number; date: string; label: string };
 type FuncionarioExistente = {
   id: string;
@@ -46,7 +56,7 @@ type AdmissaoAlterar = {
   data: string;
   tipo: "preencher" | "atualizar";
 };
-type ObraExistente = { id: string; nome: string };
+type ObraExistente = { id: string; nome: string; codigo?: string | number | null };
 type CategoriaSalarioConfig = {
   categoria: string;
   salario: number;
@@ -54,6 +64,7 @@ type CategoriaSalarioConfig = {
   seguro_vida: number | null;
 };
 type AlocacaoExistente = {
+  id: string;
   funcionario_id: string;
   obra_id: string;
   data: string;
@@ -75,12 +86,15 @@ type FuncionarioNovo = {
   data_admissao: string | null;
   rowNumber: number;
 };
-type ObraNova = { centroCusto: string; nome: string };
 type AlocacaoImportacao = {
+  sourceCellKey: string;
   funcionarioKey: string;
   funcionarioNome: string;
-  obraKey: string;
+  funcionarioId?: string;
+  obraId: string;
   centroCusto: string;
+  codigoBase: string;
+  valorOriginal: string;
   data: string;
   tipoMaoObra: TipoMaoObra;
 };
@@ -94,7 +108,15 @@ type Preview = {
   funcionariosSemSalario: string[];
   duplicadosIgnorados: string[];
   obrasEncontradas: string[];
-  obrasCriar: ObraNova[];
+  obrasNaoEncontradas: string[];
+  celulasAlocacaoIdentificadas: number;
+  alocacoesJaExistentes: string[];
+  matchesAdicionaisBanco: number;
+  duplicidadesHistoricasBanco: string[];
+  duplicidadesInternasPlanilha: string[];
+  totalCelulasPeriodo: number;
+  totalCelulasConciliadas: number;
+  outrosBloqueios: number;
   alocacoesValidas: AlocacaoImportacao[];
   celulasVazias: number;
   celulasDesligado: number;
@@ -213,13 +235,12 @@ function parseCell(
   if (!raw) return "empty";
   if (normalizado === "d" || normalizado === "desligado") return "desligado";
   if (normalizado === "sede") return "sede";
-  const m = raw.match(/^(\d+)(?:-([MC]))?$/);
-  if (!m) return { error: "Formato desconhecido: " + raw };
-  const suffix = m[2];
+  const centro = interpretarCentroCusto(value);
+  if (!centro) return { error: "Formato desconhecido: " + raw };
   return {
-    centroCusto: m[1],
-    tipoMaoObra: suffix === "M" ? "montagem" : suffix === "C" ? "civil" : "indireta",
-    raw,
+    codigoBase: centro.codigoBase,
+    tipoMaoObra: centro.tipoMaoObra,
+    raw: centro.valorOriginal,
   };
 }
 function horasNormais(dateISO: string) {
@@ -251,7 +272,15 @@ function emptyPreview(error: string): Preview {
     funcionariosSemSalario: [],
     duplicadosIgnorados: [],
     obrasEncontradas: [],
-    obrasCriar: [],
+    obrasNaoEncontradas: [],
+    celulasAlocacaoIdentificadas: 0,
+    alocacoesJaExistentes: [],
+    matchesAdicionaisBanco: 0,
+    duplicidadesHistoricasBanco: [],
+    duplicidadesInternasPlanilha: [],
+    totalCelulasPeriodo: 0,
+    totalCelulasConciliadas: 0,
+    outrosBloqueios: 0,
     alocacoesValidas: [],
     celulasVazias: 0,
     celulasDesligado: 0,
@@ -342,6 +371,10 @@ export function ImportarPlanilhaLegadoDialog() {
     const desligamentos = new Map<string, { funcionario: string; data: string }>();
     let celulasVazias = 0;
     let celulasDesligado = 0;
+    let celulasInvalidas = 0;
+    let celulasCentroNaoEncontrado = 0;
+    let outrosBloqueios = 0;
+    let totalCelulasPeriodo = 0;
     let sedesEncontradas = 0;
     const sedesResolvidas: string[] = [];
     const sedesSemCentroAnterior: string[] = [];
@@ -467,11 +500,10 @@ export function ImportarPlanilhaLegadoDialog() {
           });
       }
     }
-    const { data: obrasData, error: obrasError } = await supabase.from("obras").select("id,nome");
+    const { data: obrasData, error: obrasError } = await supabase.from("obras").select("*");
     if (obrasError) throw obrasError;
     const obrasExistentes = (obrasData ?? []) as ObraExistente[];
-    const obraMap = new Map<string, ObraExistente>();
-    for (const obra of obrasExistentes) obraMap.set(normalizeName(obra.nome), obra);
+    const centrosPorCodigo = criarIndiceCentrosExistentes(obrasExistentes);
     const obraPorId = new Map(obrasExistentes.map((obra) => [obra.id, obra]));
     const { data: salData, error: salError } = await supabase
       .from("categoria_salarios")
@@ -514,6 +546,8 @@ export function ImportarPlanilhaLegadoDialog() {
     }
     const alocacoes: AlocacaoImportacao[] = [];
     const obrasEncontradas = new Set<string>();
+    const obrasNaoEncontradas = new Map<string, string>();
+    const duplicidadesInternasPlanilha: string[] = [];
     const planilhaFuncionarioData = new Map<string, AlocacaoImportacao>();
     const ultimaAlocacaoPorFuncionario = new Map<string, AlocacaoAnterior>();
     const idsExistentes = Array.from(
@@ -549,13 +583,17 @@ export function ImportarPlanilhaLegadoDialog() {
       const obraAnterior = alocacaoAnterior ? obraPorId.get(alocacaoAnterior.obra_id) : undefined;
       let ultimoCentroResolvido: LegacyCell | null = obraAnterior
         ? {
-            centroCusto: obraAnterior.nome,
+            codigoBase:
+              Array.from(centrosPorCodigo.entries()).find(
+                ([, obra]) => obra.id === obraAnterior.id,
+              )?.[0] ?? obraAnterior.nome,
             tipoMaoObra: alocacaoAnterior?.tipo_mao_obra ?? "indireta",
             raw: obraAnterior.nome,
           }
         : null;
       const alocacoesLinha: AlocacaoImportacao[] = [];
       for (const col of dateColumns) {
+        totalCelulasPeriodo += 1;
         let parsed = parseCell(item.row[col.index]);
         if (parsed === "empty") {
           celulasVazias += 1;
@@ -580,15 +618,17 @@ export function ImportarPlanilhaLegadoDialog() {
           }
           parsed = { ...ultimoCentroResolvido, raw: "SEDE" };
           sedesResolvidas.push(
-            `${item.nome} em ${formatDate(col.date)}: SEDE resolvido pelo último centro de custo anterior: ${parsed.centroCusto}.`,
+            `${item.nome} em ${formatDate(col.date)}: SEDE resolvido pelo último centro de custo anterior: ${parsed.codigoBase}.`,
           );
         }
         if ("error" in parsed) {
+          celulasInvalidas += 1;
           rowHasError.add(funcKey);
           erros.push(item.nome + " em " + formatDate(col.date) + ": " + parsed.error);
           continue;
         }
         if (desligadoDesde) {
+          outrosBloqueios += 1;
           rowHasError.add(funcKey);
           inconsistencias.push(
             item.nome +
@@ -602,9 +642,31 @@ export function ImportarPlanilhaLegadoDialog() {
           );
           continue;
         }
-        obrasEncontradas.add(parsed.centroCusto);
+        const obra = conciliarCentroCusto(
+          {
+            codigoBase: parsed.codigoBase,
+            tipoMaoObra: parsed.tipoMaoObra,
+            valorOriginal: parsed.raw,
+          },
+          centrosPorCodigo,
+        );
+        if (!obra) {
+          celulasCentroNaoEncontrado += 1;
+          rowHasError.add(funcKey);
+          const chave = parsed.raw + "|" + parsed.codigoBase;
+          const mensagem = `Centro de custo não encontrado: ${parsed.raw}. Código-base procurado: ${parsed.codigoBase}.`;
+          if (!obrasNaoEncontradas.has(chave)) {
+            obrasNaoEncontradas.set(chave, mensagem);
+            erros.push(mensagem);
+          }
+          continue;
+        }
+        obrasEncontradas.add(parsed.codigoBase);
         const keyData = funcKey + "|" + col.date;
         if (planilhaFuncionarioData.has(keyData)) {
+          duplicidadesInternasPlanilha.push(
+            `${criarSourceCellKey(item.rowNumber - 1, col.index, col.date)} duplica uma alocação anterior de ${item.nome} em ${formatDate(col.date)}.`,
+          );
           rowHasError.add(funcKey);
           erros.push(
             item.nome +
@@ -615,24 +677,29 @@ export function ImportarPlanilhaLegadoDialog() {
           continue;
         }
         const aloc = {
+          sourceCellKey: criarSourceCellKey(item.rowNumber - 1, col.index, col.date),
           funcionarioKey: funcKey,
           funcionarioNome: item.nome,
-          obraKey: normalizeName(parsed.centroCusto),
-          centroCusto: parsed.centroCusto,
+          funcionarioId: funcionarioExistente?.id,
+          obraId: obra.id,
+          centroCusto: parsed.codigoBase,
+          codigoBase: parsed.codigoBase,
+          valorOriginal: parsed.raw,
           data: col.date,
           tipoMaoObra: tipoMaoObraFinal(item.funcao, parsed.tipoMaoObra),
         };
         ultimoCentroResolvido = {
-          centroCusto: parsed.centroCusto,
+          codigoBase: parsed.codigoBase,
           tipoMaoObra: parsed.tipoMaoObra,
           raw: parsed.raw,
         };
         planilhaFuncionarioData.set(keyData, aloc);
         alocacoesLinha.push(aloc);
       }
-      if (rowHasError.has(funcKey))
+      if (rowHasError.has(funcKey)) {
+        outrosBloqueios += alocacoesLinha.length;
         ignorados.push(item.nome + ": linha ignorada por erro/inconsistência.");
-      else alocacoes.push(...alocacoesLinha);
+      } else alocacoes.push(...alocacoesLinha);
     }
     const funcionariosCriar: FuncionarioNovo[] = [];
     for (const [key, item] of funcionariosPorNome)
@@ -652,14 +719,11 @@ export function ImportarPlanilhaLegadoDialog() {
         "Nenhuma coluna de data válida foi encontrada a partir da coluna E, nenhuma admissão válida e nenhum funcionário novo válido foi encontrado.",
       );
     }
-    const obrasCriar = Array.from(obrasEncontradas)
-      .filter((cc) => !obraMap.has(normalizeName(cc)))
-      .map((centroCusto) => ({ centroCusto, nome: centroCusto }));
     const datas = Array.from(new Set(alocacoes.map((a) => a.data))).sort();
     const competenciasFechadas = await buscarCompetenciasFechadasPorDatas(supabase, datas);
     for (const f of competenciasFechadas)
       erros.push(MENSAGEM_COMPETENCIA_FECHADA + " Competência " + f.competencia + ".");
-    const alocacoesJaExistentes = new Set<string>();
+    let registrosBanco: AlocacaoExistente[] = [];
     if (alocacoes.length > 0) {
       const datasAloc = Array.from(new Set(alocacoes.map((a) => a.data)));
       const existingIds = Array.from(
@@ -670,32 +734,53 @@ export function ImportarPlanilhaLegadoDialog() {
         ),
       );
       if (existingIds.length > 0) {
-        const { data: alocExistentes, error } = await supabase
-          .from("alocacoes")
-          .select("funcionario_id,obra_id,data,obras(nome)")
-          .in("funcionario_id", existingIds)
-          .in("data", datasAloc);
-        if (error) throw error;
-        const byId = new Map(funcionariosExistentes.map((f) => [f.id, f.nome]));
-        for (const a of (alocExistentes ?? []) as unknown as AlocacaoExistente[]) {
-          alocacoesJaExistentes.add(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
-          ignorados.push(
-            (byId.get(a.funcionario_id) ?? "Funcionário") +
-              " já possui alocação em " +
-              formatDate(a.data) +
-              (a.obras?.nome ? " no centro de custo " + a.obras.nome : "") +
-              "; alocação mantida sem alteração.",
-          );
-        }
+        registrosBanco = await buscarTodasPaginas<AlocacaoExistente>((from, to) =>
+          supabase
+            .from("alocacoes")
+            .select("id,funcionario_id,obra_id,data,obras(nome)")
+            .in("funcionario_id", existingIds)
+            .in("data", datasAloc)
+            .range(from, to),
+        );
       }
     }
-    const alocacoesNovas = alocacoes.filter((a) => {
-      const existente = funcMap.get(a.funcionarioKey);
-      const obra = obraMap.get(a.obraKey);
-      return (
-        !existente || !obra || !alocacoesJaExistentes.has(`${existente.id}|${obra.id}|${a.data}`)
-      );
+    const conciliacao = conciliarCelulasComAlocacoesExistentes(alocacoes, registrosBanco);
+    const nomesObras = new Map(obrasExistentes.map((obra) => [obra.id, obra.nome]));
+    const alocacoesJaExistentes = conciliacao.existentes.map((item) => {
+      const mensagem =
+        `${item.funcionarioNome} já possui alocação em ${formatDate(item.data)}` +
+        ` no centro de custo ${nomesObras.get(item.obraId) ?? item.codigoBase}; ` +
+        `célula mantida sem alteração (${item.quantidadeMatches} match${item.quantidadeMatches === 1 ? "" : "es"} no banco).`;
+      return `${item.sourceCellKey} — ${mensagem}`;
     });
+    const duplicidadesHistoricasBanco = conciliacao.duplicidadesHistoricas.map(
+      (item) =>
+        `${item.sourceCellKey} — ${item.funcionarioNome} — funcionario_id ${item.funcionarioId} — ` +
+        `${item.data} — célula ${item.valorOriginal} — código-base ${item.codigoBase} — ` +
+        `obra_id ${item.obraId} — tipo ${item.tipoMaoObra} — ${item.quantidadeMatches} matches — ` +
+        `IDs: ${item.idsExistentes.join(", ")}. ${item.motivo}`,
+    );
+    const alocacoesNovas = conciliacao.novas;
+    const celulasAlocacaoIdentificadas =
+      alocacoes.length +
+      celulasCentroNaoEncontrado +
+      duplicidadesInternasPlanilha.length +
+      outrosBloqueios;
+    const totalCelulasConciliadas =
+      celulasVazias +
+      celulasDesligado +
+      sedesSemCentroAnterior.length +
+      celulasInvalidas +
+      celulasCentroNaoEncontrado +
+      alocacoesNovas.length +
+      conciliacao.celulasUnicasExistentes +
+      duplicidadesInternasPlanilha.length +
+      outrosBloqueios;
+    if (totalCelulasConciliadas !== totalCelulasPeriodo) {
+      erros.push(
+        `Conciliação das células não fecha: ${totalCelulasConciliadas} classificadas de ${totalCelulasPeriodo}.`,
+      );
+    }
     return {
       modo,
       totalFuncionariosEncontrados: funcionariosPorNome.size,
@@ -706,7 +791,15 @@ export function ImportarPlanilhaLegadoDialog() {
       funcionariosSemSalario,
       duplicadosIgnorados,
       obrasEncontradas: Array.from(obrasEncontradas).sort(),
-      obrasCriar,
+      obrasNaoEncontradas: Array.from(obrasNaoEncontradas.values()),
+      celulasAlocacaoIdentificadas,
+      alocacoesJaExistentes,
+      matchesAdicionaisBanco: conciliacao.matchesAdicionaisBanco,
+      duplicidadesHistoricasBanco,
+      duplicidadesInternasPlanilha,
+      totalCelulasPeriodo,
+      totalCelulasConciliadas,
+      outrosBloqueios,
       alocacoesValidas: alocacoesNovas,
       celulasVazias,
       celulasDesligado,
@@ -739,6 +832,56 @@ export function ImportarPlanilhaLegadoDialog() {
     if (!preview || preview.bloqueado || !user?.id) return;
     setImporting(true);
     try {
+      const { data: obrasAtuaisData, error: obrasAtuaisError } = await supabase
+        .from("obras")
+        .select("*");
+      if (obrasAtuaisError) throw obrasAtuaisError;
+      const centrosAtuaisPorCodigo = criarIndiceCentrosExistentes(
+        (obrasAtuaisData ?? []) as ObraExistente[],
+      );
+      const centroDesconciliado = preview.alocacoesValidas.find((alocacao) => {
+        const interpretado = interpretarCentroCusto(alocacao.centroCusto);
+        const obra = interpretado
+          ? conciliarCentroCusto(interpretado, centrosAtuaisPorCodigo)
+          : null;
+        return !obra || obra.id !== alocacao.obraId;
+      });
+      if (centroDesconciliado) {
+        throw new Error(
+          `Centro de custo não conciliado antes da confirmação: ${centroDesconciliado.centroCusto}. Gere uma nova prévia.`,
+        );
+      }
+      const funcionariosExistentesIds = Array.from(
+        new Set(
+          preview.alocacoesValidas
+            .map((alocacao) => alocacao.funcionarioId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      let alocacoesAtuais: AlocacaoExistente[] = [];
+      if (funcionariosExistentesIds.length > 0) {
+        const datas = Array.from(new Set(preview.alocacoesValidas.map((item) => item.data)));
+        alocacoesAtuais = await buscarTodasPaginas<AlocacaoExistente>((from, to) =>
+          supabase
+            .from("alocacoes")
+            .select("id,funcionario_id,obra_id,data,obras(nome)")
+            .in("funcionario_id", funcionariosExistentesIds)
+            .in("data", datas)
+            .range(from, to),
+        );
+      }
+      const revalidacao = conciliarCelulasComAlocacoesExistentes(
+        preview.alocacoesValidas,
+        alocacoesAtuais,
+      );
+      if (
+        revalidacao.existentes.length > 0 ||
+        revalidacao.novas.length !== preview.alocacoesValidas.length
+      ) {
+        throw new Error(
+          "A situação das alocações mudou após a prévia. Gere uma nova prévia antes de confirmar.",
+        );
+      }
       for (const admissao of preview.admissoesAlterar) {
         const { error } = await supabase
           .from("funcionarios")
@@ -760,29 +903,19 @@ export function ImportarPlanilhaLegadoDialog() {
         });
         if (error) throw error;
       }
-      for (const o of preview.obrasCriar) {
-        const { error } = await supabase.from("obras").insert({ nome: o.nome, status: "ativa" });
-        if (error) throw error;
-      }
-      const [{ data: funcsData, error: funcsError }, { data: obrasData, error: obrasError }] =
-        await Promise.all([
-          supabase.rpc("obras_control_funcionarios_safe"),
-          supabase.from("obras").select("id,nome"),
-        ]);
+      const { data: funcsData, error: funcsError } = await supabase.rpc(
+        "obras_control_funcionarios_safe",
+      );
       if (funcsError) throw funcsError;
-      if (obrasError) throw obrasError;
       const funcMap = new Map(
         ((funcsData ?? []) as unknown as FuncionarioExistente[]).map((f) => [
           normalizeName(f.nome),
           f,
         ]),
       );
-      const obraMap = new Map(
-        ((obrasData ?? []) as ObraExistente[]).map((o) => [normalizeName(o.nome), o]),
-      );
       const alocRows = preview.alocacoesValidas.map((a) => ({
         funcionario_id: funcMap.get(a.funcionarioKey)?.id,
-        obra_id: obraMap.get(a.obraKey)?.id,
+        obra_id: a.obraId,
         data: a.data,
         tipo_mao_obra: a.tipoMaoObra,
         created_by: user.id,
@@ -800,7 +933,7 @@ export function ImportarPlanilhaLegadoDialog() {
       }
       const regRows = preview.alocacoesValidas.map((a) => ({
         funcionario_id: funcMap.get(a.funcionarioKey)?.id,
-        obra_id: obraMap.get(a.obraKey)?.id,
+        obra_id: a.obraId,
         data: a.data,
         horas_normais: horasNormais(a.data),
         horas_extras: 0,
@@ -912,9 +1045,16 @@ export function ImportarPlanilhaLegadoDialog() {
                   value={preview.funcoesSemSalario.length}
                   tone={preview.funcoesSemSalario.length > 0 ? "danger" : "default"}
                 />
-                <Resumo label="Duplicados ignorados" value={preview.duplicadosIgnorados.length} />
+                <Resumo
+                  label="Linhas duplicadas de funcionários"
+                  value={preview.duplicadosIgnorados.length}
+                />
                 <Resumo label="Centros de custo" value={preview.obrasEncontradas.length} />
-                <Resumo label="Centros de custo a criar" value={preview.obrasCriar.length} />
+                <Resumo
+                  label="Centros de custo não encontrados"
+                  value={preview.obrasNaoEncontradas.length}
+                  tone={preview.obrasNaoEncontradas.length > 0 ? "danger" : "default"}
+                />
                 <Resumo label="Alocações válidas" value={preview.alocacoesValidas.length} />
                 <Resumo label="Células vazias" value={preview.celulasVazias} />
                 <Resumo label="Células D/desligado" value={preview.celulasDesligado} />
@@ -930,6 +1070,37 @@ export function ImportarPlanilhaLegadoDialog() {
                   value={preview.erros.length}
                   tone={preview.erros.length > 0 ? "danger" : "default"}
                 />
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-semibold">Auditoria das células do período</div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Resumo
+                    label="Células de alocação identificadas"
+                    value={preview.celulasAlocacaoIdentificadas}
+                  />
+                  <Resumo label="Alocações novas" value={preview.alocacoesValidas.length} />
+                  <Resumo
+                    label="Alocações já existentes — células únicas"
+                    value={preview.alocacoesJaExistentes.length}
+                  />
+                  <Resumo
+                    label="Matches adicionais no banco"
+                    value={preview.matchesAdicionaisBanco}
+                    tone={preview.matchesAdicionaisBanco > 0 ? "danger" : "default"}
+                  />
+                  <Resumo
+                    label="Duplicidades internas da planilha"
+                    value={preview.duplicidadesInternasPlanilha.length}
+                    tone={preview.duplicidadesInternasPlanilha.length > 0 ? "danger" : "default"}
+                  />
+                  <Resumo label="Outros bloqueios" value={preview.outrosBloqueios} />
+                  <Resumo label="Total de células do período" value={preview.totalCelulasPeriodo} />
+                  <Resumo label="Total conciliado" value={preview.totalCelulasConciliadas} />
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  SEDE resolvida é uma origem de célula e permanece classificada operacionalmente
+                  como alocação nova ou já existente, sem contagem dupla na equação.
+                </div>
               </div>
               {preview.bloqueado && (
                 <Alert variant="destructive">
@@ -995,7 +1166,29 @@ export function ImportarPlanilhaLegadoDialog() {
                 items={preview.funcionariosSemSalario}
                 danger
               />
-              <PreviewList title="Duplicados ignorados" items={preview.duplicadosIgnorados} />
+              <PreviewList
+                title="Linhas duplicadas de funcionários na planilha"
+                items={preview.duplicadosIgnorados}
+              />
+              <PreviewList
+                title="Alocações já existentes — células únicas"
+                items={preview.alocacoesJaExistentes}
+              />
+              <PreviewList
+                title="Duplicidades históricas encontradas no banco"
+                items={preview.duplicidadesHistoricasBanco}
+                danger
+              />
+              <PreviewList
+                title="Duplicidades internas da planilha"
+                items={preview.duplicidadesInternasPlanilha}
+                danger
+              />
+              <PreviewList
+                title="Centros de custo não encontrados"
+                items={preview.obrasNaoEncontradas}
+                danger
+              />
               <PreviewList
                 title="Admissões que serão preenchidas/atualizadas"
                 items={preview.admissoesAlterar.map(
@@ -1010,7 +1203,7 @@ export function ImportarPlanilhaLegadoDialog() {
                 title="Funcionários não encontrados"
                 items={preview.funcionariosNaoEncontrados}
               />
-              <PreviewList title="Registros ignorados" items={preview.ignorados} />
+              <PreviewList title="Outros registros ignorados" items={preview.ignorados} />
               <PreviewList title="Inconsistências" items={preview.inconsistencias} danger />
               <PreviewList title="Erros" items={preview.erros} danger />
             </div>
