@@ -9,6 +9,7 @@ import {
   somarGruposMutuamenteExclusivos,
   type CelulaAlocacaoLegado,
 } from "./importacao-legado-auditoria.ts";
+import { buscarTodasPaginas } from "./paginacao.ts";
 
 function celula(overrides: Partial<CelulaAlocacaoLegado> = {}): CelulaAlocacaoLegado {
   return {
@@ -39,6 +40,40 @@ test("uma célula existente é ignorada uma vez e não permanece nas novas", () 
   assert.equal(resultado.novas.length, 0);
   assert.equal(resultado.existentes.length, 1);
   assert.equal(resultado.totalMatchesBanco, 1);
+});
+
+test("mesma pessoa e data em centro diferente é conflito bloqueante", () => {
+  const resultado = conciliarCelulasComAlocacoesExistentes(
+    [celula()],
+    [{ id: "aloc-199", funcionario_id: "func-1", obra_id: "obra-199", data: "2026-06-25" }],
+  );
+  assert.equal(resultado.novas.length, 0);
+  assert.equal(resultado.existentes.length, 0);
+  assert.equal(resultado.conflitos.length, 1);
+  assert.deepEqual(resultado.conflitos[0].obraIdsExistentes, ["obra-199"]);
+});
+
+test("múltiplos centros existentes são conflito histórico", () => {
+  const resultado = conciliarCelulasComAlocacoesExistentes(
+    [celula()],
+    [
+      { id: "aloc-199", funcionario_id: "func-1", obra_id: "obra-199", data: "2026-06-25" },
+      { id: "aloc-230", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" },
+    ],
+  );
+  assert.equal(resultado.conflitos.length, 1);
+  assert.equal(resultado.conflitos[0].conflitoHistorico, true);
+  assert.equal(resultado.conflitosHistoricos.length, 1);
+});
+
+test("tipo de mão de obra diferente no mesmo centro não cria conflito entre centros", () => {
+  const resultado = conciliarCelulasComAlocacoesExistentes(
+    [celula({ tipoMaoObra: "civil" })],
+    [{ id: "aloc-1", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" }],
+  );
+  assert.equal(resultado.conflitos.length, 0);
+  assert.equal(resultado.existentes.length, 1);
+  assert.equal(resultado.existentes[0].tipoMaoObra, "civil");
 });
 
 test("dois registros no banco geram uma célula ignorada e um match adicional", () => {
@@ -83,7 +118,10 @@ test("a conciliação fecha entre células novas e existentes", () => {
   const resultado = conciliarCelulasComAlocacoesExistentes(celulas, [
     { id: "aloc-1", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" },
   ]);
-  assert.equal(celulas.length, resultado.novas.length + resultado.existentes.length);
+  assert.equal(
+    celulas.length,
+    resultado.novas.length + resultado.existentes.length + resultado.conflitos.length,
+  );
 });
 
 test("grupos mutuamente exclusivos fecham com o total do período", () => {
@@ -120,4 +158,35 @@ test("prévia e confirmação reutilizam a mesma função de conciliação", () 
     "utf8",
   );
   assert.equal(componente.match(/conciliarCelulasComAlocacoesExistentes\(/g)?.length, 2);
+});
+
+test("revalidação detecta conflito surgido depois da prévia", () => {
+  const origem = celula();
+  const previa = conciliarCelulasComAlocacoesExistentes([origem], []);
+  const revalidacao = conciliarCelulasComAlocacoesExistentes(previa.novas, [
+    { id: "aloc-nova", funcionario_id: "func-1", obra_id: "obra-199", data: "2026-06-25" },
+  ]);
+  assert.equal(previa.novas.length, 1);
+  assert.equal(revalidacao.conflitos.length, 1);
+  assert.equal(revalidacao.novas.length, 0);
+});
+
+test("consulta paginada não perde registros", async () => {
+  const registros = Array.from({ length: 2005 }, (_, id) => id);
+  const resultado = await buscarTodasPaginas<number>((inicio, fim) =>
+    Promise.resolve({ data: registros.slice(inicio, fim + 1), error: null }),
+  );
+  assert.equal(resultado.length, 2005);
+  assert.equal(resultado[2004], 2004);
+});
+
+test("conflito é verificado antes da primeira escrita da confirmação", () => {
+  const componente = readFileSync(
+    new URL("../components/ImportarPlanilhaLegadoDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const verificacao = componente.indexOf("if (revalidacao.conflitos.length > 0)");
+  const primeiraEscrita = componente.indexOf("for (const admissao of preview.admissoesAlterar)");
+  assert.ok(verificacao > 0);
+  assert.ok(primeiraEscrita > verificacao);
 });

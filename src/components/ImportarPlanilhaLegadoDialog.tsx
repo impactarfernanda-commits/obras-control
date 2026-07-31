@@ -111,6 +111,7 @@ type Preview = {
   obrasNaoEncontradas: string[];
   celulasAlocacaoIdentificadas: number;
   alocacoesJaExistentes: string[];
+  conflitosEntreCentros: string[];
   matchesAdicionaisBanco: number;
   duplicidadesHistoricasBanco: string[];
   duplicidadesInternasPlanilha: string[];
@@ -275,6 +276,7 @@ function emptyPreview(error: string): Preview {
     obrasNaoEncontradas: [],
     celulasAlocacaoIdentificadas: 0,
     alocacoesJaExistentes: [],
+    conflitosEntreCentros: [],
     matchesAdicionaisBanco: 0,
     duplicidadesHistoricasBanco: [],
     duplicidadesInternasPlanilha: [],
@@ -753,6 +755,17 @@ export function ImportarPlanilhaLegadoDialog() {
         `célula mantida sem alteração (${item.quantidadeMatches} match${item.quantidadeMatches === 1 ? "" : "es"} no banco).`;
       return `${item.sourceCellKey} — ${mensagem}`;
     });
+    const conflitosEntreCentros = conciliacao.conflitos.map((item) => {
+      const centrosExistentes = item.obraIdsExistentes
+        .map((obraId) => `${nomesObras.get(obraId) ?? obraId} (${obraId})`)
+        .join(", ");
+      const mensagem =
+        `${item.sourceCellKey} — ${item.funcionarioNome} — ${formatDate(item.data)} — ` +
+        `existente: ${centrosExistentes} — planilha: ${nomesObras.get(item.obraId) ?? item.codigoBase} (${item.obraId}) — ` +
+        `IDs existentes: ${item.idsExistentes.join(", ")} — célula: ${item.valorOriginal} — tipo: ${item.tipoMaoObra}.`;
+      erros.push(`Conflito entre centros de custo: ${mensagem}`);
+      return mensagem;
+    });
     const duplicidadesHistoricasBanco = conciliacao.duplicidadesHistoricas.map(
       (item) =>
         `${item.sourceCellKey} — ${item.funcionarioNome} — funcionario_id ${item.funcionarioId} — ` +
@@ -774,6 +787,7 @@ export function ImportarPlanilhaLegadoDialog() {
       celulasCentroNaoEncontrado +
       alocacoesNovas.length +
       conciliacao.celulasUnicasExistentes +
+      conflitosEntreCentros.length +
       duplicidadesInternasPlanilha.length +
       outrosBloqueios;
     if (totalCelulasConciliadas !== totalCelulasPeriodo) {
@@ -794,6 +808,7 @@ export function ImportarPlanilhaLegadoDialog() {
       obrasNaoEncontradas: Array.from(obrasNaoEncontradas.values()),
       celulasAlocacaoIdentificadas,
       alocacoesJaExistentes,
+      conflitosEntreCentros,
       matchesAdicionaisBanco: conciliacao.matchesAdicionaisBanco,
       duplicidadesHistoricasBanco,
       duplicidadesInternasPlanilha,
@@ -874,6 +889,11 @@ export function ImportarPlanilhaLegadoDialog() {
         preview.alocacoesValidas,
         alocacoesAtuais,
       );
+      if (revalidacao.conflitos.length > 0) {
+        throw new Error(
+          "A importação foi interrompida porque foram encontradas alocações em centros de custo diferentes para o mesmo funcionário e data. Revise os conflitos apresentados na prévia.",
+        );
+      }
       if (
         revalidacao.existentes.length > 0 ||
         revalidacao.novas.length !== preview.alocacoesValidas.length
@@ -1084,6 +1104,11 @@ export function ImportarPlanilhaLegadoDialog() {
                     value={preview.alocacoesJaExistentes.length}
                   />
                   <Resumo
+                    label="Conflitos entre centros de custo"
+                    value={preview.conflitosEntreCentros.length}
+                    tone={preview.conflitosEntreCentros.length > 0 ? "danger" : "default"}
+                  />
+                  <Resumo
                     label="Matches adicionais no banco"
                     value={preview.matchesAdicionaisBanco}
                     tone={preview.matchesAdicionaisBanco > 0 ? "danger" : "default"}
@@ -1173,6 +1198,11 @@ export function ImportarPlanilhaLegadoDialog() {
               <PreviewList
                 title="Alocações já existentes — células únicas"
                 items={preview.alocacoesJaExistentes}
+              />
+              <PreviewList
+                title="Conflitos entre centros de custo"
+                items={preview.conflitosEntreCentros}
+                danger
               />
               <PreviewList
                 title="Duplicidades históricas encontradas no banco"

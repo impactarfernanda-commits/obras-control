@@ -25,6 +25,13 @@ export type CelulaExistenteAuditoria<T extends CelulaAlocacaoLegado = CelulaAloc
   motivo: string;
 };
 
+export type ConflitoCentroAuditoria<T extends CelulaAlocacaoLegado = CelulaAlocacaoLegado> = T & {
+  alocacoesExistentes: AlocacaoBancoAuditoria[];
+  obraIdsExistentes: string[];
+  idsExistentes: string[];
+  conflitoHistorico: boolean;
+};
+
 export function criarSourceCellKey(rowIndex: number, columnIndex: number, data: string) {
   return `linha ${rowIndex + 1} | coluna ${columnIndex + 1} | ${data}`;
 }
@@ -33,34 +40,51 @@ export function chaveOperacional(funcionarioId: string, obraId: string, data: st
   return `${funcionarioId}|${obraId}|${data}`;
 }
 
+export function chaveFuncionarioData(funcionarioId: string, data: string) {
+  return `${funcionarioId}|${data}`;
+}
+
 export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoLegado>(
   celulas: T[],
   registrosBanco: AlocacaoBancoAuditoria[],
 ) {
-  const registrosPorChave = new Map<string, AlocacaoBancoAuditoria[]>();
+  const registrosPorFuncionarioData = new Map<string, AlocacaoBancoAuditoria[]>();
   for (const registro of registrosBanco) {
-    const chave = chaveOperacional(registro.funcionario_id, registro.obra_id, registro.data);
-    const grupo = registrosPorChave.get(chave) ?? [];
+    const chave = chaveFuncionarioData(registro.funcionario_id, registro.data);
+    const grupo = registrosPorFuncionarioData.get(chave) ?? [];
     grupo.push(registro);
-    registrosPorChave.set(chave, grupo);
+    registrosPorFuncionarioData.set(chave, grupo);
   }
 
   const novas: T[] = [];
   const existentes: CelulaExistenteAuditoria<T>[] = [];
+  const conflitos: ConflitoCentroAuditoria<T>[] = [];
   for (const celula of celulas) {
     const matches = celula.funcionarioId
-      ? (registrosPorChave.get(
-          chaveOperacional(celula.funcionarioId, celula.obraId, celula.data),
-        ) ?? [])
+      ? (registrosPorFuncionarioData.get(chaveFuncionarioData(celula.funcionarioId, celula.data)) ??
+        [])
       : [];
     if (matches.length === 0) {
       novas.push(celula);
       continue;
     }
+    const mesmosCentros = matches.filter((match) => match.obra_id === celula.obraId);
+    const outrosCentros = matches.filter((match) => match.obra_id !== celula.obraId);
+    if (outrosCentros.length > 0) {
+      const obraIdsExistentes = Array.from(new Set(matches.map((match) => match.obra_id)));
+      conflitos.push({
+        ...celula,
+        alocacoesExistentes: matches,
+        obraIdsExistentes,
+        idsExistentes: matches.map((match) => match.id),
+        conflitoHistorico: obraIdsExistentes.length > 1,
+      });
+      continue;
+    }
     existentes.push({
       ...celula,
-      quantidadeMatches: matches.length,
-      idsExistentes: matches.map((match) => match.id),
+      quantidadeMatches: mesmosCentros.length,
+      idsExistentes: mesmosCentros.map((match) => match.id),
       motivo:
         "A chave operacional já possui alocação no banco; a célula será mantida sem alteração.",
     });
@@ -69,6 +93,7 @@ export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoL
   return {
     novas,
     existentes,
+    conflitos,
     celulasUnicasExistentes: existentes.length,
     totalMatchesBanco: existentes.reduce((total, item) => total + item.quantidadeMatches, 0),
     matchesAdicionaisBanco: existentes.reduce(
@@ -76,6 +101,7 @@ export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoL
       0,
     ),
     duplicidadesHistoricas: existentes.filter((item) => item.quantidadeMatches > 1),
+    conflitosHistoricos: conflitos.filter((item) => item.conflitoHistorico),
   };
 }
 
