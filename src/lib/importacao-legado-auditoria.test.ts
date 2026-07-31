@@ -42,18 +42,18 @@ test("uma célula existente é ignorada uma vez e não permanece nas novas", () 
   assert.equal(resultado.totalMatchesBanco, 1);
 });
 
-test("mesma pessoa e data em centro diferente é conflito bloqueante", () => {
+test("mesma pessoa e data em centro diferente é ignorada sem erro", () => {
   const resultado = conciliarCelulasComAlocacoesExistentes(
     [celula()],
     [{ id: "aloc-199", funcionario_id: "func-1", obra_id: "obra-199", data: "2026-06-25" }],
   );
   assert.equal(resultado.novas.length, 0);
-  assert.equal(resultado.existentes.length, 0);
-  assert.equal(resultado.conflitos.length, 1);
-  assert.deepEqual(resultado.conflitos[0].obraIdsExistentes, ["obra-199"]);
+  assert.equal(resultado.existentes.length, 1);
+  assert.equal(resultado.existentes[0].centroDiferenteNaPlanilha, true);
+  assert.deepEqual(resultado.existentes[0].obraIdsExistentes, ["obra-199"]);
 });
 
-test("múltiplos centros existentes são conflito histórico", () => {
+test("múltiplos centros existentes ignoram uma célula e auditam matches adicionais", () => {
   const resultado = conciliarCelulasComAlocacoesExistentes(
     [celula()],
     [
@@ -61,9 +61,10 @@ test("múltiplos centros existentes são conflito histórico", () => {
       { id: "aloc-230", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" },
     ],
   );
-  assert.equal(resultado.conflitos.length, 1);
-  assert.equal(resultado.conflitos[0].conflitoHistorico, true);
-  assert.equal(resultado.conflitosHistoricos.length, 1);
+  assert.equal(resultado.existentes.length, 1);
+  assert.equal(resultado.existentes[0].quantidadeMatches, 2);
+  assert.equal(resultado.matchesAdicionaisBanco, 1);
+  assert.equal(resultado.novas.length, 0);
 });
 
 test("tipo de mão de obra diferente no mesmo centro não cria conflito entre centros", () => {
@@ -71,7 +72,6 @@ test("tipo de mão de obra diferente no mesmo centro não cria conflito entre ce
     [celula({ tipoMaoObra: "civil" })],
     [{ id: "aloc-1", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" }],
   );
-  assert.equal(resultado.conflitos.length, 0);
   assert.equal(resultado.existentes.length, 1);
   assert.equal(resultado.existentes[0].tipoMaoObra, "civil");
 });
@@ -118,10 +118,7 @@ test("a conciliação fecha entre células novas e existentes", () => {
   const resultado = conciliarCelulasComAlocacoesExistentes(celulas, [
     { id: "aloc-1", funcionario_id: "func-1", obra_id: "obra-230", data: "2026-06-25" },
   ]);
-  assert.equal(
-    celulas.length,
-    resultado.novas.length + resultado.existentes.length + resultado.conflitos.length,
-  );
+  assert.equal(celulas.length, resultado.novas.length + resultado.existentes.length);
 });
 
 test("grupos mutuamente exclusivos fecham com o total do período", () => {
@@ -160,14 +157,14 @@ test("prévia e confirmação reutilizam a mesma função de conciliação", () 
   assert.equal(componente.match(/conciliarCelulasComAlocacoesExistentes\(/g)?.length, 2);
 });
 
-test("revalidação detecta conflito surgido depois da prévia", () => {
+test("revalidação retira do insert uma alocação surgida depois da prévia", () => {
   const origem = celula();
   const previa = conciliarCelulasComAlocacoesExistentes([origem], []);
   const revalidacao = conciliarCelulasComAlocacoesExistentes(previa.novas, [
     { id: "aloc-nova", funcionario_id: "func-1", obra_id: "obra-199", data: "2026-06-25" },
   ]);
   assert.equal(previa.novas.length, 1);
-  assert.equal(revalidacao.conflitos.length, 1);
+  assert.equal(revalidacao.existentes.length, 1);
   assert.equal(revalidacao.novas.length, 0);
 });
 
@@ -180,13 +177,48 @@ test("consulta paginada não perde registros", async () => {
   assert.equal(resultado[2004], 2004);
 });
 
-test("conflito é verificado antes da primeira escrita da confirmação", () => {
+test("confirmação usa somente as novas da revalidação nos inserts", () => {
   const componente = readFileSync(
     new URL("../components/ImportarPlanilhaLegadoDialog.tsx", import.meta.url),
     "utf8",
   );
-  const verificacao = componente.indexOf("if (revalidacao.conflitos.length > 0)");
+  const verificacao = componente.indexOf("const alocacoesParaInserir = revalidacao.novas");
   const primeiraEscrita = componente.indexOf("for (const admissao of preview.admissoesAlterar)");
   assert.ok(verificacao > 0);
   assert.ok(primeiraEscrita > verificacao);
+  assert.match(componente, /const alocRows = alocacoesParaInserir\.map/);
+  assert.match(componente, /const regRows = alocacoesParaInserir\.map/);
+});
+
+test("13 centros diferentes viram 13 células existentes sem aumentar o total", () => {
+  const celulas = Array.from({ length: 13 }, (_, indice) =>
+    celula({
+      sourceCellKey: `linha ${indice + 2} | coluna 5 | 2026-06-25`,
+      funcionarioId: `func-${indice}`,
+      funcionarioKey: `func-${indice}`,
+    }),
+  );
+  const registros = celulas.map((item, indice) => ({
+    id: `aloc-${indice}`,
+    funcionario_id: item.funcionarioId!,
+    obra_id: "obra-199",
+    data: item.data,
+  }));
+  const resultado = conciliarCelulasComAlocacoesExistentes(celulas, registros);
+  assert.equal(resultado.existentes.length, 13);
+  assert.equal(resultado.novas.length, 0);
+  assert.equal(
+    resultado.existentes.every((item) => item.centroDiferenteNaPlanilha),
+    true,
+  );
+  assert.equal(resultado.novas.length + resultado.existentes.length, 13);
+});
+
+test("classificação não gera update nem upsert de alocações existentes", () => {
+  const componente = readFileSync(
+    new URL("../components/ImportarPlanilhaLegadoDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(componente, /from\("alocacoes"\)\.update/);
+  assert.doesNotMatch(componente, /from\("alocacoes"\)\.upsert/);
 });

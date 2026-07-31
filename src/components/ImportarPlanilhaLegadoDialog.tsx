@@ -111,7 +111,6 @@ type Preview = {
   obrasNaoEncontradas: string[];
   celulasAlocacaoIdentificadas: number;
   alocacoesJaExistentes: string[];
-  conflitosEntreCentros: string[];
   matchesAdicionaisBanco: number;
   duplicidadesHistoricasBanco: string[];
   duplicidadesInternasPlanilha: string[];
@@ -276,7 +275,6 @@ function emptyPreview(error: string): Preview {
     obrasNaoEncontradas: [],
     celulasAlocacaoIdentificadas: 0,
     alocacoesJaExistentes: [],
-    conflitosEntreCentros: [],
     matchesAdicionaisBanco: 0,
     duplicidadesHistoricasBanco: [],
     duplicidadesInternasPlanilha: [],
@@ -749,22 +747,17 @@ export function ImportarPlanilhaLegadoDialog() {
     const conciliacao = conciliarCelulasComAlocacoesExistentes(alocacoes, registrosBanco);
     const nomesObras = new Map(obrasExistentes.map((obra) => [obra.id, obra.nome]));
     const alocacoesJaExistentes = conciliacao.existentes.map((item) => {
-      const mensagem =
-        `${item.funcionarioNome} já possui alocação em ${formatDate(item.data)}` +
-        ` no centro de custo ${nomesObras.get(item.obraId) ?? item.codigoBase}; ` +
-        `célula mantida sem alteração (${item.quantidadeMatches} match${item.quantidadeMatches === 1 ? "" : "es"} no banco).`;
-      return `${item.sourceCellKey} — ${mensagem}`;
-    });
-    const conflitosEntreCentros = conciliacao.conflitos.map((item) => {
       const centrosExistentes = item.obraIdsExistentes
-        .map((obraId) => `${nomesObras.get(obraId) ?? obraId} (${obraId})`)
+        .map((obraId) => nomesObras.get(obraId) ?? obraId)
         .join(", ");
       const mensagem =
-        `${item.sourceCellKey} — ${item.funcionarioNome} — ${formatDate(item.data)} — ` +
-        `existente: ${centrosExistentes} — planilha: ${nomesObras.get(item.obraId) ?? item.codigoBase} (${item.obraId}) — ` +
-        `IDs existentes: ${item.idsExistentes.join(", ")} — célula: ${item.valorOriginal} — tipo: ${item.tipoMaoObra}.`;
-      erros.push(`Conflito entre centros de custo: ${mensagem}`);
-      return mensagem;
+        `${item.funcionarioNome} já possui alocação em ${formatDate(item.data)}` +
+        ` — existente: ${centrosExistentes}; planilha: ${nomesObras.get(item.obraId) ?? item.codigoBase}; ` +
+        `resultado: alocação existente mantida e célula ignorada` +
+        `${item.centroDiferenteNaPlanilha ? ". A planilha indicava outro centro de custo" : ""}. ` +
+        `IDs: ${item.idsExistentes.join(", ")} — célula: ${item.valorOriginal} — tipo: ${item.tipoMaoObra} — ` +
+        `${item.quantidadeMatches} match${item.quantidadeMatches === 1 ? "" : "es"} no banco.`;
+      return `${item.sourceCellKey} — ${mensagem}`;
     });
     const duplicidadesHistoricasBanco = conciliacao.duplicidadesHistoricas.map(
       (item) =>
@@ -787,7 +780,6 @@ export function ImportarPlanilhaLegadoDialog() {
       celulasCentroNaoEncontrado +
       alocacoesNovas.length +
       conciliacao.celulasUnicasExistentes +
-      conflitosEntreCentros.length +
       duplicidadesInternasPlanilha.length +
       outrosBloqueios;
     if (totalCelulasConciliadas !== totalCelulasPeriodo) {
@@ -808,7 +800,6 @@ export function ImportarPlanilhaLegadoDialog() {
       obrasNaoEncontradas: Array.from(obrasNaoEncontradas.values()),
       celulasAlocacaoIdentificadas,
       alocacoesJaExistentes,
-      conflitosEntreCentros,
       matchesAdicionaisBanco: conciliacao.matchesAdicionaisBanco,
       duplicidadesHistoricasBanco,
       duplicidadesInternasPlanilha,
@@ -889,19 +880,7 @@ export function ImportarPlanilhaLegadoDialog() {
         preview.alocacoesValidas,
         alocacoesAtuais,
       );
-      if (revalidacao.conflitos.length > 0) {
-        throw new Error(
-          "A importação foi interrompida porque foram encontradas alocações em centros de custo diferentes para o mesmo funcionário e data. Revise os conflitos apresentados na prévia.",
-        );
-      }
-      if (
-        revalidacao.existentes.length > 0 ||
-        revalidacao.novas.length !== preview.alocacoesValidas.length
-      ) {
-        throw new Error(
-          "A situação das alocações mudou após a prévia. Gere uma nova prévia antes de confirmar.",
-        );
-      }
+      const alocacoesParaInserir = revalidacao.novas;
       for (const admissao of preview.admissoesAlterar) {
         const { error } = await supabase
           .from("funcionarios")
@@ -933,7 +912,7 @@ export function ImportarPlanilhaLegadoDialog() {
           f,
         ]),
       );
-      const alocRows = preview.alocacoesValidas.map((a) => ({
+      const alocRows = alocacoesParaInserir.map((a) => ({
         funcionario_id: funcMap.get(a.funcionarioKey)?.id,
         obra_id: a.obraId,
         data: a.data,
@@ -951,7 +930,7 @@ export function ImportarPlanilhaLegadoDialog() {
           throw new Error(amigavel?.description ?? alocErr.message);
         }
       }
-      const regRows = preview.alocacoesValidas.map((a) => ({
+      const regRows = alocacoesParaInserir.map((a) => ({
         funcionario_id: funcMap.get(a.funcionarioKey)?.id,
         obra_id: a.obraId,
         data: a.data,
@@ -1100,13 +1079,8 @@ export function ImportarPlanilhaLegadoDialog() {
                   />
                   <Resumo label="Alocações novas" value={preview.alocacoesValidas.length} />
                   <Resumo
-                    label="Alocações já existentes — células únicas"
+                    label="Alocações já existentes — ignoradas"
                     value={preview.alocacoesJaExistentes.length}
-                  />
-                  <Resumo
-                    label="Conflitos entre centros de custo"
-                    value={preview.conflitosEntreCentros.length}
-                    tone={preview.conflitosEntreCentros.length > 0 ? "danger" : "default"}
                   />
                   <Resumo
                     label="Matches adicionais no banco"
@@ -1123,6 +1097,9 @@ export function ImportarPlanilhaLegadoDialog() {
                   <Resumo label="Total conciliado" value={preview.totalCelulasConciliadas} />
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
+                  Quando o funcionário já possui alocação na data, o registro existente é preservado
+                  e a célula da planilha não é importada, mesmo que indique outro centro de custo.{" "}
+                  <br />
                   SEDE resolvida é uma origem de célula e permanece classificada operacionalmente
                   como alocação nova ou já existente, sem contagem dupla na equação.
                 </div>
@@ -1196,13 +1173,8 @@ export function ImportarPlanilhaLegadoDialog() {
                 items={preview.duplicadosIgnorados}
               />
               <PreviewList
-                title="Alocações já existentes — células únicas"
+                title="Alocações já existentes — ignoradas"
                 items={preview.alocacoesJaExistentes}
-              />
-              <PreviewList
-                title="Conflitos entre centros de custo"
-                items={preview.conflitosEntreCentros}
-                danger
               />
               <PreviewList
                 title="Duplicidades históricas encontradas no banco"

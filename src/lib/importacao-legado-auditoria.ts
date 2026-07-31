@@ -22,14 +22,10 @@ export type AlocacaoBancoAuditoria = {
 export type CelulaExistenteAuditoria<T extends CelulaAlocacaoLegado = CelulaAlocacaoLegado> = T & {
   quantidadeMatches: number;
   idsExistentes: string[];
-  motivo: string;
-};
-
-export type ConflitoCentroAuditoria<T extends CelulaAlocacaoLegado = CelulaAlocacaoLegado> = T & {
   alocacoesExistentes: AlocacaoBancoAuditoria[];
   obraIdsExistentes: string[];
-  idsExistentes: string[];
-  conflitoHistorico: boolean;
+  centroDiferenteNaPlanilha: boolean;
+  motivo: string;
 };
 
 export function criarSourceCellKey(rowIndex: number, columnIndex: number, data: string) {
@@ -58,7 +54,6 @@ export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoL
 
   const novas: T[] = [];
   const existentes: CelulaExistenteAuditoria<T>[] = [];
-  const conflitos: ConflitoCentroAuditoria<T>[] = [];
   for (const celula of celulas) {
     const matches = celula.funcionarioId
       ? (registrosPorFuncionarioData.get(chaveFuncionarioData(celula.funcionarioId, celula.data)) ??
@@ -68,32 +63,22 @@ export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoL
       novas.push(celula);
       continue;
     }
-    const mesmosCentros = matches.filter((match) => match.obra_id === celula.obraId);
-    const outrosCentros = matches.filter((match) => match.obra_id !== celula.obraId);
-    if (outrosCentros.length > 0) {
-      const obraIdsExistentes = Array.from(new Set(matches.map((match) => match.obra_id)));
-      conflitos.push({
-        ...celula,
-        alocacoesExistentes: matches,
-        obraIdsExistentes,
-        idsExistentes: matches.map((match) => match.id),
-        conflitoHistorico: obraIdsExistentes.length > 1,
-      });
-      continue;
-    }
+    const obraIdsExistentes = Array.from(new Set(matches.map((match) => match.obra_id)));
     existentes.push({
       ...celula,
-      quantidadeMatches: mesmosCentros.length,
-      idsExistentes: mesmosCentros.map((match) => match.id),
+      quantidadeMatches: matches.length,
+      idsExistentes: matches.map((match) => match.id),
+      alocacoesExistentes: matches,
+      obraIdsExistentes,
+      centroDiferenteNaPlanilha: obraIdsExistentes.some((obraId) => obraId !== celula.obraId),
       motivo:
-        "A chave operacional já possui alocação no banco; a célula será mantida sem alteração.",
+        "O funcionário já possui alocação na data; o registro existente será preservado e a célula da planilha será ignorada.",
     });
   }
 
   return {
     novas,
     existentes,
-    conflitos,
     celulasUnicasExistentes: existentes.length,
     totalMatchesBanco: existentes.reduce((total, item) => total + item.quantidadeMatches, 0),
     matchesAdicionaisBanco: existentes.reduce(
@@ -101,7 +86,6 @@ export function conciliarCelulasComAlocacoesExistentes<T extends CelulaAlocacaoL
       0,
     ),
     duplicidadesHistoricas: existentes.filter((item) => item.quantidadeMatches > 1),
-    conflitosHistoricos: conflitos.filter((item) => item.conflitoHistorico),
   };
 }
 
