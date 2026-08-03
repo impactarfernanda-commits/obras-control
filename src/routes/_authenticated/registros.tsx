@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
+import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
 
 export const Route = createFileRoute("/_authenticated/registros")({
   component: RegistrosPage,
@@ -660,18 +661,18 @@ function RegistrosPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{row.dias}</td>
-                      <td className="px-3 py-2 text-right">{row.normais.toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-right">{formatDecimalHours(row.normais)}h</td>
                       <td
                         className={cn(
                           "px-3 py-2 text-right",
                           row.alerta && "text-rose-600 font-semibold",
                         )}
                       >
-                        {row.extras.toFixed(2)}h
+                        {formatDecimalHours(row.extras)}h
                       </td>
                       <td className="px-3 py-2 text-right">{row.ausencias}</td>
                       <td className="px-3 py-2 text-right">
-                        {(row.normais + row.extras).toFixed(2)}h
+                        {formatDecimalHours(row.normais + row.extras)}h
                       </td>
                       <td className="px-3 py-2">
                         {row.alerta ? (
@@ -729,18 +730,18 @@ function RegistrosPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{row.dias}</td>
-                      <td className="px-3 py-2 text-right">{row.normais.toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-right">{formatDecimalHours(row.normais)}h</td>
                       <td
                         className={cn(
                           "px-3 py-2 text-right",
                           row.alerta && "text-rose-600 font-semibold",
                         )}
                       >
-                        {row.extras.toFixed(2)}h
+                        {formatDecimalHours(row.extras)}h
                       </td>
                       <td className="px-3 py-2 text-right">{row.ausencias}</td>
                       <td className="px-3 py-2 text-right">
-                        {(row.normais + row.extras).toFixed(2)}h
+                        {formatDecimalHours(row.normais + row.extras)}h
                       </td>
                       <td className="px-3 py-2">
                         {row.alerta ? (
@@ -822,10 +823,12 @@ function DayCell({
             <span className="font-semibold text-amber-700 dark:text-amber-400">Ausente</span>
           ) : total > 0 ? (
             <>
-              <span className="text-base font-semibold leading-tight">{total.toFixed(1)}h</span>
+              <span className="text-base font-semibold leading-tight">
+                {formatDecimalHours(total)}h
+              </span>
               {registro.horas_extras > 0 && (
                 <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                  +{Number(registro.horas_extras).toFixed(1)}h ext
+                  {formatExtraHours(registro.horas_extras)} ext
                 </span>
               )}
             </>

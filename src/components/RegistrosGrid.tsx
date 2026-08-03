@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
+import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
 
 // ---------- helpers ----------
 function startOfWeek(d: Date): Date {
@@ -646,10 +647,12 @@ function DayCell({
             <span className="font-semibold text-amber-700 dark:text-amber-400">Ausente</span>
           ) : total > 0 ? (
             <>
-              <span className="text-base font-semibold leading-tight">{total.toFixed(1)}h</span>
+              <span className="text-base font-semibold leading-tight">
+                {formatDecimalHours(total)}h
+              </span>
               {registro.horas_extras > 0 && (
                 <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                  +{Number(registro.horas_extras).toFixed(1)}h ext
+                  {formatExtraHours(registro.horas_extras)} ext
                 </span>
               )}
             </>

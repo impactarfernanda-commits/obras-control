@@ -82,6 +82,7 @@ import {
   justificativaExtrasObrigatoria,
   totalHorasTrabalhadas,
 } from "@/lib/jornada-horas";
+import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -97,10 +98,6 @@ function parseTimeToMinutes(t: string): number {
 function calcHoras(entrada: string, saida: string, dateISO: string) {
   const calculo = calcularHorasJornada(entrada, saida, dateISO);
   return { total: calculo.total, hn: calculo.horasNormais, he: calculo.horasExtras };
-}
-
-function formatarHorasBR(horas: number): string {
-  return horas.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 }
 
 const schema = z
@@ -574,7 +571,9 @@ function AlocacoesPage() {
       return { hn, he };
     },
     onSuccess: ({ hn, he }) => {
-      toast.success(`Lançamento salvo: ${hn}h normais${he > 0 ? ` + ${he}h extras` : ""}`);
+      toast.success(
+        `Lançamento salvo: ${formatDecimalHours(hn)}h normais${he > 0 ? ` ${formatExtraHours(he)} extras` : ""}`,
+      );
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
@@ -698,7 +697,7 @@ function AlocacoesPage() {
       return editPrevia.total;
     },
     onSuccess: (total) => {
-      toast.success(`Horas atualizadas para ${formatarHorasBR(total)}h`);
+      toast.success(`Horas atualizadas para ${formatDecimalHours(total)}h`);
       setAlocacaoEmEdicao(null);
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
@@ -899,11 +898,13 @@ function AlocacoesPage() {
                         Cálculo automático (1h almoço descontada)
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">Total: {previa.total}h</Badge>
-                        <Badge variant="outline">Normais: {previa.hn}h</Badge>
+                        <Badge variant="secondary">
+                          Total: {formatDecimalHours(previa.total)}h
+                        </Badge>
+                        <Badge variant="outline">Normais: {formatDecimalHours(previa.hn)}h</Badge>
                         {previa.he > 0 && (
                           <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                            Extras: +{previa.he}h
+                            Extras: {formatExtraHours(previa.he)}
                           </Badge>
                         )}
                       </div>
@@ -1030,11 +1031,11 @@ function AlocacoesPage() {
                   Intervalo padrão considerado: 1h
                 </div>
                 <div className="mt-1 font-semibold">
-                  Horas calculadas: {formatarHorasBR(editPrevia.total)}h
+                  Horas calculadas: {formatDecimalHours(editPrevia.total)}h
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {formatarHorasBR(editPrevia.hn)}h normais
-                  {editPrevia.he > 0 ? ` + ${formatarHorasBR(editPrevia.he)}h extras` : ""}
+                  {formatDecimalHours(editPrevia.hn)}h normais
+                  {editPrevia.he > 0 ? ` ${formatExtraHours(editPrevia.he)} extras` : ""}
                 </div>
               </div>
               {editPrevia.total > 12 && (
@@ -1245,7 +1246,7 @@ function AlocacoesPage() {
                                   </div>
                                   {f.he > 0 ? (
                                     <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                                      +{f.he}h
+                                      {formatExtraHours(f.he)}
                                     </Badge>
                                   ) : (
                                     <span className="pl-2 text-muted-foreground">-</span>
@@ -1378,7 +1379,7 @@ function AlocacoesPage() {
                                                         </Badge>
                                                         {h.he > 0 && (
                                                           <Badge className="bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400">
-                                                            +{h.he}h
+                                                            {formatExtraHours(h.he)}
                                                           </Badge>
                                                         )}
                                                       </>
