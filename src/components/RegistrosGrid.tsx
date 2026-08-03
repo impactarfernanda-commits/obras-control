@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
+import { payloadHorasPermitido } from "@/lib/jornada-horas";
 
 // ---------- helpers ----------
 function startOfWeek(d: Date): Date {
@@ -74,7 +75,7 @@ function cellStatus(r: Registro | undefined): CellStatus {
   const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
   if (total <= 0) return "empty";
   if (total > 16) return "error";
-  if (r.horas_extras > 0 && r.horas_normais < 9) return "error";
+  if (!payloadHorasPermitido(r.data, r.horas_normais, r.horas_extras)) return "error";
   if (r.horas_extras > 2 && !r.justificativa_extras?.trim()) return "error";
   if (r.horas_extras > 0) return "warn";
   return "ok";
@@ -619,7 +620,11 @@ function DayCell({
           : "bg-card border-border";
 
   const needsJust = registro.horas_extras > 2 && !registro.justificativa_extras?.trim();
-  const invalidExtras = registro.horas_extras > 0 && registro.horas_normais < 9;
+  const invalidExtras = !payloadHorasPermitido(
+    registro.data,
+    registro.horas_normais,
+    registro.horas_extras,
+  );
   const overflow = total > 16;
 
   return (
@@ -727,7 +732,7 @@ function DayCell({
                   value={registro.horas_extras}
                   onChange={(e) =>
                     onChange({
-                      horas_extras: Math.max(0, Math.min(7, Number(e.target.value) || 0)),
+                      horas_extras: Math.max(0, Math.min(16, Number(e.target.value) || 0)),
                     })
                   }
                 />

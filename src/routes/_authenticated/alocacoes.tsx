@@ -77,6 +77,11 @@ import {
   garantirCompetenciaAberta,
   mensagemErroCompetenciaFechada,
 } from "@/lib/competencias";
+import {
+  calcularHorasJornada,
+  justificativaExtrasObrigatoria,
+  totalHorasTrabalhadas,
+} from "@/lib/jornada-horas";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -89,33 +94,9 @@ function parseTimeToMinutes(t: string): number {
   return h * 60 + m;
 }
 
-/** Total trabalhado em horas, já descontando 1h fixa de almoço. */
-function totalHorasTrabalhadas(entrada: string, saida: string): number {
-  if (!timeRegex.test(entrada) || !timeRegex.test(saida)) return 0;
-  const diff = parseTimeToMinutes(saida) - parseTimeToMinutes(entrada);
-  if (diff <= 0) return 0;
-  const horas = diff / 60 - 1; // desconta 1h de almoço
-  return Math.max(0, Math.round(horas * 100) / 100);
-}
-
-/** Jornada normal em horas para a data: 9h seg–qui, 8h sex, 0h fim de semana. */
-function jornadaNormal(dateISO: string): number {
-  const dow = new Date(dateISO + "T00:00:00").getDay();
-  if (dow === 0 || dow === 6) return 0;
-  if (dow === 5) return 8;
-  return 9;
-}
-
 function calcHoras(entrada: string, saida: string, dateISO: string) {
-  const total = totalHorasTrabalhadas(entrada, saida);
-  const jornada = jornadaNormal(dateISO);
-  const hn = Math.min(total, jornada);
-  const he = Math.max(0, total - jornada);
-  return {
-    total,
-    hn: Math.round(hn * 100) / 100,
-    he: Math.round(he * 100) / 100,
-  };
+  const calculo = calcularHorasJornada(entrada, saida, dateISO);
+  return { total: calculo.total, hn: calculo.horasNormais, he: calculo.horasExtras };
 }
 
 function formatarHorasBR(horas: number): string {
@@ -143,7 +124,7 @@ const schema = z
       return;
     }
     const { he } = calcHoras(v.hora_entrada, v.hora_saida, v.data);
-    if (he > 2 && !v.justificativa_extras?.trim()) {
+    if (justificativaExtrasObrigatoria(he) && !v.justificativa_extras?.trim()) {
       ctx.addIssue({
         code: "custom",
         path: ["justificativa_extras"],
