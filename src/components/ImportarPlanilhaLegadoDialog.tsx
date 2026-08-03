@@ -38,6 +38,14 @@ import {
   conciliarCelulasComAlocacoesExistentes,
   criarSourceCellKey,
 } from "@/lib/importacao-legado-auditoria";
+import {
+  alocacoesAposDesligamento,
+  dataLocalISO,
+  desligamentosParaAtualizar,
+  planejarDesligamento,
+  validarDesligamentosAplicados,
+  type DesligamentoIdentificado,
+} from "@/lib/importacao-legado-desligamentos";
 
 type TipoMaoObra = TipoMaoObraLegado;
 type LegacyCell = { codigoBase: string; tipoMaoObra: TipoMaoObra; raw: string };
@@ -49,6 +57,7 @@ type FuncionarioExistente = {
   ativo: boolean;
   deleted_at: string | null;
   data_admissao: string | null;
+  data_desligamento: string | null;
 };
 type AdmissaoAlterar = {
   funcionarioId: string;
@@ -123,7 +132,9 @@ type Preview = {
   sedesEncontradas: number;
   sedesResolvidas: string[];
   sedesSemCentroAnterior: string[];
-  desligamentos: Array<{ funcionario: string; data: string }>;
+  desligamentos: DesligamentoIdentificado[];
+  alocacoesAposDesligamento: string[];
+  funcionariosAtivosAusentes: string[];
   erros: string[];
   ignorados: string[];
   inconsistencias: string[];
@@ -179,8 +190,7 @@ function pad(n: number) {
 }
 function parseExcelDate(value: unknown): string | null {
   if (value == null || value === "") return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime()))
-    return value.toISOString().slice(0, 10);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return dataLocalISO(value);
   if (typeof value === "number") {
     const p = XLSX.SSF.parse_date_code(value);
     return p ? p.y + "-" + pad(p.m) + "-" + pad(p.d) : null;
@@ -202,8 +212,7 @@ function parseExcelDate(value: unknown): string | null {
     : null;
 }
 function parseHeaderDate(value: unknown, fallbackYear: number) {
-  if (value instanceof Date && !Number.isNaN(value.getTime()))
-    return value.toISOString().slice(0, 10);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return dataLocalISO(value);
   if (typeof value === "number") {
     const p = XLSX.SSF.parse_date_code(value);
     return p ? p.y + "-" + pad(p.m) + "-" + pad(p.d) : null;
@@ -288,6 +297,8 @@ function emptyPreview(error: string): Preview {
     sedesResolvidas: [],
     sedesSemCentroAnterior: [],
     desligamentos: [],
+    alocacoesAposDesligamento: [],
+    funcionariosAtivosAusentes: [],
     erros: [error],
     ignorados: [],
     inconsistencias: [],
@@ -323,6 +334,7 @@ export function ImportarPlanilhaLegadoDialog() {
       !preview.bloqueado &&
       (preview.alocacoesValidas.length > 0 ||
         preview.admissoesAlterar.length > 0 ||
+        desligamentosParaAtualizar(preview.desligamentos).length > 0 ||
         preview.funcionariosCriar.length > 0 ||
         (preview.modo === "admissoes" && preview.admissoesIguais.length > 0)),
     [canImportar, preview],
@@ -368,7 +380,7 @@ export function ImportarPlanilhaLegadoDialog() {
     const ignorados: string[] = [];
     const inconsistencias: string[] = [];
     const admissoesIgnoradas: string[] = [];
-    const desligamentos = new Map<string, { funcionario: string; data: string }>();
+    const desligamentos = new Map<string, DesligamentoIdentificado>();
     let celulasVazias = 0;
     let celulasDesligado = 0;
     let celulasInvalidas = 0;
@@ -435,6 +447,10 @@ export function ImportarPlanilhaLegadoDialog() {
     );
     if (funcsError) throw funcsError;
     const funcionariosExistentes = (funcsData ?? []) as unknown as FuncionarioExistente[];
+    const funcionariosAtivosAusentes = funcionariosExistentes
+      .filter((f) => f.ativo && !f.deleted_at && !funcionariosPorNome.has(normalizeName(f.nome)))
+      .map((f) => `${f.nome}: ativo no banco e não localizado na planilha importada.`)
+      .sort();
     const funcionariosPorNomeExistentes = new Map<string, FuncionarioExistente[]>();
     for (const f of funcionariosExistentes) {
       const key = normalizeName(f.nome);
@@ -603,7 +619,18 @@ export function ImportarPlanilhaLegadoDialog() {
           celulasDesligado += 1;
           if (!desligadoDesde) {
             desligadoDesde = col.date;
-            desligamentos.set(funcKey, { funcionario: item.nome, data: col.date });
+            desligamentos.set(
+              funcKey,
+              planejarDesligamento(
+                funcKey,
+                item.nome,
+                col.date,
+                funcionarioExistente && !funcionarioExistente.deleted_at
+                  ? funcionarioExistente
+                  : undefined,
+                !funcionarioExistente,
+              ),
+            );
           }
           continue;
         }
@@ -745,6 +772,32 @@ export function ImportarPlanilhaLegadoDialog() {
       }
     }
     const conciliacao = conciliarCelulasComAlocacoesExistentes(alocacoes, registrosBanco);
+    const desligamentosIdentificados = Array.from(desligamentos.values());
+    const idsComDesligamento = desligamentosIdentificados
+      .map((item) => item.funcionarioId)
+      .filter((id): id is string => Boolean(id));
+    let alocacoesHistoricasAposD: AlocacaoExistente[] = [];
+    if (idsComDesligamento.length > 0) {
+      const primeiraDataD = desligamentosIdentificados
+        .map((item) => item.primeiraCelulaD)
+        .sort()[0];
+      const candidatas = await buscarTodasPaginas<AlocacaoExistente>((from, to) =>
+        supabase
+          .from("alocacoes")
+          .select("id,funcionario_id,obra_id,data,obras(nome)")
+          .in("funcionario_id", idsComDesligamento)
+          .gte("data", primeiraDataD)
+          .range(from, to),
+      );
+      alocacoesHistoricasAposD = alocacoesAposDesligamento(desligamentosIdentificados, candidatas);
+    }
+    const desligamentoPorId = new Map(
+      desligamentosIdentificados.map((item) => [item.funcionarioId, item]),
+    );
+    const alocacoesAposDesligamentoAvisos = alocacoesHistoricasAposD.map((item) => {
+      const desligamento = desligamentoPorId.get(item.funcionario_id)!;
+      return `${desligamento.funcionario}: alocação ${item.id} em ${formatDate(item.data)} será preservada; ocorre na data ou após o desligamento de ${formatDate(desligamento.primeiraCelulaD)}.`;
+    });
     const nomesObras = new Map(obrasExistentes.map((obra) => [obra.id, obra.nome]));
     const alocacoesJaExistentes = conciliacao.existentes.map((item) => {
       const centrosExistentes = item.obraIdsExistentes
@@ -812,7 +865,9 @@ export function ImportarPlanilhaLegadoDialog() {
       sedesEncontradas,
       sedesResolvidas,
       sedesSemCentroAnterior,
-      desligamentos: Array.from(desligamentos.values()),
+      desligamentos: desligamentosIdentificados,
+      alocacoesAposDesligamento: alocacoesAposDesligamentoAvisos,
+      funcionariosAtivosAusentes,
       erros,
       ignorados,
       inconsistencias,
@@ -881,6 +936,40 @@ export function ImportarPlanilhaLegadoDialog() {
         alocacoesAtuais,
       );
       const alocacoesParaInserir = revalidacao.novas;
+      const desligamentosAtualizar = desligamentosParaAtualizar(preview.desligamentos);
+      const resultadosDesligamentos = await Promise.all(
+        desligamentosAtualizar.map((desligamento) =>
+          supabase
+            .from("funcionarios")
+            .update({
+              ativo: false,
+              data_desligamento: desligamento.primeiraCelulaD,
+            })
+            .eq("id", desligamento.funcionarioId),
+        ),
+      );
+      const erroDesligamento = resultadosDesligamentos.find((resultado) => resultado.error)?.error;
+      if (erroDesligamento) throw erroDesligamento;
+      if (desligamentosAtualizar.length > 0) {
+        const { data: funcionariosRevalidados, error: erroRevalidacao } = await supabase
+          .from("funcionarios")
+          .select("id,ativo,data_desligamento")
+          .in(
+            "id",
+            desligamentosAtualizar.map((item) => item.funcionarioId),
+          );
+        if (erroRevalidacao) throw erroRevalidacao;
+        const divergentes = validarDesligamentosAplicados(
+          desligamentosAtualizar,
+          funcionariosRevalidados ?? [],
+        );
+        if (divergentes.length > 0)
+          throw new Error(
+            `Desligamentos não confirmados após a gravação: ${divergentes
+              .map((item) => item.funcionario)
+              .join(", ")}. Alocações não foram gravadas.`,
+          );
+      }
       for (const admissao of preview.admissoesAlterar) {
         const { error } = await supabase
           .from("funcionarios")
@@ -1057,6 +1146,19 @@ export function ImportarPlanilhaLegadoDialog() {
                 <Resumo label="Alocações válidas" value={preview.alocacoesValidas.length} />
                 <Resumo label="Células vazias" value={preview.celulasVazias} />
                 <Resumo label="Células D/desligado" value={preview.celulasDesligado} />
+                <Resumo label="Desligamentos identificados" value={preview.desligamentos.length} />
+                <Resumo
+                  label="Desligamentos novos"
+                  value={preview.desligamentos.filter((d) => d.acao === "aplicar").length}
+                />
+                <Resumo
+                  label="Desligamentos a corrigir"
+                  value={preview.desligamentos.filter((d) => d.acao === "corrigir").length}
+                />
+                <Resumo
+                  label="Desligamentos já iguais"
+                  value={preview.desligamentos.filter((d) => d.acao === "manter").length}
+                />
                 <Resumo label="Sedes encontradas" value={preview.sedesEncontradas} />
                 <Resumo label="Sedes resolvidas" value={preview.sedesResolvidas.length} />
                 <Resumo
@@ -1113,10 +1215,31 @@ export function ImportarPlanilhaLegadoDialog() {
                 </Alert>
               )}
               <PreviewList
-                title="Desligamentos"
-                items={preview.desligamentos.map(
-                  (d) => d.funcionario + ": desligado a partir de " + formatDate(d.data),
-                )}
+                title="Desligamentos identificados"
+                items={preview.desligamentos.map((d) => {
+                  const atual = d.ativoAtual
+                    ? `ativo, data ${d.dataAtual ? formatDate(d.dataAtual) : "não informada"}`
+                    : d.ativoAtual === false
+                      ? `inativo, data ${d.dataAtual ? formatDate(d.dataAtual) : "não informada"}`
+                      : "sem cadastro existente";
+                  const acao =
+                    d.acao === "manter"
+                      ? "manter desligamento já igual"
+                      : d.acao === "corrigir"
+                        ? `corrigir desligamento para ${formatDate(d.primeiraCelulaD)}`
+                        : d.acao === "aplicar"
+                          ? `aplicar desligamento em ${formatDate(d.primeiraCelulaD)}`
+                          : "não atualizar automaticamente";
+                  return `${d.funcionario} — Atual: ${atual}. Planilha: D em ${formatDate(d.primeiraCelulaD)}. Ação: ${acao}.`;
+                })}
+              />
+              <PreviewList
+                title="Alocações existentes na data ou após o desligamento — preservadas"
+                items={preview.alocacoesAposDesligamento}
+              />
+              <PreviewList
+                title="Funcionários ativos no banco não localizados na planilha"
+                items={preview.funcionariosAtivosAusentes}
               />
               <PreviewList title="Sedes resolvidas" items={preview.sedesResolvidas} />
               <PreviewList
