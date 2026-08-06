@@ -37,6 +37,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Download } from "lucide-react
 import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
+import { dataLocalISO, datasUteisNoIntervalo, diaUtilAnterior } from "@/lib/relatorio-sem-alocacao";
 import { useCategorias, tipoCategoria } from "@/lib/categorias";
 import {
   calcularCusto,
@@ -98,41 +99,11 @@ type RegRow = {
 };
 type ObraRow = { id: string; nome: string };
 
-function dataLocalISO(data: Date) {
-  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(
-    data.getDate(),
-  ).padStart(2, "0")}`;
-}
-
 function payrollRange(year: number, month: number) {
   // Folha: dia 25 do mês anterior até dia 24 do mês selecionado
   const start = new Date(year, month - 1, 25);
   const end = new Date(year, month, 24);
   return { start: dataLocalISO(start), end: dataLocalISO(end), startDate: start, endDate: end };
-}
-
-function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
-  const datas: string[] = [];
-  for (
-    let data = new Date(inicioISO + "T00:00:00");
-    data <= new Date(fimISO + "T00:00:00");
-    data = new Date(data.getFullYear(), data.getMonth(), data.getDate() + 1)
-  ) {
-    const dia = data.getDay();
-    if (dia !== 0 && dia !== 6) {
-      datas.push(dataLocalISO(data));
-    }
-  }
-  return datas;
-}
-
-function diaUtilAnterior(dataISO: string) {
-  const [ano, mes, dia] = dataISO.split("-").map(Number);
-  let data = new Date(ano, mes - 1, dia - 1);
-  while (data.getDay() === 0 || data.getDay() === 6) {
-    data = new Date(data.getFullYear(), data.getMonth(), data.getDate() - 1);
-  }
-  return dataLocalISO(data);
 }
 
 function tipoPorAlocacao(
