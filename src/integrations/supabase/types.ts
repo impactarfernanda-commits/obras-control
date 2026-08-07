@@ -391,9 +391,11 @@ export type Database = {
           horas_normais: number;
           id: string;
           justificativa_extras: string | null;
+          falta_tipo: string | null;
           motivo_ausencia: string | null;
           obra_id: string;
           observacoes: string | null;
+          tipo_registro: string;
           updated_at: string;
           updated_by: string | null;
         };
@@ -407,9 +409,11 @@ export type Database = {
           horas_normais?: number;
           id?: string;
           justificativa_extras?: string | null;
+          falta_tipo?: string | null;
           motivo_ausencia?: string | null;
           obra_id: string;
           observacoes?: string | null;
+          tipo_registro?: string;
           updated_at?: string;
           updated_by?: string | null;
         };
@@ -423,9 +427,11 @@ export type Database = {
           horas_normais?: number;
           id?: string;
           justificativa_extras?: string | null;
+          falta_tipo?: string | null;
           motivo_ausencia?: string | null;
           obra_id?: string;
           observacoes?: string | null;
+          tipo_registro?: string;
           updated_at?: string;
           updated_by?: string | null;
         };
@@ -570,6 +576,21 @@ export type Database = {
       };
     };
     Functions: {
+      obras_salvar_registro_horas: {
+        Args: {
+          p_data: string;
+          p_falta_tipo?: string | null;
+          p_funcionario_id: string;
+          p_horas_extras?: number;
+          p_horas_normais?: number;
+          p_id: string | null;
+          p_justificativa_extras?: string | null;
+          p_obra_id: string;
+          p_observacoes?: string | null;
+          p_tipo_registro: string;
+        };
+        Returns: Database["public"]["Tables"]["registros_horas"]["Row"];
+      };
       obras_control_funcionarios_por_ids: {
         Args: { p_ids: string[] };
         Returns: {

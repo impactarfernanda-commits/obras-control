@@ -55,6 +55,7 @@ import {
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
 import { consolidarCustosCentros } from "@/lib/relatorio-centro-custo";
+import { rotuloFalta } from "@/lib/registro-falta";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   beforeLoad: async () => {
@@ -96,6 +97,9 @@ type RegRow = {
   horas_normais: number;
   horas_extras: number;
   ausencia: boolean;
+  tipo_registro: "horas" | "falta";
+  falta_tipo: string | null;
+  observacoes: string | null;
 };
 type ObraRow = { id: string; nome: string };
 
@@ -125,6 +129,7 @@ function RelatoriosPage() {
   >("all");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
+  const [tipoRegistroFilter, setTipoRegistroFilter] = useState<"all" | "horas" | "falta">("all");
   const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
 
@@ -178,7 +183,9 @@ function RelatoriosPage() {
       buscarTodasPaginas<RegRow>((from, to) =>
         supabase
           .from("registros_horas")
-          .select("funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia")
+          .select(
+            "funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo,observacoes",
+          )
           .gte("data", start)
           .lte("data", end)
           .order("data", { ascending: true })
@@ -381,6 +388,25 @@ function RelatoriosPage() {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Sem alocação");
     XLSX.writeFile(workbook, `funcionarios-sem-alocacao-${start}-${end}.xlsx`);
   }
+  function exportarApontamentos() {
+    const nomes = new Map(funcionariosRelatorio.map((f) => [f.id, f.nome]));
+    const centros = new Map((obras ?? []).map((o) => [o.id, o.nome]));
+    const rows = (registros ?? [])
+      .filter((r) => tipoRegistroFilter === "all" || r.tipo_registro === tipoRegistroFilter)
+      .map((r) => ({
+        Data: new Date(r.data + "T00:00:00").toLocaleDateString("pt-BR"),
+        Funcionário: nomes.get(r.funcionario_id) ?? "—",
+        "Centro de custo": centros.get(r.obra_id) ?? "—",
+        "Tipo de registro": r.tipo_registro === "falta" ? "Falta" : "Horas trabalhadas",
+        "Classificação da falta": r.tipo_registro === "falta" ? rotuloFalta(r.falta_tipo) : "",
+        "Horas normais": r.tipo_registro === "falta" ? 0 : r.horas_normais,
+        "Horas extras": r.tipo_registro === "falta" ? 0 : r.horas_extras,
+        Observação: r.observacoes ?? "",
+      }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Apontamentos");
+    XLSX.writeFile(workbook, `apontamentos-${start}-${end}.xlsx`);
+  }
   // Mostra ativos + inativos com lançamentos no período (custos pagos mesmo após desligamento).
   const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce(
@@ -411,7 +437,11 @@ function RelatoriosPage() {
     : null;
   const registrosDetalhe = funcionarioDetalhe
     ? (registros ?? [])
-        .filter((registro) => registro.funcionario_id === funcionarioDetalhe.id)
+        .filter(
+          (registro) =>
+            registro.funcionario_id === funcionarioDetalhe.id &&
+            (tipoRegistroFilter === "all" || registro.tipo_registro === tipoRegistroFilter),
+        )
         .map((registro) => {
           const alocacao = alocacaoMap.get(
             `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
@@ -487,6 +517,32 @@ function RelatoriosPage() {
           </div>
         }
       />
+
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <Select
+            value={tipoRegistroFilter}
+            onValueChange={(value) => setTipoRegistroFilter(value as typeof tipoRegistroFilter)}
+          >
+            <SelectTrigger className="w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os apontamentos</SelectItem>
+              <SelectItem value="horas">Horas trabalhadas</SelectItem>
+              <SelectItem value="falta">Faltas</SelectItem>
+            </SelectContent>
+          </Select>
+          <Badge variant="secondary">
+            {(registros ?? []).filter((r) => r.tipo_registro === "falta").length} falta(s) no
+            período
+          </Badge>
+          <Button variant="outline" onClick={exportarApontamentos} disabled={!registros?.length}>
+            <Download className="mr-2 h-4 w-4" />
+            Exportar apontamentos
+          </Button>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="funcionarios" className="space-y-4">
         <TabsList>
@@ -1039,18 +1095,21 @@ function RelatoriosPage() {
                     <TableRow>
                       <TableHead>Data</TableHead>
                       <TableHead>Centro de custo</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead>Classificação</TableHead>
                       <TableHead>Entrada</TableHead>
                       <TableHead>Saída</TableHead>
                       <TableHead className="text-right">Horas normais</TableHead>
                       <TableHead className="text-right">HE 50%</TableHead>
                       <TableHead className="text-right">HE 100%</TableHead>
                       <TableHead className="text-right">Custo da HE</TableHead>
+                      <TableHead>Observação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {registrosDetalhe.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                        <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                           Nenhum registro de horas encontrado nesta competência.
                         </TableCell>
                       </TableRow>
@@ -1065,20 +1124,47 @@ function RelatoriosPage() {
                               {new Date(`${registro.data}T00:00:00`).toLocaleDateString("pt-BR")}
                             </TableCell>
                             <TableCell>{registro.obraNome}</TableCell>
-                            <TableCell>{registro.horaEntrada}</TableCell>
-                            <TableCell>{registro.horaSaida}</TableCell>
-                            <TableCell className="text-right">
-                              {formatarHorasDecimais(registro.horas_normais)}
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  registro.tipo_registro === "falta" ? "destructive" : "secondary"
+                                }
+                              >
+                                {registro.tipo_registro === "falta" ? "Falta" : "Horas"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {registro.tipo_registro === "falta"
+                                ? rotuloFalta(registro.falta_tipo)
+                                : "—"}
+                            </TableCell>
+                            <TableCell>
+                              {registro.tipo_registro === "falta" ? "—" : registro.horaEntrada}
+                            </TableCell>
+                            <TableCell>
+                              {registro.tipo_registro === "falta" ? "—" : registro.horaSaida}
                             </TableCell>
                             <TableCell className="text-right">
-                              {formatarHorasDecimais(domingo ? 0 : registro.horas_extras)}
+                              {registro.tipo_registro === "falta"
+                                ? "—"
+                                : formatarHorasDecimais(registro.horas_normais)}
                             </TableCell>
                             <TableCell className="text-right">
-                              {formatarHorasDecimais(domingo ? registro.horas_extras : 0)}
+                              {registro.tipo_registro === "falta"
+                                ? "—"
+                                : formatarHorasDecimais(domingo ? 0 : registro.horas_extras)}
                             </TableCell>
                             <TableCell className="text-right">
-                              {fmtBRL(registro.custoHoraExtra)}
+                              {registro.tipo_registro === "falta"
+                                ? "—"
+                                : formatarHorasDecimais(domingo ? registro.horas_extras : 0)}
                             </TableCell>
+                            <TableCell className="text-right">
+                              {registro.tipo_registro === "falta"
+                                ? "—"
+                                : fmtBRL(registro.custoHoraExtra)}
+                            </TableCell>
+                            <TableCell>{registro.observacoes || "—"}</TableCell>
                           </TableRow>
                         );
                       })

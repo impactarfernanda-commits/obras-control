@@ -1019,19 +1019,23 @@ export function ImportarPlanilhaLegadoDialog() {
           throw new Error(amigavel?.description ?? alocErr.message);
         }
       }
-      const regRows = alocacoesParaInserir.map((a) => ({
-        funcionario_id: funcMap.get(a.funcionarioKey)?.id,
-        obra_id: a.obraId,
-        data: a.data,
-        horas_normais: horasNormais(a.data),
-        horas_extras: 0,
-        ausencia: false,
-        justificativa_extras: null,
-        motivo_ausencia: null,
-        observacoes: "Importado da planilha legado",
-        created_by: user.id,
-        updated_by: user.id,
-      }));
+      const regRows = alocacoesParaInserir
+        .filter((a) => horasNormais(a.data) > 0)
+        .map((a) => ({
+          funcionario_id: funcMap.get(a.funcionarioKey)?.id,
+          obra_id: a.obraId,
+          data: a.data,
+          horas_normais: horasNormais(a.data),
+          horas_extras: 0,
+          ausencia: false,
+          tipo_registro: "horas",
+          falta_tipo: null,
+          justificativa_extras: null,
+          motivo_ausencia: null,
+          observacoes: "Importado da planilha legado",
+          created_by: user.id,
+          updated_by: user.id,
+        }));
       if (regRows.length > 0) {
         const { error: regErr } = await supabase.from("registros_horas").insert(regRows as never);
         if (regErr) throw regErr;

@@ -5,8 +5,6 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Loader2, Check } from "lucide
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
-import { useAuth } from "@/hooks/use-auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,6 +24,17 @@ import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
+import {
+  AVISO_FALTA_INTEGRAL,
+  CLASSIFICACOES_FALTA,
+  buscarConflitoRegistroDiario,
+  mensagemErroRegistro,
+  registroEhFalta,
+  rotuloFalta,
+  validarRegistroApontamento,
+  type FaltaTipo,
+  type TipoRegistro,
+} from "@/lib/registro-falta";
 
 export const Route = createFileRoute("/_authenticated/registros")({
   component: RegistrosPage,
@@ -88,6 +97,8 @@ type Registro = {
   ausencia: boolean;
   motivo_ausencia: string | null;
   observacoes: string | null;
+  tipo_registro: TipoRegistro;
+  falta_tipo: FaltaTipo | null;
 };
 
 type CellKey = string; // `${func_id}|${obra_id}|${date}`
@@ -96,7 +107,7 @@ const ck = (f: string, o: string, d: string): CellKey => `${f}|${o}|${d}`;
 type CellStatus = "empty" | "ok" | "warn" | "error";
 function cellStatus(r: Registro | undefined): CellStatus {
   if (!r) return "empty";
-  if (r.ausencia) return "warn";
+  if (registroEhFalta(r)) return "warn";
   const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
   if (total <= 0) return "empty";
   if (total > 16) return "error";
@@ -108,7 +119,6 @@ function cellStatus(r: Registro | undefined): CellStatus {
 
 // ---------- page ----------
 function RegistrosPage() {
-  const { user } = useAuth();
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()));
   const [obraId, setObraId] = useState<string>("");
@@ -310,32 +320,37 @@ function RegistrosPage() {
       setSaving((s) => ({ ...s, [key]: "saving" }));
       const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
       // Skip persisting completely empty rows that have no id
-      if (!r.id && !r.ausencia && total === 0 && !r.observacoes?.trim()) {
+      if (!r.id && !registroEhFalta(r) && total === 0 && !r.observacoes?.trim()) {
         setSaving((s) => ({ ...s, [key]: "idle" }));
         return;
       }
-      const payload: Database["public"]["Tables"]["registros_horas"]["Insert"] = {
-        funcionario_id: r.funcionario_id,
-        obra_id: r.obra_id,
-        data: r.data,
-        horas_normais: r.ausencia ? 0 : r.horas_normais,
-        horas_extras: r.ausencia ? 0 : r.horas_extras,
-        justificativa_extras: r.justificativa_extras?.trim() || null,
-        ausencia: r.ausencia,
-        motivo_ausencia: r.motivo_ausencia?.trim() || null,
-        observacoes: r.observacoes?.trim() || null,
-        updated_by: user?.id ?? null,
-      };
-      if (!r.id) payload.created_by = user?.id ?? null;
-
-      const { data, error } = await supabase
-        .from("registros_horas")
-        .upsert(payload, { onConflict: "funcionario_id,obra_id,data" })
-        .select()
-        .single();
+      const erroValidacao = validarRegistroApontamento(r);
+      if (erroValidacao) {
+        setSaving((s) => ({ ...s, [key]: "error" }));
+        toast.error(erroValidacao);
+        return;
+      }
+      const conflitoRegistro = await buscarConflitoRegistroDiario(supabase, r);
+      if (conflitoRegistro) {
+        setSaving((s) => ({ ...s, [key]: "error" }));
+        toast.error(conflitoRegistro);
+        return;
+      }
+      const { data, error } = await supabase.rpc("obras_salvar_registro_horas", {
+        p_id: r.id ?? null,
+        p_funcionario_id: r.funcionario_id,
+        p_obra_id: r.obra_id,
+        p_data: r.data,
+        p_tipo_registro: r.tipo_registro,
+        p_falta_tipo: r.falta_tipo,
+        p_horas_normais: registroEhFalta(r) ? 0 : r.horas_normais,
+        p_horas_extras: registroEhFalta(r) ? 0 : r.horas_extras,
+        p_justificativa_extras: r.justificativa_extras?.trim() || null,
+        p_observacoes: r.observacoes?.trim() || null,
+      });
       if (error) {
         setSaving((s) => ({ ...s, [key]: "error" }));
-        toast.error(error.message);
+        toast.error(mensagemErroRegistro(error));
         return;
       }
       setCells((prev) => ({ ...prev, [key]: data as Registro }));
@@ -347,7 +362,7 @@ function RegistrosPage() {
         setSaving((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s));
       }, 1200);
     },
-    [user?.id, qc, obraId],
+    [qc, obraId],
   );
 
   const updateCell = useCallback(
@@ -608,6 +623,8 @@ function RegistrosPage() {
                           ausencia: false,
                           motivo_ausencia: null,
                           observacoes: null,
+                          tipo_registro: "horas",
+                          falta_tipo: null,
                         };
                         const isAlloc = allocSet.has(`${f.id}|${dateStr}`);
                         return (
@@ -819,8 +836,13 @@ function DayCell({
           )}
           title={!alocado ? "Funcionário não está alocado neste dia" : undefined}
         >
-          {registro.ausencia ? (
-            <span className="font-semibold text-amber-700 dark:text-amber-400">Ausente</span>
+          {registroEhFalta(registro) ? (
+            <>
+              <span className="font-semibold text-amber-700 dark:text-amber-400">Falta</span>
+              <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                {rotuloFalta(registro.falta_tipo)}
+              </span>
+            </>
           ) : total > 0 ? (
             <>
               <span className="text-base font-semibold leading-tight">
@@ -853,31 +875,61 @@ function DayCell({
           })}
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="h-4 w-4"
-            checked={registro.ausencia}
-            onChange={(e) =>
-              onChange({
-                ausencia: e.target.checked,
-                ...(e.target.checked
-                  ? { horas_normais: 0, horas_extras: 0, justificativa_extras: null }
-                  : {}),
-              })
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Tipo de registro</label>
+          <Select
+            value={registro.tipo_registro}
+            onValueChange={(value: TipoRegistro) =>
+              onChange(
+                value === "falta"
+                  ? {
+                      tipo_registro: "falta",
+                      ausencia: true,
+                      falta_tipo: null,
+                      horas_normais: 0,
+                      horas_extras: 0,
+                      justificativa_extras: null,
+                    }
+                  : {
+                      tipo_registro: "horas",
+                      ausencia: false,
+                      falta_tipo: null,
+                      motivo_ausencia: null,
+                    },
+              )
             }
-          />
-          Marcar ausência
-        </label>
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="horas">Horas trabalhadas</SelectItem>
+              <SelectItem value="falta">Falta</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-        {registro.ausencia ? (
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Motivo da ausência *</label>
-            <Input
-              value={registro.motivo_ausencia ?? ""}
-              onChange={(e) => onChange({ motivo_ausencia: e.target.value })}
-              placeholder="Ex.: atestado médico, falta justificada..."
-            />
+        {registroEhFalta(registro) ? (
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Classificação da falta *</label>
+              <Select
+                value={registro.falta_tipo ?? ""}
+                onValueChange={(value: FaltaTipo) => onChange({ falta_tipo: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLASSIFICACOES_FALTA.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-amber-700 dark:text-amber-400">{AVISO_FALTA_INTEGRAL}</p>
           </div>
         ) : (
           <>
