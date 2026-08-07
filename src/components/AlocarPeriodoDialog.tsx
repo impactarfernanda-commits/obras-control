@@ -321,6 +321,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         horas_extras: 0,
         justificativa_extras: null,
         ausencia: false,
+        tipo_registro: "horas",
+        falta_tipo: null,
         motivo_ausencia: null,
         observacoes: null,
         created_by: user?.id ?? null,

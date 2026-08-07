@@ -17,6 +17,8 @@ export type RegistroRelatorio = {
   horas_normais: number;
   horas_extras: number;
   ausencia: boolean;
+  tipo_registro?: "horas" | "falta";
+  falta_tipo?: string | null;
 };
 
 export type FuncionarioRelatorio = {
@@ -140,11 +142,13 @@ export function consolidarCustosCentros(input: Input) {
     }
 
     const registro = regIndex.get(chave(alocacao.funcionario_id, alocacao.obra_id, alocacao.data));
+    const falta = registro?.tipo_registro === "falta";
     if (!registro) {
       avisos.add(
         "Ha alocacoes sem registro de horas correspondente; foi usada a jornada padrao do dia.",
       );
     } else if (
+      !falta &&
       !registro.ausencia &&
       Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0) <= 0
     ) {
@@ -161,18 +165,21 @@ export function consolidarCustosCentros(input: Input) {
       diasUteis: input.diasUteis,
       dataISO: alocacao.data,
       horasNormais: registro?.horas_normais ?? null,
-      ausencia: registro?.ausencia ?? null,
+      ausencia: falta || (registro?.ausencia ?? false),
     });
     if (custoBase <= 0) continue;
 
     const tipo = input.resolverTipo(alocacao, funcionario);
     const linha = obterLinha(alocacao.obra_id, funcionario, tipo, !alocacao.tipo_mao_obra);
     linha.datas.add(alocacao.data);
-    linha.horasNormais += registro?.horas_normais ?? (input.horasNormaisPadrao(alocacao.data) || 9);
+    linha.horasNormais += falta
+      ? 0
+      : (registro?.horas_normais ?? (input.horasNormaisPadrao(alocacao.data) || 9));
     linha.custoBase += custoBase;
   }
 
   for (const registro of input.registros) {
+    if (registro.tipo_registro === "falta") continue;
     if (Number(registro.horas_extras || 0) <= 0) continue;
     const funcionario = funcMap.get(registro.funcionario_id);
     const custo = input.custos.get(registro.funcionario_id);

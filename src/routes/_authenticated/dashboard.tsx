@@ -2,12 +2,35 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  AreaChart,
+  Area,
 } from "recharts";
 import {
-  DollarSign, Users, Clock, AlertTriangle, TrendingUp, Briefcase,
-  UserCheck, Layers, FileDown, Filter, X, Activity,
+  DollarSign,
+  Users,
+  Clock,
+  AlertTriangle,
+  TrendingUp,
+  Briefcase,
+  UserCheck,
+  Layers,
+  FileDown,
+  Filter,
+  X,
+  Activity,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -20,10 +43,17 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { calcularCusto, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
@@ -43,24 +73,39 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 const CHART_COLORS = [
-  "hsl(var(--primary))", "#10b981", "#f59e0b", "#ef4444",
-  "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#6366f1",
+  "hsl(var(--primary))",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ec4899",
+  "#84cc16",
+  "#f97316",
+  "#6366f1",
 ];
 
 // Folha mensal: dia 25 do mês anterior até dia 24 do mês de competência.
 // Datas >= dia 25 pertencem ao mês seguinte (competência).
 const monthKey = (d: string) => {
   const [yStr, mStr, dStr] = d.split("-");
-  const y = Number(yStr), m = Number(mStr), day = Number(dStr);
+  const y = Number(yStr),
+    m = Number(mStr),
+    day = Number(dStr);
   const dt = new Date(y, m - 1 + (day >= 25 ? 1 : 0), 1);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
 };
 const monthLabel = (k: string) => {
   const [y, m] = k.split("-");
-  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("pt-BR", {
+    month: "short",
+    year: "2-digit",
+  });
 };
 const monthsBack = (n: number) => {
-  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - n);
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - n);
   return d.toISOString().slice(0, 10);
 };
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -77,11 +122,20 @@ type FuncRow = {
 type AlocRow = { funcionario_id: string; obra_id: string; data: string };
 type ObraRow = { id: string; nome: string };
 type RegRow = {
-  funcionario_id: string; obra_id: string; data: string;
-  horas_normais: number; horas_extras: number; ausencia: boolean;
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
+  horas_normais: number;
+  horas_extras: number;
+  ausencia: boolean;
+  tipo_registro: "horas" | "falta";
+  falta_tipo: string | null;
 };
 type CustoIndireto = {
-  obra_id: string; categoria_id: string; valor: number; data: string;
+  obra_id: string;
+  categoria_id: string;
+  valor: number;
+  data: string;
 };
 type Categoria = { id: string; nome: string };
 
@@ -121,7 +175,8 @@ function DashboardPage() {
       const { data, error } = await supabase
         .from("alocacoes")
         .select("funcionario_id,obra_id,data")
-        .gte("data", dataIni).lte("data", dataFim);
+        .gte("data", dataIni)
+        .lte("data", dataFim);
       if (error) throw error;
       return data as AlocRow[];
     },
@@ -132,8 +187,11 @@ function DashboardPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("registros_horas")
-        .select("funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia")
-        .gte("data", dataIni).lte("data", dataFim);
+        .select(
+          "funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo",
+        )
+        .gte("data", dataIni)
+        .lte("data", dataFim);
       if (error) throw error;
       return data as RegRow[];
     },
@@ -145,9 +203,10 @@ function DashboardPage() {
       const { data, error } = await supabase
         .from("custos_indiretos")
         .select("obra_id,categoria_id,valor,data")
-        .gte("data", dataIni).lte("data", dataFim);
+        .gte("data", dataIni)
+        .lte("data", dataFim);
       if (error) throw error;
-      return (data as unknown) as CustoIndireto[];
+      return data as unknown as CustoIndireto[];
     },
   });
 
@@ -156,9 +215,10 @@ function DashboardPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("custos_indiretos_categorias")
-        .select("id,nome").order("nome");
+        .select("id,nome")
+        .order("nome");
       if (error) throw error;
-      return (data as unknown) as Categoria[];
+      return data as unknown as Categoria[];
     },
   });
 
@@ -166,12 +226,13 @@ function DashboardPage() {
 
   // ---------- Maps & filters applied ----------
   const obrasMap = useMemo(() => new Map((obras ?? []).map((o) => [o.id, o.nome])), [obras]);
-  const ciCatMap = useMemo(() => new Map((categoriasCI ?? []).map((c) => [c.id, c.nome])), [categoriasCI]);
+  const ciCatMap = useMemo(
+    () => new Map((categoriasCI ?? []).map((c) => [c.id, c.nome])),
+    [categoriasCI],
+  );
   const funcionariosOperacionais = useMemo(
     () =>
-      (funcionarios ?? []).filter(
-        (f) => f.deleted_at == null && f.visivel_obras_control !== false,
-      ),
+      (funcionarios ?? []).filter((f) => f.deleted_at == null && f.visivel_obras_control !== false),
     [funcionarios],
   );
   const funcMap = useMemo(
@@ -186,15 +247,19 @@ function DashboardPage() {
   const funcsAtivos = funcionariosOperacionais.filter((f) => f.ativo && funcAllowed(f));
   const allocFiltered = (alocacoes ?? []).filter((a) => {
     if (!obraAllowed(a.obra_id)) return false;
-    const f = funcMap.get(a.funcionario_id); if (!f) return false;
+    const f = funcMap.get(a.funcionario_id);
+    if (!f) return false;
     return funcAllowed(f);
   });
   const regsFiltered = (registros ?? []).filter((r) => {
     if (!obraAllowed(r.obra_id)) return false;
-    const f = funcMap.get(r.funcionario_id); if (!f) return false;
+    const f = funcMap.get(r.funcionario_id);
+    if (!f) return false;
     return funcAllowed(f);
   });
   const ciFiltered = (custosInd ?? []).filter((c) => obraAllowed(c.obra_id));
+  const regsHoras = regsFiltered.filter((r) => r.tipo_registro !== "falta");
+  const faltas = regsFiltered.filter((r) => r.tipo_registro === "falta");
 
   // ---------- Cost per active employee (monthly) ----------
   const custoMensalFunc = useMemo(() => {
@@ -210,12 +275,12 @@ function DashboardPage() {
   const custoMedioFunc = funcsAtivos.length ? custoTotalMO / funcsAtivos.length : 0;
 
   // ---------- Hours ----------
-  const totalHorasNormais = regsFiltered.reduce((s, r) => s + Number(r.horas_normais || 0), 0);
-  const totalHorasExtras = regsFiltered.reduce((s, r) => s + Number(r.horas_extras || 0), 0);
+  const totalHorasNormais = regsHoras.reduce((s, r) => s + Number(r.horas_normais || 0), 0);
+  const totalHorasExtras = regsHoras.reduce((s, r) => s + Number(r.horas_extras || 0), 0);
   const totalHoras = totalHorasNormais + totalHorasExtras;
   const pctExtras = totalHoras > 0 ? (totalHorasExtras / totalHoras) * 100 : 0;
 
-  const totalAusencias = regsFiltered.filter((r) => r.ausencia).length;
+  const totalAusencias = faltas.length;
   const taxaAusencia = regsFiltered.length > 0 ? (totalAusencias / regsFiltered.length) * 100 : 0;
 
   const custoIndiretoTotal = ciFiltered.reduce((s, c) => s + Number(c.valor), 0);
@@ -229,13 +294,15 @@ function DashboardPage() {
       if (!m.has(a.obra_id)) m.set(a.obra_id, new Set());
       m.get(a.obra_id)!.add(a.funcionario_id);
     }
-    return Array.from(m, ([id, set]) => ({ nome: obrasMap.get(id) ?? "—", qtd: set.size }))
-      .sort((a, b) => b.qtd - a.qtd);
+    return Array.from(m, ([id, set]) => ({ nome: obrasMap.get(id) ?? "—", qtd: set.size })).sort(
+      (a, b) => b.qtd - a.qtd,
+    );
   }, [allocFiltered, funcMap, obrasMap]);
 
   // MOD vs MOI
   const modMoi = useMemo(() => {
-    let mod = 0, moi = 0;
+    let mod = 0,
+      moi = 0;
     for (const f of funcsAtivos) {
       const t = funcTipo(f);
       if (t === "MOD") mod++;
@@ -265,12 +332,15 @@ function DashboardPage() {
       mMo.set(k, (mMo.get(k) ?? 0) + d);
     }
     const keys = new Set<string>([...mInd.keys(), ...mMo.keys()]);
-    return Array.from(keys).sort().map((k) => ({
-      mes: k, label: monthLabel(k),
-      mo: Math.round(mMo.get(k) ?? 0),
-      indiretos: Math.round(mInd.get(k) ?? 0),
-      total: Math.round((mMo.get(k) ?? 0) + (mInd.get(k) ?? 0)),
-    }));
+    return Array.from(keys)
+      .sort()
+      .map((k) => ({
+        mes: k,
+        label: monthLabel(k),
+        mo: Math.round(mMo.get(k) ?? 0),
+        indiretos: Math.round(mInd.get(k) ?? 0),
+        total: Math.round((mMo.get(k) ?? 0) + (mInd.get(k) ?? 0)),
+      }));
   }, [ciFiltered, allocFiltered, custoMensalFunc]);
 
   // Ranking obras por custo total (MO rateada + indiretos)
@@ -281,31 +351,38 @@ function DashboardPage() {
     for (const a of allocFiltered) {
       const d = diariaPorFunc.get(a.funcionario_id) ?? 0;
       const o = m.get(a.obra_id) ?? { mo: 0, ind: 0 };
-      o.mo += d; m.set(a.obra_id, o);
+      o.mo += d;
+      m.set(a.obra_id, o);
     }
     for (const c of ciFiltered) {
       const o = m.get(c.obra_id) ?? { mo: 0, ind: 0 };
-      o.ind += Number(c.valor); m.set(c.obra_id, o);
+      o.ind += Number(c.valor);
+      m.set(c.obra_id, o);
     }
     return Array.from(m, ([id, v]) => ({
       nome: obrasMap.get(id) ?? "—",
-      mo: Math.round(v.mo), indiretos: Math.round(v.ind),
+      mo: Math.round(v.mo),
+      indiretos: Math.round(v.ind),
       total: Math.round(v.mo + v.ind),
-    })).sort((a, b) => b.total - a.total).slice(0, 10);
+    }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
   }, [allocFiltered, ciFiltered, custoMensalFunc, obrasMap]);
 
   // Horas extras por período (mensal)
   const horasExtrasPeriodo = useMemo(() => {
     const m = new Map<string, { normais: number; extras: number }>();
-    for (const r of regsFiltered) {
+    for (const r of regsHoras) {
       const k = monthKey(r.data);
       const o = m.get(k) ?? { normais: 0, extras: 0 };
-      o.normais += Number(r.horas_normais); o.extras += Number(r.horas_extras);
+      o.normais += Number(r.horas_normais);
+      o.extras += Number(r.horas_extras);
       m.set(k, o);
     }
-    return Array.from(m).sort(([a], [b]) => a.localeCompare(b))
+    return Array.from(m)
+      .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({ mes: k, label: monthLabel(k), normais: v.normais, extras: v.extras }));
-  }, [regsFiltered]);
+  }, [regsHoras]);
 
   // Distribuição custos indiretos por categoria
   const distCustosInd = useMemo(() => {
@@ -321,26 +398,32 @@ function DashboardPage() {
   // Obras com excesso de horas extras (>15% do total ou >40h no período)
   const obrasExtras = useMemo(() => {
     const m = new Map<string, { normais: number; extras: number }>();
-    for (const r of regsFiltered) {
+    for (const r of regsHoras) {
       const o = m.get(r.obra_id) ?? { normais: 0, extras: 0 };
-      o.normais += Number(r.horas_normais); o.extras += Number(r.horas_extras);
+      o.normais += Number(r.horas_normais);
+      o.extras += Number(r.horas_extras);
       m.set(r.obra_id, o);
     }
     return Array.from(m, ([id, v]) => ({
       nome: obrasMap.get(id) ?? "—",
-      extras: v.extras, total: v.normais + v.extras,
+      extras: v.extras,
+      total: v.normais + v.extras,
       pct: v.normais + v.extras > 0 ? (v.extras / (v.normais + v.extras)) * 100 : 0,
-    })).filter((x) => x.pct > 15 || x.extras > 40)
+    }))
+      .filter((x) => x.pct > 15 || x.extras > 40)
       .sort((a, b) => b.extras - a.extras);
-  }, [regsFiltered, obrasMap]);
+  }, [regsHoras, obrasMap]);
 
   // Funcionários sobrecarregados (>20h extras ou >10% ausência no período)
   const funcsSobrecarregados = useMemo(() => {
     const m = new Map<string, { extras: number; dias: number; aus: number }>();
     for (const r of regsFiltered) {
       const o = m.get(r.funcionario_id) ?? { extras: 0, dias: 0, aus: 0 };
-      o.extras += Number(r.horas_extras); o.dias += 1;
-      if (r.ausencia) o.aus += 1;
+      if (r.tipo_registro !== "falta") {
+        o.extras += Number(r.horas_extras);
+        o.dias += 1;
+      }
+      if (r.tipo_registro === "falta") o.aus += 1;
       m.set(r.funcionario_id, o);
     }
     return Array.from(m, ([id, v]) => {
@@ -350,8 +433,10 @@ function DashboardPage() {
         extras: v.extras,
         ausencia: v.dias > 0 ? (v.aus / v.dias) * 100 : 0,
       };
-    }).filter((x) => x.extras > 20 || x.ausencia > 10)
-      .sort((a, b) => b.extras - a.extras).slice(0, 10);
+    })
+      .filter((x) => x.extras > 20 || x.ausencia > 10)
+      .sort((a, b) => b.extras - a.extras)
+      .slice(0, 10);
   }, [regsFiltered, funcMap]);
 
   // ---------- Exports ----------
@@ -359,7 +444,8 @@ function DashboardPage() {
     const { default: jsPDF } = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF();
-    doc.setFontSize(16); doc.text("Dashboard Gerencial", 14, 16);
+    doc.setFontSize(16);
+    doc.text("Dashboard Gerencial", 14, 16);
     doc.setFontSize(10);
     doc.text(`Período: ${dataIni} a ${dataFim}`, 14, 24);
 
@@ -373,6 +459,7 @@ function DashboardPage() {
         ["Custos indiretos", fmtBRL(custoIndiretoTotal)],
         ["Funcionários ativos", String(funcsAtivos.length)],
         ["Taxa de ausências", `${taxaAusencia.toFixed(1)}%`],
+        ["Faltas integrais", String(faltas.length)],
       ],
     });
 
@@ -402,14 +489,27 @@ function DashboardPage() {
       { KPI: "Custos indiretos", Valor: custoIndiretoTotal },
       { KPI: "Funcionários ativos", Valor: funcsAtivos.length },
       { KPI: "Taxa de ausências %", Valor: taxaAusencia },
+      { KPI: "Faltas integrais", Valor: faltas.length },
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kpis), "KPIs");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(evolucaoMensal), "Evolução");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankingObras), "Ranking centros de custo");
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(rankingObras),
+      "Ranking centros de custo",
+    );
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(distCustosInd), "Custos indiretos");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(horasExtrasPeriodo), "Horas");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(obrasExtras), "Alertas centros de custo");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(funcsSobrecarregados), "Alertas funcionários");
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(obrasExtras),
+      "Alertas centros de custo",
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(funcsSobrecarregados),
+      "Alertas funcionários",
+    );
 
     XLSX.writeFile(wb, `dashboard-${dataIni}-${dataFim}.xlsx`);
   };
@@ -418,13 +518,16 @@ function DashboardPage() {
   const toggleObra = (id: string) => {
     setObraSel((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
   const clearFiltros = () => {
-    setDataIni(monthsBack(5)); setDataFim(todayISO());
-    setObraSel(new Set()); setTipoMO("all");
+    setDataIni(monthsBack(5));
+    setDataFim(todayISO());
+    setObraSel(new Set());
+    setTipoMO("all");
   };
 
   // ---------- Render ----------
@@ -436,7 +539,10 @@ function DashboardPage() {
         actions={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button><FileDown className="mr-1 h-4 w-4" />Exportar</Button>
+              <Button>
+                <FileDown className="mr-1 h-4 w-4" />
+                Exportar
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={exportPDF}>PDF</DropdownMenuItem>
@@ -449,8 +555,14 @@ function DashboardPage() {
       {/* Filters */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="flex items-center gap-2 text-base"><Filter className="h-4 w-4" />Filtros globais</CardTitle>
-          <Button variant="ghost" size="sm" onClick={clearFiltros}><X className="mr-1 h-4 w-4" />Limpar</Button>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Filter className="h-4 w-4" />
+            Filtros globais
+          </CardTitle>
+          <Button variant="ghost" size="sm" onClick={clearFiltros}>
+            <X className="mr-1 h-4 w-4" />
+            Limpar
+          </Button>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <div>
@@ -464,7 +576,9 @@ function DashboardPage() {
           <div>
             <Label className="text-xs">Tipo MO</Label>
             <Select value={tipoMO} onValueChange={(v) => setTipoMO(v as any)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
                 <SelectItem value="MOD">MOD (direta)</SelectItem>
@@ -476,14 +590,18 @@ function DashboardPage() {
             <Label className="text-xs">Centros de custo ({obraSel.size || "todos"})</Label>
             <div className="flex max-h-24 flex-wrap gap-1 overflow-auto rounded border p-2">
               {(obras ?? []).map((o) => (
-                <Badge key={o.id}
+                <Badge
+                  key={o.id}
                   variant={obraSel.has(o.id) ? "default" : "outline"}
                   className="cursor-pointer transition-colors"
-                  onClick={() => toggleObra(o.id)}>
+                  onClick={() => toggleObra(o.id)}
+                >
                   {o.nome}
                 </Badge>
               ))}
-              {(obras ?? []).length === 0 && <span className="text-xs text-muted-foreground">Sem centros de custo</span>}
+              {(obras ?? []).length === 0 && (
+                <span className="text-xs text-muted-foreground">Sem centros de custo</span>
+              )}
             </div>
           </div>
         </CardContent>
@@ -491,25 +609,54 @@ function DashboardPage() {
 
       {/* ============ SECTION 1: KPIs financeiros ============ */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Financeiro</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Financeiro
+        </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard icon={DollarSign} label="Custo total MO (mensal)" value={fmtBRL(custoTotalMO)} loading={loading} tone="primary" />
-          <KpiCard icon={Clock} label="Horas extras" value={`${pctExtras.toFixed(1)}%`}
-            sub={`${totalHorasExtras.toFixed(0)}h de ${totalHoras.toFixed(0)}h`} loading={loading}
-            tone={pctExtras > 15 ? "warn" : "default"} />
-          <KpiCard icon={UserCheck} label="Custo médio / funcionário" value={fmtBRL(custoMedioFunc)} loading={loading} />
-          <KpiCard icon={Briefcase} label="Custos indiretos" value={fmtBRL(custoIndiretoTotal)} loading={loading} />
+          <KpiCard
+            icon={DollarSign}
+            label="Custo total MO (mensal)"
+            value={fmtBRL(custoTotalMO)}
+            loading={loading}
+            tone="primary"
+          />
+          <KpiCard
+            icon={Clock}
+            label="Horas extras"
+            value={`${pctExtras.toFixed(1)}%`}
+            sub={`${totalHorasExtras.toFixed(0)}h de ${totalHoras.toFixed(0)}h`}
+            loading={loading}
+            tone={pctExtras > 15 ? "warn" : "default"}
+          />
+          <KpiCard
+            icon={UserCheck}
+            label="Custo médio / funcionário"
+            value={fmtBRL(custoMedioFunc)}
+            loading={loading}
+          />
+          <KpiCard
+            icon={Briefcase}
+            label="Custos indiretos"
+            value={fmtBRL(custoIndiretoTotal)}
+            loading={loading}
+          />
         </div>
       </section>
 
       {/* ============ SECTION 2: Operacional ============ */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Operacional</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Operacional
+        </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <Card className="transition-all hover:-translate-y-0.5 hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Funcionários ativos por centro de custo</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Funcionários ativos por centro de custo</CardTitle>
+            </CardHeader>
             <CardContent>
-              {ativosPorObra.length === 0 ? <Empty /> : (
+              {ativosPorObra.length === 0 ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={Math.max(180, ativosPorObra.length * 28)}>
                   <BarChart data={ativosPorObra} layout="vertical" margin={{ left: 12 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -524,14 +671,25 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:-translate-y-0.5 hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Distribuição MOD / MOI</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Distribuição MOD / MOI</CardTitle>
+            </CardHeader>
             <CardContent>
-              {modMoi.every((x) => x.qtd === 0) ? <Empty /> : (
+              {modMoi.every((x) => x.qtd === 0) ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>
-                    <Pie data={modMoi} dataKey="qtd" nameKey="nome" outerRadius={80}
-                      label={(e: any) => `${e.nome}: ${e.qtd}`}>
-                      {modMoi.map((_, i) => <Cell key={i} fill={CHART_COLORS[i]} />)}
+                    <Pie
+                      data={modMoi}
+                      dataKey="qtd"
+                      nameKey="nome"
+                      outerRadius={80}
+                      label={(e: any) => `${e.nome}: ${e.qtd}`}
+                    >
+                      {modMoi.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i]} />
+                      ))}
                     </Pie>
                     <Tooltip />
                     <Legend />
@@ -542,9 +700,16 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:-translate-y-0.5 hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Taxa de ausências</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Taxa de ausências</CardTitle>
+            </CardHeader>
             <CardContent className="flex h-[220px] flex-col items-center justify-center">
-              <div className={cn("text-5xl font-bold", taxaAusencia > 10 ? "text-destructive" : "text-primary")}>
+              <div
+                className={cn(
+                  "text-5xl font-bold",
+                  taxaAusencia > 10 ? "text-destructive" : "text-primary",
+                )}
+              >
                 {taxaAusencia.toFixed(1)}%
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
@@ -557,7 +722,9 @@ function DashboardPage() {
 
       {/* ============ SECTION 3: Gráficos analíticos ============ */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Análises</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Análises
+        </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="transition-all hover:shadow-lg">
             <CardHeader>
@@ -565,7 +732,9 @@ function DashboardPage() {
               <CardDescription>Mão de obra rateada + indiretos</CardDescription>
             </CardHeader>
             <CardContent>
-              {evolucaoMensal.length === 0 ? <Empty /> : (
+              {evolucaoMensal.length === 0 ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={evolucaoMensal}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -573,10 +742,24 @@ function DashboardPage() {
                     <YAxis fontSize={11} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
                     <Legend />
-                    <Area type="monotone" dataKey="mo" name="Mão de obra" stackId="1"
-                      stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.6} />
-                    <Area type="monotone" dataKey="indiretos" name="Indiretos" stackId="1"
-                      stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.6} />
+                    <Area
+                      type="monotone"
+                      dataKey="mo"
+                      name="Mão de obra"
+                      stackId="1"
+                      stroke="hsl(var(--primary))"
+                      fill="hsl(var(--primary))"
+                      fillOpacity={0.6}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="indiretos"
+                      name="Indiretos"
+                      stackId="1"
+                      stroke="#f59e0b"
+                      fill="#f59e0b"
+                      fillOpacity={0.6}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -584,13 +767,21 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Ranking de centros de custo por custo</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Ranking de centros de custo por custo</CardTitle>
+            </CardHeader>
             <CardContent>
-              {rankingObras.length === 0 ? <Empty /> : (
+              {rankingObras.length === 0 ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={Math.max(220, rankingObras.length * 34)}>
                   <BarChart data={rankingObras} layout="vertical" margin={{ left: 12 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis type="number" fontSize={11} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+                    <XAxis
+                      type="number"
+                      fontSize={11}
+                      tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
+                    />
                     <YAxis type="category" dataKey="nome" fontSize={11} width={130} />
                     <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
                     <Legend />
@@ -603,9 +794,13 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Horas extras por período</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Horas extras por período</CardTitle>
+            </CardHeader>
             <CardContent>
-              {horasExtrasPeriodo.length === 0 ? <Empty /> : (
+              {horasExtrasPeriodo.length === 0 ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={horasExtrasPeriodo}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -622,14 +817,25 @@ function DashboardPage() {
           </Card>
 
           <Card className="transition-all hover:shadow-lg">
-            <CardHeader><CardTitle className="text-base">Distribuição custos indiretos</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Distribuição custos indiretos</CardTitle>
+            </CardHeader>
             <CardContent>
-              {distCustosInd.length === 0 ? <Empty /> : (
+              {distCustosInd.length === 0 ? (
+                <Empty />
+              ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
-                    <Pie data={distCustosInd} dataKey="valor" nameKey="nome" outerRadius={90}
-                      label={(e: any) => e.nome}>
-                      {distCustosInd.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    <Pie
+                      data={distCustosInd}
+                      dataKey="valor"
+                      nameKey="nome"
+                      outerRadius={90}
+                      label={(e: any) => e.nome}
+                    >
+                      {distCustosInd.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
                     </Pie>
                     <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
                   </PieChart>
@@ -642,7 +848,9 @@ function DashboardPage() {
 
       {/* ============ SECTION 4: Alertas e ações ============ */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Alertas e ações</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Alertas e ações
+        </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="border-destructive/30 transition-all hover:shadow-lg">
             <CardHeader>
@@ -689,7 +897,9 @@ function DashboardPage() {
                       <span className="truncate">{f.nome}</span>
                       <div className="flex gap-2">
                         <Badge variant="outline">{f.extras.toFixed(0)}h extras</Badge>
-                        {f.ausencia > 10 && <Badge variant="destructive">{f.ausencia.toFixed(0)}% aus.</Badge>}
+                        {f.ausencia > 10 && (
+                          <Badge variant="destructive">{f.ausencia.toFixed(0)}% aus.</Badge>
+                        )}
                       </div>
                     </li>
                   ))}
@@ -704,10 +914,18 @@ function DashboardPage() {
 }
 
 function KpiCard({
-  icon: Icon, label, value, sub, loading, tone = "default",
+  icon: Icon,
+  label,
+  value,
+  sub,
+  loading,
+  tone = "default",
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  label: string; value: string; sub?: string; loading?: boolean;
+  label: string;
+  value: string;
+  sub?: string;
+  loading?: boolean;
   tone?: "default" | "primary" | "warn";
 }) {
   return (
@@ -716,21 +934,31 @@ function KpiCard({
         <div className="flex items-start justify-between">
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-            {loading ? <Skeleton className="mt-2 h-8 w-32" /> : (
-              <p className={cn(
-                "mt-1 truncate text-2xl font-bold",
-                tone === "primary" && "text-primary",
-                tone === "warn" && "text-destructive",
-              )}>{value}</p>
+            {loading ? (
+              <Skeleton className="mt-2 h-8 w-32" />
+            ) : (
+              <p
+                className={cn(
+                  "mt-1 truncate text-2xl font-bold",
+                  tone === "primary" && "text-primary",
+                  tone === "warn" && "text-destructive",
+                )}
+              >
+                {value}
+              </p>
             )}
             {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
           </div>
-          <div className={cn(
-            "rounded-lg p-2 transition-transform group-hover:scale-110",
-            tone === "primary" ? "bg-primary/10 text-primary" :
-            tone === "warn" ? "bg-destructive/10 text-destructive" :
-            "bg-muted text-muted-foreground",
-          )}>
+          <div
+            className={cn(
+              "rounded-lg p-2 transition-transform group-hover:scale-110",
+              tone === "primary"
+                ? "bg-primary/10 text-primary"
+                : tone === "warn"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-muted text-muted-foreground",
+            )}
+          >
             <Icon className="h-5 w-5" />
           </div>
         </div>

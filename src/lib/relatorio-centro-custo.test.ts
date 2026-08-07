@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { consolidarCustosCentros, type AlocacaoRelatorio } from "./relatorio-centro-custo.ts";
+import {
+  consolidarCustosCentros,
+  type AlocacaoRelatorio,
+  type RegistroRelatorio,
+} from "./relatorio-centro-custo.ts";
 
 const custo = {
   salario: 2200,
@@ -40,7 +44,7 @@ function registro(
 
 function consolidar(
   alocacoes: AlocacaoRelatorio[],
-  registros: ReturnType<typeof registro>[],
+  registros: RegistroRelatorio[],
   listaFuncionarios = funcionarios,
 ) {
   return consolidarCustosCentros({
@@ -186,4 +190,21 @@ test("registro histórico e centro sem dados não quebram", () => {
   const historico = consolidar([alocacao("f1", "o1", "2026-07-27", "montagem")], []).centros[0];
   assert.equal(historico.dias, 1);
   assert.deepEqual(consolidar([], []).centros, []);
+});
+
+test("falta integral não soma horas, produtividade ou custo de jornada", () => {
+  const resultado = consolidar(
+    [alocacao("f1", "o1", "2026-08-03", "montagem")],
+    [
+      {
+        ...registro("f1", "o1", "2026-08-03", 0, 0),
+        tipo_registro: "falta" as const,
+        falta_tipo: "justificada",
+        horas_normais: 0,
+        horas_extras: 0,
+        ausencia: true,
+      },
+    ],
+  );
+  assert.equal(resultado.centros.length, 0);
 });

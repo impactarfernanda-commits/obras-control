@@ -187,7 +187,8 @@ test("confirmação usa somente as novas da revalidação nos inserts", () => {
   assert.ok(verificacao > 0);
   assert.ok(primeiraEscrita > verificacao);
   assert.match(componente, /const alocRows = alocacoesParaInserir\.map/);
-  assert.match(componente, /const regRows = alocacoesParaInserir\.map/);
+  assert.match(componente, /const regRows = alocacoesParaInserir\s*\.filter/);
+  assert.match(componente, /tipo_registro: "horas"/);
 });
 
 test("13 centros diferentes viram 13 células existentes sem aumentar o total", () => {

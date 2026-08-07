@@ -83,6 +83,7 @@ import {
   totalHorasTrabalhadas,
 } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
+import { mensagemErroRegistro } from "@/lib/registro-falta";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -561,13 +562,16 @@ function AlocacoesPage() {
             justificativa_extras: he > 0 ? v.justificativa_extras?.trim() || null : null,
             observacoes: v.observacoes?.trim() || null,
             ausencia: false,
+            tipo_registro: "horas",
+            falta_tipo: null,
             created_by: user?.id ?? null,
             updated_by: user?.id ?? null,
           },
         ],
         { onConflict: "funcionario_id,obra_id,data" },
       );
-      if (regErr) throw new Error(mensagemErroCompetenciaFechada(regErr) ?? regErr.message);
+      if (regErr)
+        throw new Error(mensagemErroCompetenciaFechada(regErr) ?? mensagemErroRegistro(regErr));
       return { hn, he };
     },
     onSuccess: ({ hn, he }) => {
@@ -674,6 +678,8 @@ function AlocacoesPage() {
         horas_extras: editPrevia.he,
         justificativa_extras: editPrevia.he > 0 ? editJustificativa.trim() || null : null,
         ausencia: false,
+        tipo_registro: "horas",
+        falta_tipo: null,
         updated_by: user?.id ?? null,
       };
       const resultadoRegistro = registro
@@ -692,7 +698,7 @@ function AlocacoesPage() {
       if (resultadoRegistro.error)
         throw new Error(
           mensagemErroCompetenciaFechada(resultadoRegistro.error) ??
-            resultadoRegistro.error.message,
+            mensagemErroRegistro(resultadoRegistro.error),
         );
       return editPrevia.total;
     },
