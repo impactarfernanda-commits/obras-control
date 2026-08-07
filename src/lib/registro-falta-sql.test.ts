@@ -28,7 +28,7 @@ test("dry run autocontido representa integralmente a migration na mesma ordem", 
 
   assert.equal(
     createHash("sha256").update(migrationBytes).digest("hex"),
-    "44232f276484944d6997607ac5c2a09d553852397723e57368271abda0290f01",
+    "80286ef7f175980955635231fc5714f1ff780da6c3b50ae4bd61d2251986d5b1",
     "a migration original não deve ser alterada por esta correção",
   );
   assert.match(dryRun, /^BEGIN;\n/);

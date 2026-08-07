@@ -48,7 +48,7 @@ export function validarRegistroApontamento(registro: {
   }
   if (registro.falta_tipo) return "Horas trabalhadas não podem ter classificação de falta.";
   if (totalHorasRegistro(registro) <= 0) {
-    return "Informe um total de horas trabalhadas maior que zero.";
+    return "Informe uma jornada válida com horas efetivamente trabalhadas.";
   }
   return null;
 }
@@ -62,10 +62,10 @@ export function mensagemErroRegistro(error: { message?: string } | null | undefi
     return "Este funcionário já possui horas registradas nesta data. Corrija ou cancele os apontamentos antes de registrar a falta.";
   }
   if (message.includes("REGISTRO_HORAS_ZERO")) {
-    return "Informe um total de horas trabalhadas maior que zero.";
+    return "Informe uma jornada válida com horas efetivamente trabalhadas.";
   }
   if (message.includes("REGISTRO_FALTA_CLASSIFICACAO")) {
-    return "Selecione a classificação da falta.";
+    return "A classificação da falta é obrigatória.";
   }
   return message || "Não foi possível salvar o apontamento.";
 }

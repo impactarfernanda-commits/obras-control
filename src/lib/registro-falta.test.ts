@@ -19,7 +19,7 @@ test("oferece as seis classificações de falta integral", () => {
 test("horas exigem total positivo e não aceitam classificação de falta", () => {
   assert.match(
     validarRegistroApontamento({ tipo_registro: "horas", horas_normais: 0, horas_extras: 0 })!,
-    /maior que zero/,
+    /jornada válida/,
   );
   assert.equal(
     validarRegistroApontamento({ tipo_registro: "horas", horas_normais: 8, horas_extras: 0 }),
