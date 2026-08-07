@@ -83,13 +83,27 @@ import {
   totalHorasTrabalhadas,
 } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
-import { mensagemErroRegistro } from "@/lib/registro-falta";
+import {
+  AVISO_FALTA_INTEGRAL,
+  buscarConflitoRegistroDiario,
+  CLASSIFICACOES_FALTA,
+  mensagemErroRegistro,
+  rotuloFalta,
+  TIPOS_REGISTRO,
+  validarRegistroApontamento,
+  type FaltaTipo,
+  type TipoRegistro,
+} from "@/lib/registro-falta";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
 });
 
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+const classificacoesFaltaValues = CLASSIFICACOES_FALTA.map(({ value }) => value) as [
+  FaltaTipo,
+  ...FaltaTipo[],
+];
 
 function parseTimeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
@@ -106,18 +120,38 @@ const schema = z
     funcionario_id: z.string().uuid("Selecione um funcionário"),
     obra_id: z.string().uuid("Selecione um centro de custo"),
     data: z.string().min(1, "Data obrigatória"),
-    hora_entrada: z.string().regex(timeRegex, "Horário inválido"),
-    hora_saida: z.string().regex(timeRegex, "Horário inválido"),
+    tipo_registro: z.enum(TIPOS_REGISTRO),
+    falta_tipo: z.enum(classificacoesFaltaValues).nullable(),
+    hora_entrada: z.string(),
+    hora_saida: z.string(),
     observacoes: z.string().optional(),
     justificativa_extras: z.string().optional(),
   })
   .superRefine((v, ctx) => {
+    if (v.tipo_registro === "falta") {
+      if (!v.falta_tipo) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["falta_tipo"],
+          message: "A classificação da falta é obrigatória.",
+        });
+      }
+      return;
+    }
+    if (!timeRegex.test(v.hora_entrada)) {
+      ctx.addIssue({ code: "custom", path: ["hora_entrada"], message: "Horário inválido" });
+      return;
+    }
+    if (!timeRegex.test(v.hora_saida)) {
+      ctx.addIssue({ code: "custom", path: ["hora_saida"], message: "Horário inválido" });
+      return;
+    }
     const total = totalHorasTrabalhadas(v.hora_entrada, v.hora_saida);
     if (total <= 0) {
       ctx.addIssue({
         code: "custom",
         path: ["hora_saida"],
-        message: "Saída deve ser depois da entrada (descontado 1h de almoço)",
+        message: "Informe uma jornada válida com horas efetivamente trabalhadas.",
       });
       return;
     }
@@ -195,6 +229,9 @@ function AlocacoesPage() {
   const [editEntrada, setEditEntrada] = useState("07:00");
   const [editSaida, setEditSaida] = useState("17:00");
   const [editJustificativa, setEditJustificativa] = useState("");
+  const [editTipoRegistro, setEditTipoRegistro] = useState<TipoRegistro>("horas");
+  const [editFaltaTipo, setEditFaltaTipo] = useState<FaltaTipo | null>(null);
+  const [editObservacoes, setEditObservacoes] = useState("");
   const [obraFiltro, setObraFiltro] = useState<string>("all");
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
@@ -296,6 +333,7 @@ function AlocacoesPage() {
     enabled: !!alocacoes && alocacoes.length > 0,
     queryFn: async () => {
       type RegistroResumo = {
+        id: string;
         funcionario_id: string;
         obra_id: string;
         data: string;
@@ -306,12 +344,15 @@ function AlocacoesPage() {
         updated_by: string | null;
         updated_at: string;
         justificativa_extras: string | null;
+        observacoes: string | null;
+        tipo_registro: TipoRegistro;
+        falta_tipo: FaltaTipo | null;
       };
       return buscarTodasPaginas<RegistroResumo>(async (from, to) => {
         let q = supabase
           .from("registros_horas")
           .select(
-            "funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, created_at, updated_by, updated_at, justificativa_extras",
+            "id, funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, created_at, updated_by, updated_at, justificativa_extras, observacoes, tipo_registro, falta_tipo",
           )
           .gte("data", startISO)
           .lte("data", endISO)
@@ -412,6 +453,7 @@ function AlocacoesPage() {
     const m = new Map<
       string,
       {
+        id: string;
         hn: number;
         he: number;
         createdBy: string | null;
@@ -419,10 +461,14 @@ function AlocacoesPage() {
         updatedBy: string | null;
         updatedAt: string;
         justificativaExtras: string | null;
+        observacoes: string | null;
+        tipoRegistro: TipoRegistro;
+        faltaTipo: FaltaTipo | null;
       }
     >();
     for (const r of registros ?? []) {
       m.set(`${r.funcionario_id}|${r.obra_id}|${r.data}`, {
+        id: r.id,
         hn: Number(r.horas_normais),
         he: Number(r.horas_extras),
         createdBy: r.created_by,
@@ -430,6 +476,9 @@ function AlocacoesPage() {
         updatedBy: r.updated_by,
         updatedAt: r.updated_at,
         justificativaExtras: r.justificativa_extras,
+        observacoes: r.observacoes,
+        tipoRegistro: r.tipo_registro,
+        faltaTipo: r.falta_tipo,
       });
     }
     return m;
@@ -489,6 +538,8 @@ function AlocacoesPage() {
     funcionario_id: "",
     obra_id: "",
     data: today,
+    tipo_registro: "horas",
+    falta_tipo: null,
     hora_entrada: "07:00",
     hora_saida: "17:00",
     observacoes: "",
@@ -499,11 +550,15 @@ function AlocacoesPage() {
     defaultValues: defaultFormValues,
   });
   const watchData = form.watch("data");
+  const watchTipoRegistro = form.watch("tipo_registro");
   const watchEntrada = form.watch("hora_entrada");
   const watchSaida = form.watch("hora_saida");
   const previa = useMemo(
-    () => calcHoras(watchEntrada, watchSaida, watchData || today),
-    [watchEntrada, watchSaida, watchData, today],
+    () =>
+      watchTipoRegistro === "horas" && timeRegex.test(watchEntrada) && timeRegex.test(watchSaida)
+        ? calcHoras(watchEntrada, watchSaida, watchData || today)
+        : { total: 0, hn: 0, he: 0 },
+    [watchEntrada, watchSaida, watchData, watchTipoRegistro, today],
   );
   const previaDow = useMemo(
     () => new Date((watchData || today) + "T00:00:00").getDay(),
@@ -514,10 +569,24 @@ function AlocacoesPage() {
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
       setAlocacaoFeedback(null);
-      const { total, hn, he } = calcHoras(v.hora_entrada, v.hora_saida, v.data);
-      if (total <= 0) throw new Error("Horário inválido");
+      const falta = v.tipo_registro === "falta";
+      const { hn, he } = falta ? { hn: 0, he: 0 } : calcHoras(v.hora_entrada, v.hora_saida, v.data);
+      const erroValidacao = validarRegistroApontamento({
+        tipo_registro: v.tipo_registro,
+        falta_tipo: v.falta_tipo,
+        horas_normais: hn,
+        horas_extras: he,
+      });
+      if (erroValidacao) throw new Error(erroValidacao);
 
       await garantirCompetenciaAberta(supabase, v.data);
+
+      const conflitoRegistro = await buscarConflitoRegistroDiario(supabase, {
+        funcionario_id: v.funcionario_id,
+        data: v.data,
+        tipo_registro: v.tipo_registro,
+      });
+      if (conflitoRegistro) throw new Error(conflitoRegistro);
 
       const conflito = await buscarConflitoAlocacao({
         supabase,
@@ -534,8 +603,8 @@ function AlocacoesPage() {
             obra_id: v.obra_id,
             data: v.data,
             created_by: user?.id ?? null,
-            hora_entrada: v.hora_entrada,
-            hora_saida: v.hora_saida,
+            hora_entrada: falta ? null : v.hora_entrada,
+            hora_saida: falta ? null : v.hora_saida,
             intervalo_padrao_minutos: 60,
           },
         ],
@@ -551,32 +620,27 @@ function AlocacoesPage() {
         );
       }
 
-      const { error: regErr } = await supabase.from("registros_horas").upsert(
-        [
-          {
-            funcionario_id: v.funcionario_id,
-            obra_id: v.obra_id,
-            data: v.data,
-            horas_normais: hn,
-            horas_extras: he,
-            justificativa_extras: he > 0 ? v.justificativa_extras?.trim() || null : null,
-            observacoes: v.observacoes?.trim() || null,
-            ausencia: false,
-            tipo_registro: "horas",
-            falta_tipo: null,
-            created_by: user?.id ?? null,
-            updated_by: user?.id ?? null,
-          },
-        ],
-        { onConflict: "funcionario_id,obra_id,data" },
-      );
+      const { error: regErr } = await supabase.rpc("obras_salvar_registro_horas", {
+        p_id: null,
+        p_funcionario_id: v.funcionario_id,
+        p_obra_id: v.obra_id,
+        p_data: v.data,
+        p_tipo_registro: v.tipo_registro,
+        p_falta_tipo: falta ? v.falta_tipo : null,
+        p_horas_normais: falta ? 0 : hn,
+        p_horas_extras: falta ? 0 : he,
+        p_justificativa_extras: !falta && he > 0 ? v.justificativa_extras?.trim() || null : null,
+        p_observacoes: v.observacoes?.trim() || null,
+      });
       if (regErr)
         throw new Error(mensagemErroCompetenciaFechada(regErr) ?? mensagemErroRegistro(regErr));
-      return { hn, he };
+      return { tipoRegistro: v.tipo_registro, faltaTipo: v.falta_tipo, hn, he };
     },
-    onSuccess: ({ hn, he }) => {
+    onSuccess: ({ tipoRegistro, faltaTipo, hn, he }) => {
       toast.success(
-        `Lançamento salvo: ${formatDecimalHours(hn)}h normais${he > 0 ? ` ${formatExtraHours(he)} extras` : ""}`,
+        tipoRegistro === "falta"
+          ? `Falta registrada: ${rotuloFalta(faltaTipo)}`
+          : `Lançamento salvo: ${formatDecimalHours(hn)}h normais${he > 0 ? ` ${formatExtraHours(he)} extras` : ""}`,
       );
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
@@ -591,7 +655,7 @@ function AlocacoesPage() {
         toast.error(e.title, { description: e.description, duration: 10000 });
         return;
       }
-      toast.error(e.message ?? "Erro ao salvar lançamento");
+      toast.error(mensagemErroRegistro(e));
     },
   });
 
@@ -625,30 +689,43 @@ function AlocacoesPage() {
 
   const editPrevia = useMemo(
     () =>
-      calcHoras(
-        editEntrada,
-        editSaida,
-        alocacaoEmEdicao?.data ?? new Date().toISOString().slice(0, 10),
-      ),
-    [alocacaoEmEdicao?.data, editEntrada, editSaida],
+      editTipoRegistro === "horas" && timeRegex.test(editEntrada) && timeRegex.test(editSaida)
+        ? calcHoras(
+            editEntrada,
+            editSaida,
+            alocacaoEmEdicao?.data ?? new Date().toISOString().slice(0, 10),
+          )
+        : { total: 0, hn: 0, he: 0 },
+    [alocacaoEmEdicao?.data, editEntrada, editSaida, editTipoRegistro],
   );
   const editHorariosValidos =
-    timeRegex.test(editEntrada) &&
-    timeRegex.test(editSaida) &&
-    parseTimeToMinutes(editSaida) > parseTimeToMinutes(editEntrada) &&
-    editPrevia.total > 0;
-  const editJustificativaValida = editPrevia.he <= 2 || editJustificativa.trim().length > 0;
-  const editPodeSalvar = editHorariosValidos && editJustificativaValida;
+    editTipoRegistro === "falta" ||
+    (timeRegex.test(editEntrada) &&
+      timeRegex.test(editSaida) &&
+      parseTimeToMinutes(editSaida) > parseTimeToMinutes(editEntrada) &&
+      editPrevia.total > 0);
+  const editJustificativaValida =
+    editTipoRegistro === "falta" || editPrevia.he <= 2 || editJustificativa.trim().length > 0;
+  const editPodeSalvar =
+    editHorariosValidos &&
+    editJustificativaValida &&
+    (editTipoRegistro === "horas" || editFaltaTipo !== null);
 
   function abrirEdicao(a: AlocRow) {
     const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+    const tipoRegistro = registro?.tipoRegistro ?? "horas";
     const entrada = a.hora_entrada?.slice(0, 5) || "07:00";
     const totalAtual = (registro?.hn ?? 0) + (registro?.he ?? 0);
     const saidaInferida = Math.min(parseTimeToMinutes(entrada) + (totalAtual + 1) * 60, 1439);
-    setEditEntrada(entrada);
+    setEditTipoRegistro(tipoRegistro);
+    setEditFaltaTipo(registro?.faltaTipo ?? null);
+    setEditObservacoes(registro?.observacoes ?? "");
+    setEditEntrada(tipoRegistro === "falta" ? "" : entrada);
     setEditSaida(
-      a.hora_saida?.slice(0, 5) ||
-        `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
+      tipoRegistro === "falta"
+        ? ""
+        : a.hora_saida?.slice(0, 5) ||
+            `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
     );
     setEditJustificativa(registro?.justificativaExtras ?? "");
     setAlocacaoEmEdicao(a);
@@ -662,48 +739,61 @@ function AlocacoesPage() {
 
       await garantirCompetenciaAberta(supabase, a.data);
 
+      const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+      const erroValidacao = validarRegistroApontamento({
+        tipo_registro: editTipoRegistro,
+        falta_tipo: editFaltaTipo,
+        horas_normais: editPrevia.hn,
+        horas_extras: editPrevia.he,
+      });
+      if (erroValidacao) throw new Error(erroValidacao);
+
+      const conflitoRegistro = await buscarConflitoRegistroDiario(supabase, {
+        id: registro?.id,
+        funcionario_id: a.funcionario_id,
+        data: a.data,
+        tipo_registro: editTipoRegistro,
+      });
+      if (conflitoRegistro) throw new Error(conflitoRegistro);
+
       const { error: alocErr } = await supabase
         .from("alocacoes")
         .update({
-          hora_entrada: editEntrada,
-          hora_saida: editSaida,
+          hora_entrada: editTipoRegistro === "falta" ? null : editEntrada,
+          hora_saida: editTipoRegistro === "falta" ? null : editSaida,
           intervalo_padrao_minutos: 60,
         })
         .eq("id", a.id);
       if (alocErr) throw new Error(mensagemErroCompetenciaFechada(alocErr) ?? alocErr.message);
 
-      const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
-      const registroPayload = {
-        horas_normais: editPrevia.hn,
-        horas_extras: editPrevia.he,
-        justificativa_extras: editPrevia.he > 0 ? editJustificativa.trim() || null : null,
-        ausencia: false,
-        tipo_registro: "horas",
-        falta_tipo: null,
-        updated_by: user?.id ?? null,
-      };
-      const resultadoRegistro = registro
-        ? await supabase.from("registros_horas").update(registroPayload).match({
-            funcionario_id: a.funcionario_id,
-            obra_id: a.obra_id,
-            data: a.data,
-          })
-        : await supabase.from("registros_horas").insert({
-            ...registroPayload,
-            funcionario_id: a.funcionario_id,
-            obra_id: a.obra_id,
-            data: a.data,
-            created_by: user?.id ?? null,
-          });
+      const resultadoRegistro = await supabase.rpc("obras_salvar_registro_horas", {
+        p_id: registro?.id ?? null,
+        p_funcionario_id: a.funcionario_id,
+        p_obra_id: a.obra_id,
+        p_data: a.data,
+        p_tipo_registro: editTipoRegistro,
+        p_falta_tipo: editTipoRegistro === "falta" ? editFaltaTipo : null,
+        p_horas_normais: editTipoRegistro === "falta" ? 0 : editPrevia.hn,
+        p_horas_extras: editTipoRegistro === "falta" ? 0 : editPrevia.he,
+        p_justificativa_extras:
+          editTipoRegistro === "horas" && editPrevia.he > 0
+            ? editJustificativa.trim() || null
+            : null,
+        p_observacoes: editObservacoes.trim() || null,
+      });
       if (resultadoRegistro.error)
         throw new Error(
           mensagemErroCompetenciaFechada(resultadoRegistro.error) ??
             mensagemErroRegistro(resultadoRegistro.error),
         );
-      return editPrevia.total;
+      return { total: editPrevia.total, tipoRegistro: editTipoRegistro };
     },
-    onSuccess: (total) => {
-      toast.success(`Horas atualizadas para ${formatDecimalHours(total)}h`);
+    onSuccess: ({ total, tipoRegistro }) => {
+      toast.success(
+        tipoRegistro === "falta"
+          ? "Falta atualizada"
+          : `Horas atualizadas para ${formatDecimalHours(total)}h`,
+      );
       setAlocacaoEmEdicao(null);
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
@@ -871,69 +961,145 @@ function AlocacoesPage() {
                         </FormItem>
                       )}
                     />
-                    <div className="grid grid-cols-2 gap-3">
-                      <FormField
-                        control={form.control}
-                        name="hora_entrada"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Hora de entrada</FormLabel>
+                    <FormField
+                      control={form.control}
+                      name="tipo_registro"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tipo de registro</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value: TipoRegistro) => {
+                              field.onChange(value);
+                              form.setValue("hora_entrada", "");
+                              form.setValue("hora_saida", "");
+                              form.setValue("justificativa_extras", "");
+                              form.setValue("falta_tipo", null);
+                              form.clearErrors([
+                                "hora_entrada",
+                                "hora_saida",
+                                "justificativa_extras",
+                                "falta_tipo",
+                              ]);
+                            }}
+                          >
                             <FormControl>
-                              <Input type="time" {...field} />
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
                             </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="hora_saida"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Hora de saída</FormLabel>
-                            <FormControl>
-                              <Input type="time" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <div className="rounded-md border bg-muted/40 p-3 text-sm">
-                      <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-                        Cálculo automático (1h almoço descontada)
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">
-                          Total: {formatDecimalHours(previa.total)}h
-                        </Badge>
-                        <Badge variant="outline">Normais: {formatDecimalHours(previa.hn)}h</Badge>
-                        {previa.he > 0 && (
-                          <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                            Extras: {formatExtraHours(previa.he)}
-                          </Badge>
-                        )}
-                      </div>
-                      {previaIsFds && (
-                        <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
-                          Fim de semana: todo o tempo trabalhado será contado como hora extra.
-                        </div>
+                            <SelectContent>
+                              <SelectItem value="horas">Horas trabalhadas</SelectItem>
+                              <SelectItem value="falta">Falta</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
                       )}
-                    </div>
-                    {previa.he > 2 && (
-                      <FormField
-                        control={form.control}
-                        name="justificativa_extras"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Justificativa para extras &gt; 2h</FormLabel>
-                            <FormControl>
-                              <Textarea rows={2} {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
+                    />
+                    {watchTipoRegistro === "horas" ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <FormField
+                            control={form.control}
+                            name="hora_entrada"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Hora de entrada</FormLabel>
+                                <FormControl>
+                                  <Input type="time" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="hora_saida"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Hora de saída</FormLabel>
+                                <FormControl>
+                                  <Input type="time" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                          <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
+                            Cálculo automático (1h almoço descontada)
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="secondary">
+                              Total: {formatDecimalHours(previa.total)}h
+                            </Badge>
+                            <Badge variant="outline">
+                              Normais: {formatDecimalHours(previa.hn)}h
+                            </Badge>
+                            {previa.he > 0 && (
+                              <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
+                                Extras: {formatExtraHours(previa.he)}
+                              </Badge>
+                            )}
+                          </div>
+                          {previaIsFds && (
+                            <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                              Fim de semana: todo o tempo trabalhado será contado como hora extra.
+                            </div>
+                          )}
+                        </div>
+                        {previa.he > 2 && (
+                          <FormField
+                            control={form.control}
+                            name="justificativa_extras"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Justificativa para extras &gt; 2h</FormLabel>
+                                <FormControl>
+                                  <Textarea rows={2} {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
                         )}
-                      />
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <FormField
+                          control={form.control}
+                          name="falta_tipo"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Classificação da falta *</FormLabel>
+                              <Select
+                                value={field.value ?? ""}
+                                onValueChange={(value: FaltaTipo) => field.onChange(value)}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {CLASSIFICACOES_FALTA.map((item) => (
+                                    <SelectItem key={item.value} value={item.value}>
+                                      {item.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <Alert>
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>{AVISO_FALTA_INTEGRAL}</AlertDescription>
+                        </Alert>
+                      </div>
                     )}
                     <FormField
                       control={form.control}
@@ -1003,72 +1169,133 @@ function AlocacoesPage() {
                   </dd>
                 </div>
               </dl>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <label htmlFor="edit-hora-entrada" className="text-sm font-medium">
-                    Hora de entrada
-                  </label>
-                  <Input
-                    id="edit-hora-entrada"
-                    type="time"
-                    value={editEntrada}
-                    onChange={(e) => setEditEntrada(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="edit-hora-saida" className="text-sm font-medium">
-                    Hora de saída
-                  </label>
-                  <Input
-                    id="edit-hora-saida"
-                    type="time"
-                    value={editSaida}
-                    onChange={(e) => setEditSaida(e.target.value)}
-                  />
-                </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Tipo de registro</label>
+                <Select
+                  value={editTipoRegistro}
+                  onValueChange={(value: TipoRegistro) => {
+                    setEditTipoRegistro(value);
+                    setEditEntrada("");
+                    setEditSaida("");
+                    setEditJustificativa("");
+                    setEditFaltaTipo(null);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="horas">Horas trabalhadas</SelectItem>
+                    <SelectItem value="falta">Falta</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              {!editHorariosValidos && (
-                <p className="text-sm text-destructive">
-                  Informe horários válidos; a saída deve permitir mais de 1h de jornada bruta.
-                </p>
-              )}
-              <div className="rounded-md border bg-muted/40 p-3 text-sm">
-                <div className="text-xs text-muted-foreground">
-                  Intervalo padrão considerado: 1h
-                </div>
-                <div className="mt-1 font-semibold">
-                  Horas calculadas: {formatDecimalHours(editPrevia.total)}h
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {formatDecimalHours(editPrevia.hn)}h normais
-                  {editPrevia.he > 0 ? ` ${formatExtraHours(editPrevia.he)} extras` : ""}
-                </div>
-              </div>
-              {editPrevia.total > 12 && (
-                <Alert>
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>Confira a carga horária</AlertTitle>
-                  <AlertDescription>
-                    Carga horária superior a 12h. Confira antes de salvar.
-                  </AlertDescription>
-                </Alert>
-              )}
-              {editPrevia.he > 2 && (
-                <div className="space-y-2">
-                  <label htmlFor="edit-justificativa" className="text-sm font-medium">
-                    Justificativa para extras &gt; 2h
-                  </label>
-                  <Textarea
-                    id="edit-justificativa"
-                    rows={2}
-                    value={editJustificativa}
-                    onChange={(e) => setEditJustificativa(e.target.value)}
-                  />
-                  {!editJustificativaValida && (
-                    <p className="text-sm text-destructive">Informe a justificativa.</p>
+              {editTipoRegistro === "horas" ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label htmlFor="edit-hora-entrada" className="text-sm font-medium">
+                        Hora de entrada
+                      </label>
+                      <Input
+                        id="edit-hora-entrada"
+                        type="time"
+                        value={editEntrada}
+                        onChange={(e) => setEditEntrada(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="edit-hora-saida" className="text-sm font-medium">
+                        Hora de saída
+                      </label>
+                      <Input
+                        id="edit-hora-saida"
+                        type="time"
+                        value={editSaida}
+                        onChange={(e) => setEditSaida(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {!editHorariosValidos && (
+                    <p className="text-sm text-destructive">
+                      Informe horários válidos; a saída deve permitir mais de 1h de jornada bruta.
+                    </p>
                   )}
+                  <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                    <div className="text-xs text-muted-foreground">
+                      Intervalo padrão considerado: 1h
+                    </div>
+                    <div className="mt-1 font-semibold">
+                      Horas calculadas: {formatDecimalHours(editPrevia.total)}h
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {formatDecimalHours(editPrevia.hn)}h normais
+                      {editPrevia.he > 0 ? ` ${formatExtraHours(editPrevia.he)} extras` : ""}
+                    </div>
+                  </div>
+                  {editPrevia.total > 12 && (
+                    <Alert>
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Confira a carga horária</AlertTitle>
+                      <AlertDescription>
+                        Carga horária superior a 12h. Confira antes de salvar.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {editPrevia.he > 2 && (
+                    <div className="space-y-2">
+                      <label htmlFor="edit-justificativa" className="text-sm font-medium">
+                        Justificativa para extras &gt; 2h
+                      </label>
+                      <Textarea
+                        id="edit-justificativa"
+                        rows={2}
+                        value={editJustificativa}
+                        onChange={(e) => setEditJustificativa(e.target.value)}
+                      />
+                      {!editJustificativaValida && (
+                        <p className="text-sm text-destructive">Informe a justificativa.</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Classificação da falta *</label>
+                    <Select
+                      value={editFaltaTipo ?? ""}
+                      onValueChange={(value: FaltaTipo) => setEditFaltaTipo(value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CLASSIFICACOES_FALTA.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>{AVISO_FALTA_INTEGRAL}</AlertDescription>
+                  </Alert>
                 </div>
               )}
+              <div className="space-y-2">
+                <label htmlFor="edit-observacoes" className="text-sm font-medium">
+                  Observações (opcional)
+                </label>
+                <Textarea
+                  id="edit-observacoes"
+                  rows={2}
+                  value={editObservacoes}
+                  onChange={(e) => setEditObservacoes(e.target.value)}
+                />
+              </div>
               <DialogFooter>
                 <Button
                   type="button"
@@ -1376,19 +1603,41 @@ function AlocacoesPage() {
                                                   </div>
                                                   <div className="mt-0.5 flex flex-wrap gap-1">
                                                     {h ? (
-                                                      <>
-                                                        <Badge
-                                                          variant="secondary"
-                                                          className="text-[10px]"
-                                                        >
-                                                          {h.hn}h
-                                                        </Badge>
-                                                        {h.he > 0 && (
-                                                          <Badge className="bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400">
-                                                            {formatExtraHours(h.he)}
+                                                      h.tipoRegistro === "falta" ? (
+                                                        <>
+                                                          <Badge
+                                                            variant="destructive"
+                                                            className="text-[10px]"
+                                                          >
+                                                            Falta
                                                           </Badge>
-                                                        )}
-                                                      </>
+                                                          <Badge
+                                                            variant="outline"
+                                                            className="text-[10px]"
+                                                          >
+                                                            {rotuloFalta(h.faltaTipo)}
+                                                          </Badge>
+                                                          {h.observacoes && (
+                                                            <span className="w-full text-[10px] text-muted-foreground">
+                                                              {h.observacoes}
+                                                            </span>
+                                                          )}
+                                                        </>
+                                                      ) : (
+                                                        <>
+                                                          <Badge
+                                                            variant="secondary"
+                                                            className="text-[10px]"
+                                                          >
+                                                            {h.hn}h
+                                                          </Badge>
+                                                          {h.he > 0 && (
+                                                            <Badge className="bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400">
+                                                              {formatExtraHours(h.he)}
+                                                            </Badge>
+                                                          )}
+                                                        </>
+                                                      )
                                                     ) : (
                                                       <Badge
                                                         variant="outline"
