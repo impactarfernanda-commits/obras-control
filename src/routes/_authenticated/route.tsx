@@ -1,19 +1,14 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { createFileRoute, Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { Skeleton } from "@/components/ui/skeleton";
-
+import { Button } from "@/components/ui/button";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
-  beforeLoad: async () => {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) throw redirect({ to: "/auth" });
-    return { user: data.user };
-  },
   component: AuthenticatedLayout,
 });
 
@@ -26,7 +21,9 @@ function AuthenticatedLayout() {
 }
 
 function Shell() {
-  const { loading } = useAuth();
+  const { loading, authStatus, profileStatus, retryProfile, signOut } = useAuth();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  if (authStatus === "unauthenticated") return <Navigate to="/auth" replace />;
   return (
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">
@@ -38,13 +35,28 @@ function Shell() {
             <TanksBRLogo size="header" />
           </header>
           <main className="flex-1 p-4 md:p-6">
-            {loading ? (
+            {loading || authStatus === "initializing" ? (
               <div className="space-y-3">
                 <Skeleton className="h-8 w-48" />
                 <Skeleton className="h-32 w-full" />
               </div>
+            ) : authStatus === "error" || profileStatus === "error" ? (
+              <div className="mx-auto max-w-lg rounded-lg border bg-card p-6 text-center">
+                <h1 className="text-lg font-semibold">Não foi possível carregar seu acesso</h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Verifique sua conexão e tente novamente. Nenhuma permissão foi alterada.
+                </p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button onClick={retryProfile}>Tentar novamente</Button>
+                  <Button variant="outline" onClick={signOut}>
+                    Sair
+                  </Button>
+                </div>
+              </div>
             ) : (
-              <Outlet />
+              <RouteErrorBoundary resetKey={pathname}>
+                <Outlet />
+              </RouteErrorBoundary>
             )}
           </main>
         </div>

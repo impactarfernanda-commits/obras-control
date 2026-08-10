@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -56,18 +56,14 @@ import {
 } from "@/lib/horas-extras";
 import { consolidarCustosCentros } from "@/lib/relatorio-centro-custo";
 import { rotuloFalta } from "@/lib/registro-falta";
+import { RequireRole } from "@/components/RouteAccess";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
-  beforeLoad: async () => {
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) throw redirect({ to: "/auth" });
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
-    const roles = (data ?? []).map((r) => r.role);
-    if (!roles.includes("gerente") && !roles.includes("diretor")) {
-      throw redirect({ to: "/funcionarios" });
-    }
-  },
-  component: RelatoriosPage,
+  component: () => (
+    <RequireRole allowed={["gerente", "diretor"]}>
+      <RelatoriosPage />
+    </RequireRole>
+  ),
 });
 
 type FuncRow = {

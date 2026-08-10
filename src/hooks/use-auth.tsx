@@ -1,8 +1,15 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-
-type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
+import { highestRole, type Role } from "@/lib/access-control";
 
 interface AuthContextValue {
   user: User | null;
@@ -10,6 +17,9 @@ interface AuthContextValue {
   role: Role | null;
   fullName: string;
   loading: boolean;
+  authStatus: "initializing" | "authenticated" | "unauthenticated" | "error";
+  profileStatus: "idle" | "loading" | "ready" | "error";
+  retryProfile: () => void;
   isDirector: boolean;
   isManagerOrAbove: boolean;
   signOut: () => Promise<void>;
@@ -23,41 +33,96 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role | null>(null);
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [authStatus, setAuthStatus] = useState<AuthContextValue["authStatus"]>("initializing");
+  const [profileStatus, setProfileStatus] = useState<AuthContextValue["profileStatus"]>("idle");
+  const [profileAttempt, setProfileAttempt] = useState(0);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  const userVersion = useRef(0);
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    let active = true;
+    const applySession = (s: Session | null) => {
+      if (!active) return;
       setSession(s);
       setUser(s?.user ?? null);
+      setAuthStatus(s ? "authenticated" : "unauthenticated");
       if (!s) {
         setRole(null);
         setFullName("");
+        setProfileStatus("idle");
       }
-    });
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    };
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => applySession(s));
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (error) throw error;
+        applySession(data.session);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error(
+          "Authentication initialization failed",
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : { message: "Unknown authentication error" },
+        );
+        setAuthStatus("error");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [authAttempt]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(authStatus === "initializing");
+      return;
+    }
     let cancelled = false;
+    const version = ++userVersion.current;
+    setProfileStatus("loading");
+    setLoading(true);
     (async () => {
       const [rolesRes, profileRes] = await Promise.all([
         supabase.from("user_roles").select("role").eq("user_id", user.id),
         supabase.from("users_profiles").select("full_name").eq("id", user.id).maybeSingle(),
       ]);
-      if (cancelled) return;
-      const roles = (rolesRes.data ?? []).map((r) => r.role as Role);
-      const priority: Role[] = ["diretor", "gerente", "coordenador", "supervisor", "assistente"];
-      const top = priority.find((p) => roles.includes(p)) ?? null;
-      setRole(top);
+      if (rolesRes.error) throw rolesRes.error;
+      if (profileRes.error) throw profileRes.error;
+      if (cancelled || version !== userVersion.current) return;
+      setRole(highestRole((rolesRes.data ?? []).map((r) => r.role)));
       setFullName(profileRes.data?.full_name ?? "");
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+      setProfileStatus("ready");
+    })()
+      .catch((error: unknown) => {
+        if (cancelled || version !== userVersion.current) return;
+        console.error(
+          "User access profile failed",
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : { message: "Unknown profile error" },
+        );
+        setRole(null);
+        setFullName("");
+        setProfileStatus("error");
+      })
+      .finally(() => {
+        if (!cancelled && version === userVersion.current) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, profileAttempt, authStatus]);
+
+  const retryProfile = useCallback(() => {
+    setAuthStatus("initializing");
+    setLoading(true);
+    setAuthAttempt((attempt) => attempt + 1);
+    setProfileAttempt((attempt) => attempt + 1);
+  }, []);
 
   const value: AuthContextValue = {
     user,
@@ -65,9 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     role,
     fullName,
     loading,
+    authStatus,
+    profileStatus,
+    retryProfile,
     isDirector: role === "diretor",
     isManagerOrAbove: role === "diretor" || role === "gerente",
-    signOut: async () => { await supabase.auth.signOut(); },
+    signOut: async () => {
+      await supabase.auth.signOut();
+    },
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
