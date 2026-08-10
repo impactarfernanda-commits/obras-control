@@ -27,6 +27,7 @@ import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { useAuth } from "@/hooks/use-auth";
 import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 import { Button } from "@/components/ui/button";
+import { APP_NAVIGATION_ITEMS } from "@/lib/navigation";
 
 type Item = {
   title: string;
@@ -36,21 +37,17 @@ type Item = {
   requiresUserManagement?: boolean;
 };
 
-const items: Item[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, minLevel: 2 },
-  { title: "Funcionários", url: "/funcionarios", icon: Users, minLevel: 1 },
-  { title: "Centros de custo", url: "/obras", icon: Building2, minLevel: 1 },
-  { title: "Alocações", url: "/alocacoes", icon: CalendarRange, minLevel: 1 },
-  { title: "Relatórios", url: "/relatorios", icon: BarChart3, minLevel: 2 },
-  { title: "Configurações", url: "/configuracoes", icon: Settings, minLevel: 3 },
-  {
-    title: "Usuários",
-    url: "/admin/usuarios",
-    icon: ShieldCheck,
-    minLevel: 1,
-    requiresUserManagement: true,
-  },
-];
+const icons = {
+  "/dashboard": LayoutDashboard,
+  "/funcionarios": Users,
+  "/obras": Building2,
+  "/alocacoes": CalendarRange,
+  "/relatorios": BarChart3,
+  "/configuracoes": Settings,
+  "/admin/usuarios": ShieldCheck,
+} satisfies Record<(typeof APP_NAVIGATION_ITEMS)[number]["url"], Item["icon"]>;
+
+const items: Item[] = APP_NAVIGATION_ITEMS.map((item) => ({ ...item, icon: icons[item.url] }));
 
 const portalTanksUrl = import.meta.env.VITE_PORTAL_TANKS_URL || "https://portal-tks-br.vercel.app/";
 

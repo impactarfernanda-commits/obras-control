@@ -94,6 +94,12 @@ import {
   type FaltaTipo,
   type TipoRegistro,
 } from "@/lib/registro-falta";
+import {
+  logAlocacoesQueryError,
+  logLinhasFuncionariosIgnoradas,
+  normalizarFuncionariosAlocacao,
+  rotuloFuncionarioAlocacao,
+} from "@/lib/alocacoes-runtime";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -166,6 +172,20 @@ const schema = z
   });
 type FormVals = z.infer<typeof schema>;
 type ErrorLike = { message?: string };
+
+function LocalReadError({ message, retry }: { message: string; retry: () => void }) {
+  return (
+    <Alert variant="destructive">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>{message}</AlertTitle>
+      <AlertDescription className="mt-2">
+        <Button type="button" size="sm" variant="outline" onClick={retry}>
+          Tentar novamente
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 function pad(n: number) {
   return n < 10 ? `0${n}` : `${n}`;
@@ -247,23 +267,20 @@ function AlocacoesPage() {
   const mesKey = `${year}-${pad(month + 1)}`;
   const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
 
-  const { data: funcionarios, error: funcionariosError } = useQuery({
+  const funcionariosQuery = useQuery({
     queryKey: ["funcionarios-alocacao-selecao"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      return data as unknown as Array<{
-        id: string;
-        nome: string;
-        categoria_mo: string | null;
-        ativo: boolean;
-        data_admissao: string | null;
-        data_desligamento: string | null;
-        deleted_at: string | null;
-        visivel_obras_control: boolean | null;
-      }>;
+      if (error) {
+        logAlocacoesQueryError("funcionarios", error);
+        throw error;
+      }
+      const normalizados = normalizarFuncionariosAlocacao(data);
+      logLinhasFuncionariosIgnoradas(normalizados.ignorados);
+      return normalizados.validos;
     },
   });
+  const funcionarios = funcionariosQuery.data;
   // Inclui inativos no select (com marcador) para permitir lançamentos retroativos.
   const funcionariosSelecionaveis = useMemo(
     () =>
@@ -287,48 +304,54 @@ function AlocacoesPage() {
       });
     return m;
   }, [funcionarios]);
-  const { data: obras, error: obrasError } = useQuery({
+  const obrasQuery = useQuery({
     queryKey: ["obras-min"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("obras")
         .select("id,nome,visivel_obras_control")
         .order("nome");
-      if (error) throw error;
+      if (error) {
+        logAlocacoesQueryError("obras", error);
+        throw error;
+      }
       return data.filter((obra) => obra.visivel_obras_control !== false) as Array<{
         id: string;
         nome: string;
       }>;
     },
   });
+  const obras = obrasQuery.data;
 
-  const {
-    data: alocacoes,
-    isLoading,
-    error: alocacoesError,
-  } = useQuery({
+  const alocacoesQuery = useQuery({
     queryKey: ["alocacoes-mes", mesKey, obraFiltro],
     queryFn: async () => {
-      return buscarTodasPaginas<AlocRow>(async (from, to) => {
-        let q = supabase
-          .from("alocacoes")
-          .select(
-            "id, data, funcionario_id, obra_id, created_by, created_at, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
-          )
-          .gte("data", startISO)
-          .lte("data", endISO)
-          .order("data", { ascending: true })
-          .order("funcionario_id", { ascending: true })
-          .order("obra_id", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to);
-        if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-        return q;
-      });
+      try {
+        return await buscarTodasPaginas<AlocRow>(async (from, to) => {
+          let q = supabase
+            .from("alocacoes")
+            .select(
+              "id, data, funcionario_id, obra_id, created_by, created_at, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
+            )
+            .gte("data", startISO)
+            .lte("data", endISO)
+            .order("data", { ascending: true })
+            .order("funcionario_id", { ascending: true })
+            .order("obra_id", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to);
+          if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
+          return q;
+        });
+      } catch (error) {
+        logAlocacoesQueryError("alocacoes", error);
+        throw error;
+      }
     },
   });
+  const alocacoes = alocacoesQuery.data;
 
-  const { data: registros, error: registrosError } = useQuery({
+  const registrosQuery = useQuery({
     queryKey: ["registros-mes", mesKey, obraFiltro],
     enabled: !!alocacoes && alocacoes.length > 0,
     queryFn: async () => {
@@ -348,39 +371,51 @@ function AlocacoesPage() {
         tipo_registro: TipoRegistro;
         falta_tipo: FaltaTipo | null;
       };
-      return buscarTodasPaginas<RegistroResumo>(async (from, to) => {
-        let q = supabase
-          .from("registros_horas")
-          .select(
-            "id, funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, created_at, updated_by, updated_at, justificativa_extras, observacoes, tipo_registro, falta_tipo",
-          )
-          .gte("data", startISO)
-          .lte("data", endISO)
-          .order("data", { ascending: true })
-          .order("funcionario_id", { ascending: true })
-          .order("obra_id", { ascending: true })
-          .range(from, to);
-        if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
-        return q;
-      });
+      try {
+        return await buscarTodasPaginas<RegistroResumo>(async (from, to) => {
+          let q = supabase
+            .from("registros_horas")
+            .select(
+              "id, funcionario_id, obra_id, data, horas_normais, horas_extras, created_by, created_at, updated_by, updated_at, justificativa_extras, observacoes, tipo_registro, falta_tipo",
+            )
+            .gte("data", startISO)
+            .lte("data", endISO)
+            .order("data", { ascending: true })
+            .order("funcionario_id", { ascending: true })
+            .order("obra_id", { ascending: true })
+            .range(from, to);
+          if (obraFiltro !== "all") q = q.eq("obra_id", obraFiltro);
+          return q;
+        });
+      } catch (error) {
+        logAlocacoesQueryError("registros", error);
+        throw error;
+      }
     },
   });
+  const registros = registrosQuery.data;
 
   const funcionarioIdsHistoricos = useMemo(
     () => Array.from(new Set((alocacoes ?? []).map((a) => a.funcionario_id))).sort(),
     [alocacoes],
   );
-  const { data: funcionariosHistoricos, error: funcionariosHistoricosError } = useQuery({
+  const funcionariosHistoricosQuery = useQuery({
     queryKey: ["funcionarios-historico-alocacoes", funcionarioIdsHistoricos],
     enabled: funcionarioIdsHistoricos.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("obras_control_funcionarios_por_ids", {
         p_ids: funcionarioIdsHistoricos,
       });
-      if (error) throw error;
-      return data;
+      if (error) {
+        logAlocacoesQueryError("funcionarios_historicos", error);
+        throw error;
+      }
+      const normalizados = normalizarFuncionariosAlocacao(data);
+      logLinhasFuncionariosIgnoradas(normalizados.ignorados);
+      return normalizados.validos;
     },
   });
+  const funcionariosHistoricos = funcionariosHistoricosQuery.data;
 
   const infoHistoricoById = useMemo(() => {
     const infos = new Map(infoById);
@@ -406,17 +441,21 @@ function AlocacoesPage() {
     return Array.from(ids).sort();
   }, [alocacoes, canViewAllocationAudit, registros]);
 
-  const { data: auditUsers, error: auditUsersError } = useQuery({
+  const auditUsersQuery = useQuery({
     queryKey: ["allocation-audit-users", auditUserIds],
     enabled: canViewAllocationAudit && auditUserIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_allocation_audit_users", {
         p_user_ids: auditUserIds,
       });
-      if (error) throw error;
+      if (error) {
+        logAlocacoesQueryError("auditoria", error);
+        throw error;
+      }
       return data as AllocationAuditUser[];
     },
   });
+  const auditUsers = auditUsersQuery.data;
 
   const auditUserById = useMemo(() => {
     const users = new Map<string, string>();
@@ -428,26 +467,6 @@ function AlocacoesPage() {
     }
     return users;
   }, [auditUsers]);
-
-  useEffect(() => {
-    const errs = [
-      funcionariosError && `Funcionários: ${(funcionariosError as ErrorLike).message}`,
-      funcionariosHistoricosError &&
-        `Funcionários do histórico: ${(funcionariosHistoricosError as ErrorLike).message}`,
-      obrasError && `Centros de custo: ${(obrasError as ErrorLike).message}`,
-      alocacoesError && `Alocações: ${(alocacoesError as ErrorLike).message}`,
-      registrosError && `Registros: ${(registrosError as ErrorLike).message}`,
-      auditUsersError && `Auditoria de alocações: ${(auditUsersError as ErrorLike).message}`,
-    ].filter(Boolean) as string[];
-    for (const m of errs) toast.error(m);
-  }, [
-    funcionariosError,
-    funcionariosHistoricosError,
-    obrasError,
-    alocacoesError,
-    registrosError,
-    auditUsersError,
-  ]);
 
   const horasMap = useMemo(() => {
     const m = new Map<
@@ -890,6 +909,18 @@ function AlocacoesPage() {
                     descontado automaticamente. Fim de semana conta como hora extra.
                   </DialogDescription>
                 </DialogHeader>
+                {funcionariosQuery.isError && (
+                  <LocalReadError
+                    message="Não foi possível carregar os funcionários."
+                    retry={() => void funcionariosQuery.refetch()}
+                  />
+                )}
+                {obrasQuery.isError && (
+                  <LocalReadError
+                    message="Não foi possível carregar os centros de custo."
+                    retry={() => void obrasQuery.refetch()}
+                  />
+                )}
                 <Form {...form}>
                   <form
                     onSubmit={form.handleSubmit((v) => createMutation.mutate(v))}
@@ -910,12 +941,7 @@ function AlocacoesPage() {
                             <SelectContent>
                               {funcionariosSelecionaveis.map((f) => (
                                 <SelectItem key={f.id} value={f.id}>
-                                  {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
-                                  {f.data_desligamento
-                                    ? ` — desligado em ${new Date(
-                                        f.data_desligamento + "T00:00:00",
-                                      ).toLocaleDateString("pt-BR")}`
-                                    : ""}
+                                  {rotuloFuncionarioAlocacao(f)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1364,12 +1390,49 @@ function AlocacoesPage() {
         </CardContent>
       </Card>
 
-      {isLoading ? (
+      {obrasQuery.isError && (
+        <div className="mb-4">
+          <LocalReadError
+            message="Não foi possível carregar os centros de custo."
+            retry={() => void obrasQuery.refetch()}
+          />
+        </div>
+      )}
+
+      {(alocacoesQuery.isError || registrosQuery.isError) && (
+        <div className="mb-4 space-y-2">
+          {alocacoesQuery.isError && (
+            <LocalReadError
+              message="Não foi possível carregar as alocações desta competência."
+              retry={() => void alocacoesQuery.refetch()}
+            />
+          )}
+          {registrosQuery.isError && (
+            <LocalReadError
+              message="Não foi possível carregar os registros desta competência."
+              retry={() => void registrosQuery.refetch()}
+            />
+          )}
+        </div>
+      )}
+
+      {(funcionariosHistoricosQuery.isError || auditUsersQuery.isError) && (
+        <Alert className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Alguns detalhes complementares não foram carregados.</AlertTitle>
+          <AlertDescription>
+            As alocações permanecem disponíveis; nomes históricos ou dados de auditoria podem
+            aparecer indisponíveis.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {alocacoesQuery.isLoading ? (
         <div className="space-y-2">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-24 w-full" />
         </div>
-      ) : porObra.length === 0 ? (
+      ) : alocacoesQuery.isError || registrosQuery.isError ? null : porObra.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             Nenhuma alocação nesta competência.
