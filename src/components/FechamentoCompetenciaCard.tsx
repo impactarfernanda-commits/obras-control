@@ -32,6 +32,7 @@ import {
   formatarPeriodoCompetencia,
   type FechamentoCompetencia,
 } from "@/lib/competencias";
+import { logConfigQueryError, nomeUsuarioDisponivel } from "@/lib/configuracoes-runtime";
 
 type ErrorLike = { message?: string };
 type ProfileRow = { id: string; full_name: string | null };
@@ -59,36 +60,49 @@ export function FechamentoCompetenciaCard() {
     [dataReferencia],
   );
 
-  const { data, isLoading } = useQuery({
+  const fechamentosQuery = useQuery({
     queryKey: ["fechamentos-competencia"],
     queryFn: async () => {
       const { data: rows, error } = await fechamentosTable()
         .select("*")
         .order("competencia", { ascending: false });
-      if (error) throw error;
-
-      const fechamentos = (rows ?? []) as unknown as FechamentoCompetencia[];
-      const ids = Array.from(
+      if (error) {
+        logConfigQueryError("fechamentos_competencia", error);
+        throw error;
+      }
+      return (rows ?? []) as unknown as FechamentoCompetencia[];
+    },
+  });
+  const fechamentos = useMemo(() => fechamentosQuery.data ?? [], [fechamentosQuery.data]);
+  const profileIds = useMemo(
+    () =>
+      Array.from(
         new Set(
           fechamentos
-            .flatMap((f) => [f.fechado_por, f.reaberto_por])
+            .flatMap((fechamento) => [fechamento.fechado_por, fechamento.reaberto_por])
             .filter((id): id is string => Boolean(id)),
         ),
-      );
-
-      if (ids.length === 0) return { fechamentos, profiles: new Map<string, string>() };
-
+      ),
+    [fechamentos],
+  );
+  const profilesQuery = useQuery({
+    queryKey: ["fechamentos-competencia-profiles", profileIds],
+    enabled: profileIds.length > 0,
+    queryFn: async () => {
       const { data: profilesRows, error: profilesError } = await supabase
         .from("users_profiles")
         .select("id,full_name")
-        .in("id", ids);
-      if (profilesError) throw profilesError;
+        .in("id", profileIds);
+      if (profilesError) {
+        logConfigQueryError("users_profiles", profilesError);
+        throw profilesError;
+      }
 
       const profiles = new Map<string, string>();
       for (const profile of (profilesRows ?? []) as ProfileRow[]) {
         profiles.set(profile.id, profile.full_name || profile.id);
       }
-      return { fechamentos, profiles };
+      return profiles;
     },
   });
 
@@ -145,8 +159,7 @@ export function FechamentoCompetenciaCard() {
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao reabrir competência"),
   });
 
-  const fechamentos = data?.fechamentos ?? [];
-  const profiles = data?.profiles ?? new Map<string, string>();
+  const profiles = profilesQuery.data;
 
   return (
     <Card className="mt-6">
@@ -154,7 +167,8 @@ export function FechamentoCompetenciaCard() {
         <div>
           <CardTitle>Fechamento de Competência</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Fechamento global 25–24 para bloquear lançamentos, edições e remoções em todos os centros de custo.
+            Fechamento global 25–24 para bloquear lançamentos, edições e remoções em todos os
+            centros de custo.
           </p>
         </div>
       </CardHeader>
@@ -197,7 +211,12 @@ export function FechamentoCompetenciaCard() {
           </div>
         </div>
 
-        {isLoading ? (
+        {fechamentosQuery.isError ? (
+          <QueryError
+            message="Não foi possível carregar o fechamento de competência."
+            onRetry={() => void fechamentosQuery.refetch()}
+          />
+        ) : fechamentosQuery.isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -207,66 +226,70 @@ export function FechamentoCompetenciaCard() {
             Nenhuma competência fechada ou criada ainda.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Competência</TableHead>
-                  <TableHead>Período</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Fechamento</TableHead>
-                  <TableHead>Reabertura</TableHead>
-                  <TableHead>Motivo</TableHead>
-                  <TableHead>Observações</TableHead>
-                  <TableHead className="w-[120px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {fechamentos.map((f) => (
-                  <TableRow key={f.id}>
-                    <TableCell className="font-medium">{f.competencia}</TableCell>
-                    <TableCell>{formatarPeriodoCompetencia(f)}</TableCell>
-                    <TableCell>
-                      <Badge variant={f.fechada ? "default" : "outline"}>
-                        {f.fechada ? "Fechada" : "Aberta"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        {f.fechado_por ? (profiles.get(f.fechado_por) ?? f.fechado_por) : "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatDateTime(f.fechado_em)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        {f.reaberto_por ? (profiles.get(f.reaberto_por) ?? f.reaberto_por) : "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatDateTime(f.reaberto_em)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="max-w-[220px] whitespace-normal">
-                      {f.motivo_reabertura || "—"}
-                    </TableCell>
-                    <TableCell className="max-w-[220px] whitespace-normal">
-                      {f.observacoes || "—"}
-                    </TableCell>
-                    <TableCell>
-                      {isManagerOrAbove && f.fechada && (
-                        <Button variant="outline" size="sm" onClick={() => setReabrir(f)}>
-                          <Unlock className="mr-2 h-4 w-4" />
-                          Reabrir
-                        </Button>
-                      )}
-                      {isManagerOrAbove && !f.fechada && <Badge variant="outline">Aberta</Badge>}
-                    </TableCell>
+          <>
+            {profilesQuery.isError && (
+              <QueryError
+                message="Os responsáveis não puderam ser identificados. Os fechamentos continuam disponíveis."
+                onRetry={() => void profilesQuery.refetch()}
+              />
+            )}
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Competência</TableHead>
+                    <TableHead>Período</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Fechamento</TableHead>
+                    <TableHead>Reabertura</TableHead>
+                    <TableHead>Motivo</TableHead>
+                    <TableHead>Observações</TableHead>
+                    <TableHead className="w-[120px]"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {fechamentos.map((f) => (
+                    <TableRow key={f.id}>
+                      <TableCell className="font-medium">{f.competencia}</TableCell>
+                      <TableCell>{formatarPeriodoCompetencia(f)}</TableCell>
+                      <TableCell>
+                        <Badge variant={f.fechada ? "default" : "outline"}>
+                          {f.fechada ? "Fechada" : "Aberta"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div>{nomeUsuarioDisponivel(profiles, f.fechado_por)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDateTime(f.fechado_em)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>{nomeUsuarioDisponivel(profiles, f.reaberto_por)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDateTime(f.reaberto_em)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[220px] whitespace-normal">
+                        {f.motivo_reabertura || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[220px] whitespace-normal">
+                        {f.observacoes || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {isManagerOrAbove && f.fechada && (
+                          <Button variant="outline" size="sm" onClick={() => setReabrir(f)}>
+                            <Unlock className="mr-2 h-4 w-4" />
+                            Reabrir
+                          </Button>
+                        )}
+                        {isManagerOrAbove && !f.fechada && <Badge variant="outline">Aberta</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
 
@@ -291,5 +314,16 @@ export function FechamentoCompetenciaCard() {
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+function QueryError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm">
+      <p>{message}</p>
+      <Button className="mt-3" variant="outline" size="sm" onClick={onRetry}>
+        Tentar novamente
+      </Button>
+    </div>
   );
 }

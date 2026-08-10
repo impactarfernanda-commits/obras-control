@@ -52,6 +52,11 @@ import { useCategorias, type Categoria } from "@/lib/categorias";
 import { useAuth } from "@/hooks/use-auth";
 import { useBeneficios, fmtBRL, ENCARGOS_PCT } from "@/lib/custos";
 import { RequireRole } from "@/components/RouteAccess";
+import {
+  combinarCategoriasSalarios,
+  logConfigQueryError,
+  type LinhaSalario,
+} from "@/lib/configuracoes-runtime";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   component: () => (
@@ -61,49 +66,36 @@ export const Route = createFileRoute("/_authenticated/configuracoes")({
   ),
 });
 
-type Linha = { categoria: string; salario: string; encargos: string; seguro_vida: string };
 type ErrorLike = { message?: string };
-type CategoriaSalario = {
-  categoria: string;
-  salario: number;
-  encargos: number;
-  seguro_vida: number | null;
-};
 
 function ConfiguracoesPage() {
   const qc = useQueryClient();
   const { isManagerOrAbove } = useAuth();
   const canEditSalario = isManagerOrAbove;
-  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [linhas, setLinhas] = useState<LinhaSalario[]>([]);
   const [openNova, setOpenNova] = useState(false);
   const [novoNome, setNovoNome] = useState("");
   const [novoTipo, setNovoTipo] = useState<"MOI" | "MOD">("MOD");
 
-  const { data: categorias, isLoading: catLoading } = useCategorias();
+  const categoriasQuery = useCategorias({ configContext: true });
+  const { data: categorias, isLoading: catLoading } = categoriasQuery;
 
-  const { data, isLoading } = useQuery({
+  const salariosQuery = useQuery({
     queryKey: ["categoria_salarios"],
     queryFn: async () => {
       const { data, error } = await supabase.from("categoria_salarios").select("*");
-      if (error) throw error;
+      if (error) {
+        logConfigQueryError("categoria_salarios", error);
+        throw error;
+      }
       return data ?? [];
     },
   });
+  const { data, isLoading } = salariosQuery;
 
   useEffect(() => {
     if (!data || !categorias) return;
-    const map = new Map((data as CategoriaSalario[]).map((r) => [r.categoria, r]));
-    setLinhas(
-      categorias.map((c) => {
-        const r = map.get(c.nome);
-        return {
-          categoria: c.nome,
-          salario: r ? String(r.salario) : "0",
-          encargos: r ? String(r.encargos) : "0",
-          seguro_vida: r ? String(r.seguro_vida ?? 0) : "0",
-        };
-      }),
-    );
+    setLinhas(combinarCategoriasSalarios(categorias, data));
   }, [data, categorias]);
 
   const saveMutation = useMutation({
@@ -241,11 +233,23 @@ function ConfiguracoesPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading || catLoading ? (
+          {categoriasQuery.isError || salariosQuery.isError ? (
+            <LocalQueryError
+              message="Não foi possível carregar funções e salários."
+              onRetry={() => {
+                if (categoriasQuery.isError) void categoriasQuery.refetch();
+                if (salariosQuery.isError) void salariosQuery.refetch();
+              }}
+            />
+          ) : isLoading || catLoading ? (
             <div className="space-y-2 p-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
+            </div>
+          ) : linhas.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              Nenhuma função cadastrada.
             </div>
           ) : (
             <Table>
@@ -340,7 +344,8 @@ function ConfiguracoesPage() {
 
 function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
-  const { data, isLoading } = useBeneficios();
+  const beneficiosQuery = useBeneficios({ configContext: true });
+  const { data, isLoading } = beneficiosQuery;
   const [form, setForm] = useState({
     assistencia_medica: "",
     assistencia_odontologica: "",
@@ -411,7 +416,12 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
         )}
       </CardHeader>
       <CardContent>
-        {isLoading ? (
+        {beneficiosQuery.isError ? (
+          <LocalQueryError
+            message="Não foi possível carregar os benefícios."
+            onRetry={() => void beneficiosQuery.refetch()}
+          />
+        ) : isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -441,5 +451,16 @@ function BeneficiosCard({ canEdit }: { canEdit: boolean }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function LocalQueryError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="m-4 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm">
+      <p>{message}</p>
+      <Button className="mt-3" variant="outline" size="sm" onClick={onRetry}>
+        Tentar novamente
+      </Button>
+    </div>
   );
 }
