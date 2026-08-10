@@ -13,6 +13,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SsoCallbackRouteImport } from './routes/sso.callback'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as AuthenticatedRegistrosRouteImport } from './routes/_authenticated/registros'
 import { Route as AuthenticatedObrasRouteImport } from './routes/_authenticated/obras'
@@ -43,6 +44,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SsoCallbackRoute = SsoCallbackRouteImport.update({
+  id: '/sso/callback',
+  path: '/sso/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRelatoriosRoute = AuthenticatedRelatoriosRouteImport.update({
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/obras': typeof AuthenticatedObrasRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/sso/callback': typeof SsoCallbackRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
 }
@@ -142,6 +149,7 @@ export interface FileRoutesByTo {
   '/obras': typeof AuthenticatedObrasRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/sso/callback': typeof SsoCallbackRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
 }
@@ -161,6 +169,7 @@ export interface FileRoutesById {
   '/_authenticated/obras': typeof AuthenticatedObrasRoute
   '/_authenticated/registros': typeof AuthenticatedRegistrosRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/sso/callback': typeof SsoCallbackRoute
   '/_authenticated/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
 }
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/obras'
     | '/registros'
     | '/relatorios'
+    | '/sso/callback'
     | '/admin/usuarios'
     | '/api/public/hooks/check-alerts'
   fileRoutesByTo: FileRoutesByTo
@@ -197,6 +207,7 @@ export interface FileRouteTypes {
     | '/obras'
     | '/registros'
     | '/relatorios'
+    | '/sso/callback'
     | '/admin/usuarios'
     | '/api/public/hooks/check-alerts'
   id:
@@ -215,6 +226,7 @@ export interface FileRouteTypes {
     | '/_authenticated/obras'
     | '/_authenticated/registros'
     | '/_authenticated/relatorios'
+    | '/sso/callback'
     | '/_authenticated/admin/usuarios'
     | '/api/public/hooks/check-alerts'
   fileRoutesById: FileRoutesById
@@ -224,6 +236,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SsoCallbackRoute: typeof SsoCallbackRoute
   ApiPublicHooksCheckAlertsRoute: typeof ApiPublicHooksCheckAlertsRoute
 }
 
@@ -255,6 +268,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sso/callback': {
+      id: '/sso/callback'
+      path: '/sso/callback'
+      fullPath: '/sso/callback'
+      preLoaderRoute: typeof SsoCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/relatorios': {
@@ -380,6 +400,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SsoCallbackRoute: SsoCallbackRoute,
   ApiPublicHooksCheckAlertsRoute: ApiPublicHooksCheckAlertsRoute,
 }
 export const routeTree = rootRouteImport

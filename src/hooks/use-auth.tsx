@@ -10,6 +10,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { highestRole, type Role } from "@/lib/access-control";
+import { PORTAL_ORIGIN } from "@/lib/sso";
 
 interface AuthContextValue {
   user: User | null;
@@ -137,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isManagerOrAbove: role === "diretor" || role === "gerente",
     signOut: async () => {
       await supabase.auth.signOut();
+      window.location.assign(PORTAL_ORIGIN);
     },
   };
 
