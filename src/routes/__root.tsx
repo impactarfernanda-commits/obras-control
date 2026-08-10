@@ -14,6 +14,7 @@ import faviconUrl from "../assets/logo-tanksbr.png?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { safeErrorDetails } from "@/lib/access-control";
+import { BUILD_SHA, BUILD_SHORT_SHA } from "@/lib/build-info";
 
 function NotFoundComponent() {
   return (
@@ -94,6 +95,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "Obras Control" },
+      { name: "google", content: "notranslate" },
+      { name: "build-sha", content: BUILD_SHA },
     ],
     links: [
       {
@@ -119,7 +122,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR" translate="no">
       <head>
         <HeadContent />
       </head>
@@ -133,6 +136,10 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    console.info(`[Build] ${BUILD_SHORT_SHA}`);
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
