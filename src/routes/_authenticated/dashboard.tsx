@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -58,18 +58,14 @@ import {
 import { cn } from "@/lib/utils";
 import { calcularCusto, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { useCategorias, tipoCategoria, type CategoriaTipo } from "@/lib/categorias";
+import { RequireRole } from "@/components/RouteAccess";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
-  beforeLoad: async () => {
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) throw redirect({ to: "/auth" });
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
-    const roles = (data ?? []).map((r) => r.role);
-    if (!roles.includes("gerente") && !roles.includes("diretor")) {
-      throw redirect({ to: "/funcionarios" });
-    }
-  },
-  component: DashboardPage,
+  component: () => (
+    <RequireRole allowed={["gerente", "diretor"]}>
+      <DashboardPage />
+    </RequireRole>
+  ),
 });
 
 const CHART_COLORS = [

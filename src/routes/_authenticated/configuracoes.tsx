@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -51,17 +51,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCategorias, type Categoria } from "@/lib/categorias";
 import { useAuth } from "@/hooks/use-auth";
 import { useBeneficios, fmtBRL, ENCARGOS_PCT } from "@/lib/custos";
+import { RequireRole } from "@/components/RouteAccess";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
-  beforeLoad: async () => {
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) throw redirect({ to: "/auth" });
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
-    const roles = (data ?? []).map((r) => r.role);
-    const allowed = ["supervisor", "coordenador", "gerente", "diretor"];
-    if (!roles.some((r) => allowed.includes(r))) throw redirect({ to: "/funcionarios" });
-  },
-  component: ConfiguracoesPage,
+  component: () => (
+    <RequireRole allowed={["supervisor", "coordenador", "gerente", "diretor"]}>
+      <ConfiguracoesPage />
+    </RequireRole>
+  ),
 });
 
 type Linha = { categoria: string; salario: string; encargos: string; seguro_vida: string };
