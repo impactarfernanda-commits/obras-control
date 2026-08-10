@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { beneficiosOuZero, logConfigQueryError } from "@/lib/configuracoes-runtime";
 
 export const ENCARGOS_PCT = 0.368;
 
@@ -51,25 +52,28 @@ export function calcularCusto(
   const bnf = totalBeneficios(beneficios);
   const sv = Number(seguroVida || 0);
   const total = s + encargos + prov13 + provAvisoPrevio + provFerias + bnf + sv;
-  return { salario: s, encargos, prov13, provAvisoPrevio, provFerias, beneficios: bnf, seguroVida: sv, total };
+  return {
+    salario: s,
+    encargos,
+    prov13,
+    provAvisoPrevio,
+    provFerias,
+    beneficios: bnf,
+    seguroVida: sv,
+    total,
+  };
 }
 
-export function useBeneficios() {
+export function useBeneficios(options?: { configContext?: boolean }) {
   return useQuery({
     queryKey: ["beneficios_config"],
     queryFn: async (): Promise<Beneficios> => {
-      const { data, error } = await supabase
-        .from("beneficios_config" as any)
-        .select("*")
-        .maybeSingle();
-      if (error) throw error;
-      const row = (data ?? {}) as any;
-      return {
-        assistencia_medica: Number(row.assistencia_medica ?? 0),
-        assistencia_odontologica: Number(row.assistencia_odontologica ?? 0),
-        vale_alimentacao: Number(row.vale_alimentacao ?? 0),
-        multibeneficio: Number(row.multibeneficio ?? 0),
-      };
+      const { data, error } = await supabase.from("beneficios_config").select("*").maybeSingle();
+      if (error) {
+        if (options?.configContext) logConfigQueryError("beneficios_config", error);
+        throw error;
+      }
+      return beneficiosOuZero(data as Partial<Beneficios> | null);
     },
   });
 }
@@ -81,10 +85,10 @@ export function useSegurosVida(options?: { enabled?: boolean }) {
     queryFn: async (): Promise<Map<string, number>> => {
       const { data, error } = await supabase
         .from("categoria_salarios")
-        .select("categoria, seguro_vida" as any);
+        .select("categoria, seguro_vida");
       if (error) throw error;
       const m = new Map<string, number>();
-      for (const r of (data ?? []) as any[]) {
+      for (const r of data ?? []) {
         m.set(r.categoria, Number(r.seguro_vida ?? 0));
       }
       return m;
