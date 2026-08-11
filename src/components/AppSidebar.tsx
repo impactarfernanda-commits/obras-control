@@ -4,7 +4,6 @@ import {
   Building2,
   CalendarRange,
   BarChart3,
-  LayoutDashboard,
   Settings,
   LogOut,
   ShieldCheck,
@@ -38,7 +37,6 @@ type Item = {
 };
 
 const icons = {
-  "/dashboard": LayoutDashboard,
   "/funcionarios": Users,
   "/obras": Building2,
   "/alocacoes": CalendarRange,

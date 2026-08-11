@@ -18,10 +18,18 @@ const sourceAuthenticated = readFileSync(
   new URL("../routes/_authenticated/route.tsx", import.meta.url),
   "utf8",
 );
+const sourceIndex = readFileSync(new URL("../routes/index.tsx", import.meta.url), "utf8");
+const sourceDashboard = readFileSync(
+  new URL("../routes/_authenticated/dashboard.tsx", import.meta.url),
+  "utf8",
+);
+const sourceSsoCallback = readFileSync(
+  new URL("../routes/sso.callback.tsx", import.meta.url),
+  "utf8",
+);
 const sourceVite = readFileSync(new URL("../../vite.config.ts", import.meta.url), "utf8");
 
 const expectedNavigation = [
-  ["Dashboard", "/dashboard"],
   ["Funcionários", "/funcionarios"],
   ["Centros de custo", "/obras"],
   ["Alocações", "/alocacoes"],
@@ -48,6 +56,51 @@ test("labels da sidebar são exatamente os esperados", () => {
   assert.deepEqual(
     APP_NAVIGATION_ITEMS.map(({ title, url }) => [title, url]),
     expectedNavigation,
+  );
+});
+
+test("Dashboard fica oculto e Funcionários abre a navegação", () => {
+  assert.doesNotMatch(
+    readFileSync(new URL("./navigation.ts", import.meta.url), "utf8"),
+    /url: "\/dashboard"/,
+  );
+  assert.deepEqual(APP_NAVIGATION_ITEMS[0], {
+    title: "Funcionários",
+    url: "/funcionarios",
+    minLevel: 1,
+  });
+});
+
+test("ordem e permissões da navegação permanecem restritas", () => {
+  assert.deepEqual(APP_NAVIGATION_ITEMS, [
+    { title: "Funcionários", url: "/funcionarios", minLevel: 1 },
+    { title: "Centros de custo", url: "/obras", minLevel: 1 },
+    { title: "Alocações", url: "/alocacoes", minLevel: 1 },
+    { title: "Relatórios", url: "/relatorios", minLevel: 2 },
+    { title: "Configurações", url: "/configuracoes", minLevel: 3 },
+    {
+      title: "Usuários",
+      url: "/admin/usuarios",
+      minLevel: 1,
+      requiresUserManagement: true,
+    },
+  ]);
+  assert.match(sourceSidebar, /i\.requiresUserManagement \? canManageUsers : level >= i\.minLevel/);
+});
+
+test("raiz e Dashboard redirecionam para Alocações sem remover sua implementação", () => {
+  assert.match(sourceIndex, /redirect\(\{ to: "\/alocacoes" \}\)/);
+  assert.match(sourceDashboard, /beforeLoad:[\s\S]*?redirect\(\{ to: "\/alocacoes" \}\)/);
+  assert.match(sourceDashboard, /function DashboardPage\(/);
+  assert.match(sourceDashboard, /useQuery/);
+});
+
+test("Alocações e o retorno padrão do SSO continuam preservados", () => {
+  assert.match(sourceAlocacoes, /createFileRoute\("\/_authenticated\/alocacoes"\)/);
+  assert.match(sourceSsoCallback, /safeReturnPath/);
+  assert.match(
+    sourceSsoCallback,
+    /window\.location\.replace\(safeReturnPath\(data\.return_path\)\)/,
   );
 });
 

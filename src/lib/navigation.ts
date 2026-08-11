@@ -1,5 +1,4 @@
 export const APP_NAVIGATION_ITEMS = [
-  { title: "Dashboard", url: "/dashboard", minLevel: 2 },
   { title: "Funcionários", url: "/funcionarios", minLevel: 1 },
   { title: "Centros de custo", url: "/obras", minLevel: 1 },
   { title: "Alocações", url: "/alocacoes", minLevel: 1 },
