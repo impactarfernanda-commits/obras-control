@@ -59,6 +59,7 @@ import {
   type AdminUser,
 } from "@/lib/admin-users.functions";
 import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
+import { resetPasswordResult, type ResetPasswordVariables } from "@/lib/admin-user-reset";
 
 export const Route = createFileRoute("/_authenticated/admin/usuarios")({
   component: AdminUsuariosPage,
@@ -167,14 +168,14 @@ function AdminUsuariosPage() {
   });
 
   const resetMut = useMutation({
-    mutationFn: (v: { user_id: string; password: string }) => {
+    mutationFn: (v: ResetPasswordVariables) => {
       if (!canManageUsers)
         throw new Error("Gerenciamento de usuários disponível apenas para a conta autorizada.");
-      return resetPwd({ data: v });
+      return resetPwd({ data: { user_id: v.user_id, password: v.password } });
     },
     onSuccess: (_r, v) => {
       toast.success("Senha redefinida");
-      setResetShown({ email: resetTarget!.email, password: v.password });
+      setResetShown(resetPasswordResult(v));
       setResetTarget(null);
       qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
@@ -354,7 +355,12 @@ function AdminUsuariosPage() {
                             >
                               Editar
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setResetTarget(u)}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={resetMut.isPending}
+                              onClick={() => !resetMut.isPending && setResetTarget(u)}
+                            >
                               <KeyRound className="h-3 w-3" />
                             </Button>
                             <Button
@@ -555,8 +561,15 @@ function AdminUsuariosPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
+              disabled={resetMut.isPending}
               onClick={() =>
-                resetTarget && resetMut.mutate({ user_id: resetTarget.id, password: gerarSenha() })
+                resetTarget &&
+                !resetMut.isPending &&
+                resetMut.mutate({
+                  user_id: resetTarget.id,
+                  email: resetTarget.email,
+                  password: gerarSenha(),
+                })
               }
             >
               Redefinir
