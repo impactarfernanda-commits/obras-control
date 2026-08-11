@@ -17,7 +17,6 @@ export function safeReturnPath(path: string | null | undefined) {
 }
 export function portalLoginUrl(path: string) {
   const url = new URL("/", PORTAL_ORIGIN);
-  url.searchParams.set("app", "obras-control");
   url.searchParams.set("return_path", safeReturnPath(path));
   return url.toString();
 }
