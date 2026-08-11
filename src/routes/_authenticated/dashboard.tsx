@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -61,6 +61,10 @@ import { useCategorias, tipoCategoria, type CategoriaTipo } from "@/lib/categori
 import { RequireRole } from "@/components/RouteAccess";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
+  // Dashboard temporariamente oculto da operação.
+  beforeLoad: () => {
+    throw redirect({ to: "/alocacoes" });
+  },
   component: () => (
     <RequireRole allowed={["gerente", "diretor"]}>
       <DashboardPage />
