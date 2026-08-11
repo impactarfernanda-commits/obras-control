@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { Loader2, MailCheck, AlertCircle } from "lucide-react";
+import { portalLoginUrl } from "@/lib/sso";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -18,8 +19,14 @@ export const Route = createFileRoute("/auth")({
       { name: "description", content: "Acesse o sistema de gestão TanksBR." },
     ],
   }),
-  component: AuthPage,
+  component: import.meta.env.PROD ? ProductionAuthRedirect : AuthPage,
 });
+
+function ProductionAuthRedirect() {
+  const target = new URLSearchParams(window.location.search).get("return_path") || "/alocacoes";
+  window.location.replace(portalLoginUrl(target));
+  return null;
+}
 
 function translateAuthError(message: string): string {
   const m = message.toLowerCase();
@@ -29,11 +36,19 @@ function translateAuthError(message: string): string {
     return "E-mail ainda não confirmado. Verifique sua caixa de entrada.";
   if (m.includes("user already registered") || m.includes("already registered"))
     return "Este e-mail já está em uso. Tente outro ou faça login.";
-  if (m.includes("password should be at least") || m.includes("password_too_short") || m.includes("weak_password"))
+  if (
+    m.includes("password should be at least") ||
+    m.includes("password_too_short") ||
+    m.includes("weak_password")
+  )
     return "A senha deve ter pelo menos 6 caracteres.";
   if (m.includes("unable to validate email") || m.includes("invalid email"))
     return "E-mail inválido.";
-  if (m.includes("rate limit") || m.includes("over_request_rate_limit") || m.includes("too many requests"))
+  if (
+    m.includes("rate limit") ||
+    m.includes("over_request_rate_limit") ||
+    m.includes("too many requests")
+  )
     return "Muitas tentativas. Aguarde alguns segundos e tente novamente.";
   if (m.includes("pwned") || m.includes("compromised"))
     return "Esta senha apareceu em vazamentos públicos. Escolha outra mais forte.";
@@ -155,21 +170,21 @@ function AuthPage() {
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
           <TanksBRLogo size="login" />
-          <p className="text-sm text-muted-foreground">Sistema de gestão de centros de custo e equipes</p>
+          <p className="text-sm text-muted-foreground">
+            Sistema de gestão de centros de custo e equipes
+          </p>
         </div>
         <Card className="shadow-brand">
           <CardHeader>
-            <CardTitle>
-              {forgotMode ? "Recuperar senha" : "Acesso ao sistema"}
-            </CardTitle>
+            <CardTitle>{forgotMode ? "Recuperar senha" : "Acesso ao sistema"}</CardTitle>
             <CardDescription>
               {forgotMode
                 ? forgotSent
                   ? "Verifique sua caixa de entrada."
                   : "Informe seu e-mail para receber o link de redefinição."
                 : signupSent
-                ? "Confirme seu e-mail para ativar a conta."
-                : "Entre com seu e-mail ou crie uma conta."}
+                  ? "Confirme seu e-mail para ativar a conta."
+                  : "Entre com seu e-mail ou crie uma conta."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -182,8 +197,8 @@ function AuthPage() {
                       <p className="font-semibold">E-mail enviado</p>
                       <p className="text-sm text-muted-foreground">
                         Enviamos um link de redefinição para{" "}
-                        <strong className="text-foreground">{forgotSent.email}</strong>. Clique
-                        no link para criar uma nova senha.
+                        <strong className="text-foreground">{forgotSent.email}</strong>. Clique no
+                        link para criar uma nova senha.
                       </p>
                     </div>
                   </div>
@@ -215,12 +230,7 @@ function AuthPage() {
                     {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Enviar link de redefinição
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full"
-                    onClick={exitForgot}
-                  >
+                  <Button type="button" variant="ghost" className="w-full" onClick={exitForgot}>
                     Voltar ao login
                   </Button>
                 </form>
