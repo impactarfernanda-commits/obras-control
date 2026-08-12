@@ -2,12 +2,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canDeactivateEmployee,
+  canEditEmployeeTerminationDate,
   hasAnyRole,
   highestRole,
   isExpectedAccessError,
   isTransientReadError,
   shouldRetryRead,
 } from "./access-control.ts";
+
+test("todos os perfis internos podem desligar somente funcionario ativo", () => {
+  for (const role of ["assistente", "supervisor", "coordenador", "gerente", "diretor"] as const) {
+    assert.equal(canDeactivateEmployee(role, true), true, role);
+    assert.equal(canDeactivateEmployee(role, false), false, role);
+  }
+  assert.equal(canDeactivateEmployee(null, true), false);
+});
+
+test("somente gerente e diretor editam data de funcionario ja desligado", () => {
+  for (const role of ["assistente", "supervisor", "coordenador"] as const) {
+    assert.equal(canEditEmployeeTerminationDate(role, false), false, role);
+  }
+  assert.equal(canEditEmployeeTerminationDate("gerente", false), true);
+  assert.equal(canEditEmployeeTerminationDate("diretor", false), true);
+  assert.equal(canEditEmployeeTerminationDate("gerente", true), false);
+});
 
 test("matriz de perfis preserva a maior role suportada", () => {
   assert.equal(highestRole(["assistente"]), "assistente");
