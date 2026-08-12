@@ -12,6 +12,14 @@ export function hasAnyRole(role: Role | null, allowed: readonly Role[]): boolean
   return role !== null && allowed.includes(role);
 }
 
+export function canDeactivateEmployee(role: Role | null, active: boolean): boolean {
+  return role !== null && active;
+}
+
+export function canEditEmployeeTerminationDate(role: Role | null, active: boolean): boolean {
+  return (role === "gerente" || role === "diretor") && !active;
+}
+
 export function isExpectedAccessError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { status?: number; code?: string };

@@ -50,6 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { tipoCategoria, useCategorias } from "@/lib/categorias";
+import { canDeactivateEmployee, canEditEmployeeTerminationDate } from "@/lib/access-control";
 import { useAuth } from "@/hooks/use-auth";
 import { calcularCusto, ENCARGOS_PCT, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { Separator } from "@/components/ui/separator";
@@ -116,7 +117,7 @@ function databaseError(error: unknown) {
 
 function FuncionariosPage() {
   const qc = useQueryClient();
-  const { isManagerOrAbove } = useAuth();
+  const { isManagerOrAbove, role } = useAuth();
   const canSeeSalario = isManagerOrAbove;
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<"all" | "MOI" | "MOD">("all");
@@ -734,7 +735,7 @@ function FuncionariosPage() {
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            {isManagerOrAbove && f.ativo && (
+                            {canDeactivateEmployee(role, f.ativo) && (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -747,7 +748,7 @@ function FuncionariosPage() {
                                 <UserMinus className="h-4 w-4" />
                               </Button>
                             )}
-                            {isManagerOrAbove && !f.ativo && (
+                            {canEditEmployeeTerminationDate(role, f.ativo) && (
                               <Button
                                 variant="ghost"
                                 size="icon"
