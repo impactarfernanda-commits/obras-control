@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import * as XLSX from "xlsx";
+
+import {
+  buildCostCenterWorkbook,
+  costCenterXlsxFilename,
+  sanitizeXlsxFilename,
+  type CostCenterWorkbookInput,
+} from "./relatorio-centro-custo-xlsx.ts";
+
+const input: CostCenterWorkbookInput = {
+  centro: {
+    id: "o1",
+    nome: "230 - IGUÁ ETE SUL",
+    mod: 200.25,
+    moi: 77.5,
+    total: 277.75,
+    funcs: 1,
+    dias: 2,
+    custoHE: 7.5,
+    linhas: [
+      {
+        funcionarioId: "f1",
+        funcionarioNome: "Ana",
+        funcao: "Montadora",
+        tipo: "MOD",
+        tipoInferido: false,
+        dias: 2,
+        horasNormais: 17.5,
+        horas50: 1.5,
+        horas100: 0,
+        custoBase: 192.75,
+        custoHE: 7.5,
+        total: 200.25,
+      },
+    ],
+  },
+  competencia: "agosto de 2026",
+  periodoInicial: "2026-07-25",
+  periodoFinal: "2026-08-24",
+};
+
+function sheets(overrides: Partial<CostCenterWorkbookInput> = {}) {
+  const workbook = buildCostCenterWorkbook({ ...input, ...overrides });
+  return {
+    workbook,
+    resumo: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Resumo, { header: 1, raw: true }),
+    detalhe: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Detalhamento, {
+      header: 1,
+      raw: true,
+    }),
+  };
+}
+
+test("workbook possui as abas Resumo e Detalhamento", () => {
+  assert.deepEqual(sheets().workbook.SheetNames, ["Resumo", "Detalhamento"]);
+});
+
+test("resumo preserva centro, competência e período 25→24", () => {
+  const { resumo } = sheets();
+  assert.equal(resumo[1][1], input.centro.nome);
+  assert.equal(resumo[2][1], input.competencia);
+  assert.equal(resumo[3][1], "25/07/2026 a 24/08/2026");
+});
+
+test("KPIs financeiros e quantitativos do modal permanecem numéricos", () => {
+  const { resumo } = sheets();
+  for (const index of [4, 5, 6, 7, 8, 9]) assert.equal(typeof resumo[index][1], "number");
+  assert.deepEqual([resumo[4][1], resumo[5][1], resumo[6][1]], [277.75, 200.25, 77.5]);
+});
+
+test("detalhamento preserva funcionário, função, tipo e números fornecidos pelo modal", () => {
+  const linha = sheets().detalhe[1];
+  assert.deepEqual(linha.slice(4, 7), ["Ana", "Montadora", "MOD"]);
+  assert.deepEqual(linha.slice(7, 14), [2, 17.5, 1.5, 0, 192.75, 7.5, 200.25]);
+  for (const valor of linha.slice(7, 14)) assert.equal(typeof valor, "number");
+});
+
+test("centro sem HE exporta zero numérico", () => {
+  const centro = {
+    ...input.centro,
+    custoHE: 0,
+    linhas: [{ ...input.centro.linhas[0], horas50: 0, custoHE: 0 }],
+  };
+  const { resumo, detalhe } = sheets({ centro });
+  assert.equal(resumo[9][1], 0);
+  assert.equal(detalhe[1][9], 0);
+  assert.equal(detalhe[1][12], 0);
+});
+
+test("quantidade variável preserva ordem e alocação parcial sem recalcular custos", () => {
+  const parcial = {
+    ...input.centro.linhas[0],
+    funcionarioId: "f2",
+    funcionarioNome: "Bia",
+    dias: 1,
+    custoBase: 31.23,
+    custoHE: 0,
+    total: 31.23,
+  };
+  const centro = { ...input.centro, linhas: [...input.centro.linhas, parcial] };
+  const detalhe = sheets({ centro }).detalhe;
+  assert.equal(detalhe[1][4], "Ana");
+  assert.equal(detalhe[2][4], "Bia");
+  assert.equal(detalhe[2][11], 31.23);
+  assert.equal(detalhe.length, 4);
+});
+
+test("linha TOTAL usa fórmulas com quantidade dinâmica", () => {
+  const workbook = sheets().workbook;
+  assert.equal(workbook.Sheets.Detalhamento.N3.f, "SUM(N2:N2)");
+  assert.equal(workbook.Sheets.Detalhamento.H3.f, "SUM(H2:H2)");
+});
+
+test("nome do arquivo remove caracteres inválidos e permanece legível", () => {
+  assert.equal(
+    sanitizeXlsxFilename('04.0003.01 / DIRETORIA: "GERAL"?'),
+    "04.0003.01_DIRETORIA_GERAL",
+  );
+  assert.equal(costCenterXlsxFilename(input), "CC_230_IGUA_ETE_SUL_agosto_de_2026.xlsx");
+});
+
+test("exportação é transformação pura dos dados recebidos", () => {
+  assert.equal(buildCostCenterWorkbook.length, 1);
+  assert.equal(input.centro.linhas[0].total, sheets().detalhe[1][13]);
+});

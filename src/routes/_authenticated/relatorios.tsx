@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileSpreadsheet } from "lucide-react";
 import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -55,6 +55,7 @@ import {
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
 import { consolidarCustosCentros } from "@/lib/relatorio-centro-custo";
+import { exportCostCenterXlsx } from "@/lib/relatorio-centro-custo-xlsx";
 import { rotuloFalta } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
 
@@ -128,6 +129,7 @@ function RelatoriosPage() {
   const [tipoRegistroFilter, setTipoRegistroFilter] = useState<"all" | "horas" | "falta">("all");
   const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
+  const [exportandoCentro, setExportandoCentro] = useState(false);
 
   const { data: beneficios } = useBeneficios();
   const { data: segurosVida } = useSegurosVida();
@@ -478,6 +480,21 @@ function RelatoriosPage() {
     const d = new Date(year, month + delta, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth());
+  }
+
+  function exportarCentroDetalhe() {
+    if (!centroDetalhe || exportandoCentro) return;
+    setExportandoCentro(true);
+    try {
+      exportCostCenterXlsx({
+        centro: centroDetalhe,
+        competencia: mesLabel,
+        periodoInicial: start,
+        periodoFinal: end,
+      });
+    } finally {
+      setExportandoCentro(false);
+    }
   }
 
   const loading = lf || la || lr;
@@ -1028,7 +1045,11 @@ function RelatoriosPage() {
                 </p>
               )}
 
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <Button onClick={exportarCentroDetalhe} disabled={exportandoCentro}>
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  {exportandoCentro ? "Gerando..." : "Exportar Excel"}
+                </Button>
                 <DialogClose asChild>
                   <Button variant="outline">Fechar</Button>
                 </DialogClose>
