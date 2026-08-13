@@ -38,30 +38,25 @@ import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
 import { dataLocalISO, datasUteisNoIntervalo, diaUtilAnterior } from "@/lib/relatorio-sem-alocacao";
-import { useCategorias, tipoCategoria } from "@/lib/categorias";
-import {
-  calcularCusto,
-  fmtBRL,
-  useBeneficios,
-  useSegurosVida,
-  diasUteisNoIntervalo,
-  custoDoDia,
-  horasPadraoDoDia,
-} from "@/lib/custos";
+import { useCategorias } from "@/lib/categorias";
+import { tipoCategoria } from "@/lib/categorias-core";
+import { fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
+import { calcularCusto, diasUteisNoIntervalo } from "@/lib/custos-core";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import {
   calcularCustoHorasExtras,
   formatarHorasDecimais,
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
-import { consolidarCustosCentros } from "@/lib/relatorio-centro-custo";
 import { exportCostCenterXlsx } from "@/lib/relatorio-centro-custo-xlsx";
 import { rotuloFalta } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
+import { useAuth } from "@/hooks/use-auth";
+import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
-    <RequireRole allowed={["gerente", "diretor"]}>
+    <RequireRole allowed={["coordenador", "gerente", "diretor"]}>
       <RelatoriosPage />
     </RequireRole>
   ),
@@ -107,17 +102,9 @@ function payrollRange(year: number, month: number) {
   return { start: dataLocalISO(start), end: dataLocalISO(end), startDate: start, endDate: end };
 }
 
-function tipoPorAlocacao(
-  alocacao: Pick<AlocRow, "tipo_mao_obra">,
-  funcionario: FuncRow,
-  categorias: Parameters<typeof tipoCategoria>[1],
-) {
-  if (alocacao.tipo_mao_obra === "montagem" || alocacao.tipo_mao_obra === "civil") return "MOD";
-  if (alocacao.tipo_mao_obra === "indireta") return "MOI";
-  return tipoCategoria(funcionario.categoria_mo, categorias) ?? "MOD";
-}
-
 function RelatoriosPage() {
+  const { role } = useAuth();
+  const podeVerFolha = role === "gerente" || role === "diretor";
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -131,9 +118,9 @@ function RelatoriosPage() {
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
   const [exportandoCentro, setExportandoCentro] = useState(false);
 
-  const { data: beneficios } = useBeneficios();
-  const { data: segurosVida } = useSegurosVida();
-  const { data: categorias } = useCategorias();
+  const { data: beneficios } = useBeneficios({ enabled: podeVerFolha });
+  const { data: segurosVida } = useSegurosVida({ enabled: podeVerFolha });
+  const { data: categorias } = useCategorias({ enabled: podeVerFolha });
 
   const { data: funcionarios, isLoading: lf } = useQuery({
     queryKey: ["funcionarios-relatorios"],
@@ -142,6 +129,7 @@ function RelatoriosPage() {
       if (error) throw error;
       return (data ?? []) satisfies FuncRow[];
     },
+    enabled: podeVerFolha,
   });
 
   const { data: obras } = useQuery({
@@ -151,6 +139,7 @@ function RelatoriosPage() {
       if (error) throw error;
       return (data ?? []) as ObraRow[];
     },
+    enabled: podeVerFolha,
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);
@@ -173,6 +162,7 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
+    enabled: podeVerFolha,
   });
 
   const { data: registros, isLoading: lr } = useQuery({
@@ -191,6 +181,13 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
+    enabled: podeVerFolha,
+  });
+
+  const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
+    queryKey: ["relatorio-centros-custo", competencia],
+    queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
   });
 
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
@@ -240,26 +237,8 @@ function RelatoriosPage() {
     return resultado;
   }, [custoPorFunc, funcionariosRelatorio, registros]);
 
-  const resultadoObras = useMemo(() => {
-    const resultado = consolidarCustosCentros({
-      alocacoes: alocacoes ?? [],
-      registros: registros ?? [],
-      funcionarios: funcionariosRelatorio,
-      custos: custoPorFunc,
-      obras: new Map((obras ?? []).map((obra) => [obra.id, obra.nome])),
-      diasUteis,
-      resolverTipo: (alocacao, funcionario) =>
-        alocacao
-          ? tipoPorAlocacao(alocacao, funcionario as FuncRow, categorias)
-          : (tipoCategoria(funcionario.categoria_mo, categorias) ?? "MOD"),
-      calcularCustoBase: (input) => custoDoDia({ ...input, horasExtras: 0 }),
-      horasNormaisPadrao: horasPadraoDoDia,
-    });
-    return { obrasComCusto: resultado.centros, avisos: resultado.avisos };
-  }, [alocacoes, registros, custoPorFunc, funcionariosRelatorio, categorias, obras, diasUteis]);
-
-  const obrasComCusto = resultadoObras.obrasComCusto;
-  const avisosObras = resultadoObras.avisos;
+  const obrasComCusto = useMemo(() => relatorioCentros?.centros ?? [], [relatorioCentros]);
+  const avisosObras = useMemo(() => relatorioCentros?.avisos ?? [], [relatorioCentros]);
   const centroDetalhe = obrasComCusto.find((obra) => obra.id === centroDetalheId) ?? null;
 
   const totaisObra = useMemo(
@@ -531,155 +510,164 @@ function RelatoriosPage() {
         }
       />
 
-      <Card className="mb-4">
-        <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <Select
-            value={tipoRegistroFilter}
-            onValueChange={(value) => setTipoRegistroFilter(value as typeof tipoRegistroFilter)}
-          >
-            <SelectTrigger className="w-[220px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os apontamentos</SelectItem>
-              <SelectItem value="horas">Horas trabalhadas</SelectItem>
-              <SelectItem value="falta">Faltas</SelectItem>
-            </SelectContent>
-          </Select>
-          <Badge variant="secondary">
-            {(registros ?? []).filter((r) => r.tipo_registro === "falta").length} falta(s) no
-            período
-          </Badge>
-          <Button variant="outline" onClick={exportarApontamentos} disabled={!registros?.length}>
-            <Download className="mr-2 h-4 w-4" />
-            Exportar apontamentos
-          </Button>
-        </CardContent>
-      </Card>
+      {podeVerFolha && (
+        <Card className="mb-4">
+          <CardContent className="flex flex-wrap items-center gap-3 p-4">
+            <Select
+              value={tipoRegistroFilter}
+              onValueChange={(value) => setTipoRegistroFilter(value as typeof tipoRegistroFilter)}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os apontamentos</SelectItem>
+                <SelectItem value="horas">Horas trabalhadas</SelectItem>
+                <SelectItem value="falta">Faltas</SelectItem>
+              </SelectContent>
+            </Select>
+            <Badge variant="secondary">
+              {(registros ?? []).filter((r) => r.tipo_registro === "falta").length} falta(s) no
+              período
+            </Badge>
+            <Button variant="outline" onClick={exportarApontamentos} disabled={!registros?.length}>
+              <Download className="mr-2 h-4 w-4" />
+              Exportar apontamentos
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
-      <Tabs defaultValue="funcionarios" className="space-y-4">
+      <Tabs defaultValue={podeVerFolha ? "funcionarios" : "obras"} className="space-y-4">
         <TabsList>
-          <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>
+          {podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>}
           <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>
-          <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
+          {podeVerFolha && <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="funcionarios">
-          <Card>
-            <CardHeader>
-              <CardTitle>Folha mensal — funcionários ativos</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Total mensal:{" "}
-                <span className="font-semibold text-foreground">{fmtBRL(totalFolhaAtiva)}</span> ·{" "}
-                {ativos.length} funcionário(s)
-              </p>
-            </CardHeader>
-            <CardContent className="p-0">
-              {loading ? (
-                <div className="space-y-2 p-4">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nome</TableHead>
-                      <TableHead>Categoria</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead className="text-right">Salário</TableHead>
-                      <TableHead className="text-right">Encargos</TableHead>
-                      <TableHead className="text-right">Prov. 13º</TableHead>
-                      <TableHead className="text-right">Prov. aviso</TableHead>
-                      <TableHead className="text-right">Prov. férias</TableHead>
-                      <TableHead className="text-right">Benefícios e seguro</TableHead>
-                      <TableHead className="text-right">Horas extras</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ativos.length === 0 ? (
+        {podeVerFolha && (
+          <TabsContent value="funcionarios">
+            <Card>
+              <CardHeader>
+                <CardTitle>Folha mensal — funcionários ativos</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Total mensal:{" "}
+                  <span className="font-semibold text-foreground">{fmtBRL(totalFolhaAtiva)}</span> ·{" "}
+                  {ativos.length} funcionário(s)
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loading ? (
+                  <div className="space-y-2 p-4">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
-                          Nenhum funcionário ativo.
+                        <TableHead>Nome</TableHead>
+                        <TableHead>Categoria</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead className="text-right">Salário</TableHead>
+                        <TableHead className="text-right">Encargos</TableHead>
+                        <TableHead className="text-right">Prov. 13º</TableHead>
+                        <TableHead className="text-right">Prov. aviso</TableHead>
+                        <TableHead className="text-right">Prov. férias</TableHead>
+                        <TableHead className="text-right">Benefícios e seguro</TableHead>
+                        <TableHead className="text-right">Horas extras</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ativos.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={11}
+                            className="py-8 text-center text-muted-foreground"
+                          >
+                            Nenhum funcionário ativo.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        ativos.map((f) => {
+                          const c = custoPorFunc.get(f.id);
+                          const tipo = tipoCategoria(f.categoria_mo, categorias);
+                          if (!c) return null;
+                          return (
+                            <TableRow key={f.id}>
+                              <TableCell className="font-medium">
+                                <button
+                                  type="button"
+                                  className="flex cursor-pointer items-center gap-2 text-left hover:underline"
+                                  onClick={() => setFuncionarioDetalheId(f.id)}
+                                >
+                                  <span>{f.nome}</span>
+                                  {!f.ativo && (
+                                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                      Inativo
+                                    </span>
+                                  )}
+                                </button>
+                              </TableCell>
+                              <TableCell>{f.categoria_mo}</TableCell>
+                              <TableCell>
+                                {tipo && <Badge variant="outline">{tipo}</Badge>}
+                              </TableCell>
+                              <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
+                              <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
+                              <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
+                              <TableCell className="text-right">
+                                {fmtBRL(c.provAvisoPrevio)}
+                              </TableCell>
+                              <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
+                              <TableCell className="text-right">
+                                <div>{fmtBRL(c.beneficios)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  Seguro: {fmtBRL(c.seguroVida)}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
+                                {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
+                                  (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
+                                  0 && (
+                                  <div className="whitespace-nowrap text-xs text-muted-foreground">
+                                    {formatarHorasDecimais(
+                                      horasExtrasPorFunc.get(f.id)?.horas50 ?? 0,
+                                    )}{" "}
+                                    a 50% ·{" "}
+                                    {formatarHorasDecimais(
+                                      horasExtrasPorFunc.get(f.id)?.horas100 ?? 0,
+                                    )}{" "}
+                                    a 100%
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0))}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-right font-medium">
+                          Total
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {fmtBRL(totalFolhaAtiva)}
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      ativos.map((f) => {
-                        const c = custoPorFunc.get(f.id);
-                        const tipo = tipoCategoria(f.categoria_mo, categorias);
-                        if (!c) return null;
-                        return (
-                          <TableRow key={f.id}>
-                            <TableCell className="font-medium">
-                              <button
-                                type="button"
-                                className="flex cursor-pointer items-center gap-2 text-left hover:underline"
-                                onClick={() => setFuncionarioDetalheId(f.id)}
-                              >
-                                <span>{f.nome}</span>
-                                {!f.ativo && (
-                                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-                                    Inativo
-                                  </span>
-                                )}
-                              </button>
-                            </TableCell>
-                            <TableCell>{f.categoria_mo}</TableCell>
-                            <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
-                            <TableCell className="text-right">
-                              {fmtBRL(c.provAvisoPrevio)}
-                            </TableCell>
-                            <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
-                            <TableCell className="text-right">
-                              <div>{fmtBRL(c.beneficios)}</div>
-                              <div className="text-xs text-muted-foreground">
-                                Seguro: {fmtBRL(c.seguroVida)}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
-                              {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
-                                (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
-                                0 && (
-                                <div className="whitespace-nowrap text-xs text-muted-foreground">
-                                  {formatarHorasDecimais(
-                                    horasExtrasPorFunc.get(f.id)?.horas50 ?? 0,
-                                  )}{" "}
-                                  a 50% ·{" "}
-                                  {formatarHorasDecimais(
-                                    horasExtrasPorFunc.get(f.id)?.horas100 ?? 0,
-                                  )}{" "}
-                                  a 100%
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold">
-                              {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0))}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                  <TableFooter>
-                    <TableRow>
-                      <TableCell colSpan={10} className="text-right font-medium">
-                        Total
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {fmtBRL(totalFolhaAtiva)}
-                      </TableCell>
-                    </TableRow>
-                  </TableFooter>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                    </TableFooter>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="obras">
           <Card>
@@ -694,7 +682,7 @@ function RelatoriosPage() {
               </p>
             </CardHeader>
             <CardContent className="p-0">
-              {loading ? (
+              {loadingCentros ? (
                 <div className="space-y-2 p-4">
                   <Skeleton className="h-10 w-full" />
                   <Skeleton className="h-10 w-full" />
@@ -772,148 +760,155 @@ function RelatoriosPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="sem-alocacao">
-          <Card>
-            <CardHeader className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <CardTitle>Funcionários sem alocação na competência</CardTitle>
-                  <div className="text-sm text-muted-foreground">
-                    <p>Competência: {periodoLabel}</p>
-                    <p>
-                      {competenciaSemDiasVencidos
-                        ? "Esta competência ainda não possui dias vencidos para análise."
-                        : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
-                    </p>
+        {podeVerFolha && (
+          <TabsContent value="sem-alocacao">
+            <Card>
+              <CardHeader className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>Funcionários sem alocação na competência</CardTitle>
+                    <div className="text-sm text-muted-foreground">
+                      <p>Competência: {periodoLabel}</p>
+                      <p>
+                        {competenciaSemDiasVencidos
+                          ? "Esta competência ainda não possui dias vencidos para análise."
+                          : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    variant="outline"
+                    onClick={exportarSemAlocacao}
+                    disabled={!semAlocacao.length}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Exportar Excel
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={exportarSemAlocacao}
-                  disabled={!semAlocacao.length}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Exportar Excel
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Select
-                  value={pendenciaFilter}
-                  onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}
-                >
-                  <SelectTrigger className="w-[210px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="ativos">Apenas ativos</SelectItem>
-                    <SelectItem value="admitidos">Admitidos no período</SelectItem>
-                    <SelectItem value="desligados">Desligados no período</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
-                  <SelectTrigger className="w-[230px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as categorias</SelectItem>
-                    {categoriasPendencias.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={coberturaFilter}
-                  onValueChange={(v) => setCoberturaFilter(v as typeof coberturaFilter)}
-                >
-                  <SelectTrigger className="w-[230px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as pendências</SelectItem>
-                    <SelectItem value="zero">Sem nenhuma alocação</SelectItem>
-                    <SelectItem value="parcial">Alocação parcial</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {loading ? (
-                <div className="space-y-2 p-4">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
+                <div className="flex flex-wrap gap-2">
+                  <Select
+                    value={pendenciaFilter}
+                    onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}
+                  >
+                    <SelectTrigger className="w-[210px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="ativos">Apenas ativos</SelectItem>
+                      <SelectItem value="admitidos">Admitidos no período</SelectItem>
+                      <SelectItem value="desligados">Desligados no período</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
+                    <SelectTrigger className="w-[230px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas as categorias</SelectItem>
+                      {categoriasPendencias.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={coberturaFilter}
+                    onValueChange={(v) => setCoberturaFilter(v as typeof coberturaFilter)}
+                  >
+                    <SelectTrigger className="w-[230px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas as pendências</SelectItem>
+                      <SelectItem value="zero">Sem nenhuma alocação</SelectItem>
+                      <SelectItem value="parcial">Alocação parcial</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Funcionário</TableHead>
-                      <TableHead>Função/Categoria</TableHead>
-                      <TableHead>Admissão</TableHead>
-                      <TableHead>Desligamento</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Dias disponíveis</TableHead>
-                      <TableHead className="text-right">Dias alocados</TableHead>
-                      <TableHead className="text-right">Dias pendentes</TableHead>
-                      <TableHead>Datas sem alocação</TableHead>
-                      <TableHead>Observação</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {!semAlocacao.length ? (
+              </CardHeader>
+              <CardContent className="p-0">
+                {loading ? (
+                  <div className="space-y-2 p-4">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
-                          {competenciaSemDiasVencidos
-                            ? "Esta competência ainda não possui dias vencidos para análise."
-                            : "Nenhum funcionário com pendências vencidas no período analisado."}
-                        </TableCell>
+                        <TableHead>Funcionário</TableHead>
+                        <TableHead>Função/Categoria</TableHead>
+                        <TableHead>Admissão</TableHead>
+                        <TableHead>Desligamento</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Dias disponíveis</TableHead>
+                        <TableHead className="text-right">Dias alocados</TableHead>
+                        <TableHead className="text-right">Dias pendentes</TableHead>
+                        <TableHead>Datas sem alocação</TableHead>
+                        <TableHead>Observação</TableHead>
                       </TableRow>
-                    ) : (
-                      semAlocacao.map((f) => (
-                        <TableRow key={f.id}>
-                          <TableCell className="font-medium">{f.nome}</TableCell>
-                          <TableCell>{f.categoria_mo}</TableCell>
-                          <TableCell>
-                            {f.data_admissao
-                              ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString("pt-BR")
-                              : "—"}
+                    </TableHeader>
+                    <TableBody>
+                      {!semAlocacao.length ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={10}
+                            className="py-8 text-center text-muted-foreground"
+                          >
+                            {competenciaSemDiasVencidos
+                              ? "Esta competência ainda não possui dias vencidos para análise."
+                              : "Nenhum funcionário com pendências vencidas no período analisado."}
                           </TableCell>
-                          <TableCell>
-                            {f.data_desligamento
-                              ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString(
-                                  "pt-BR",
-                                )
-                              : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={f.ativo ? "default" : "secondary"}>
-                              {f.ativo ? "Ativo" : "Desligado"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
-                          <TableCell className="text-right">{f.diasComAlocacao}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            {f.diasSemAlocacao}
-                          </TableCell>
-                          <TableCell className="max-w-[320px] text-xs leading-5">
-                            {f.datasSemAlocacao
-                              .map((data) =>
-                                new Date(data + "T00:00:00").toLocaleDateString("pt-BR"),
-                              )
-                              .join(", ")}
-                          </TableCell>
-                          <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                      ) : (
+                        semAlocacao.map((f) => (
+                          <TableRow key={f.id}>
+                            <TableCell className="font-medium">{f.nome}</TableCell>
+                            <TableCell>{f.categoria_mo}</TableCell>
+                            <TableCell>
+                              {f.data_admissao
+                                ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString(
+                                    "pt-BR",
+                                  )
+                                : "—"}
+                            </TableCell>
+                            <TableCell>
+                              {f.data_desligamento
+                                ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString(
+                                    "pt-BR",
+                                  )
+                                : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={f.ativo ? "default" : "secondary"}>
+                                {f.ativo ? "Ativo" : "Desligado"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
+                            <TableCell className="text-right">{f.diasComAlocacao}</TableCell>
+                            <TableCell className="text-right font-medium">
+                              {f.diasSemAlocacao}
+                            </TableCell>
+                            <TableCell className="max-w-[320px] text-xs leading-5">
+                              {f.datasSemAlocacao
+                                .map((data) =>
+                                  new Date(data + "T00:00:00").toLocaleDateString("pt-BR"),
+                                )
+                                .join(", ")}
+                            </TableCell>
+                            <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       <Dialog
@@ -979,13 +974,17 @@ function RelatoriosPage() {
                       centroDetalhe.linhas.map((linha) => (
                         <TableRow key={`${linha.funcionarioId}|${linha.tipo}`}>
                           <TableCell className="font-medium">
-                            <button
-                              type="button"
-                              className="cursor-pointer text-left hover:underline"
-                              onClick={() => setFuncionarioDetalheId(linha.funcionarioId)}
-                            >
-                              {linha.funcionarioNome}
-                            </button>
+                            {podeVerFolha ? (
+                              <button
+                                type="button"
+                                className="cursor-pointer text-left hover:underline"
+                                onClick={() => setFuncionarioDetalheId(linha.funcionarioId)}
+                              >
+                                {linha.funcionarioNome}
+                              </button>
+                            ) : (
+                              linha.funcionarioNome
+                            )}
                           </TableCell>
                           <TableCell>{linha.funcao}</TableCell>
                           <TableCell>

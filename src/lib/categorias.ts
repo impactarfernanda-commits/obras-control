@@ -5,9 +5,10 @@ import { logConfigQueryError } from "@/lib/configuracoes-runtime";
 export type CategoriaTipo = "MOI" | "MOD";
 export type Categoria = { nome: string; tipo: CategoriaTipo };
 
-export function useCategorias(options?: { configContext?: boolean }) {
+export function useCategorias(options?: { configContext?: boolean; enabled?: boolean }) {
   return useQuery({
     queryKey: ["categorias"],
+    enabled: options?.enabled ?? true,
     queryFn: async (): Promise<Categoria[]> => {
       const { data, error } = await supabase
         .from("categorias")
