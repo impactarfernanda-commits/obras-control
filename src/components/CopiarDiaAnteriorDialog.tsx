@@ -4,7 +4,8 @@ import { Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { formatarDataCopia, type ResumoCopiaDia } from "@/lib/copiar-dia-anterior";
+import { formatarDataCopia, logErroCopiaDia, type ResumoCopiaDia } from "@/lib/copiar-dia-anterior";
+import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +61,7 @@ export function CopiarDiaAnteriorDialog({
       if (error) throw error;
       setPrevia(data as unknown as ResumoCopiaDia);
     } catch (error) {
+      logErroCopiaDia("previa", error);
       toast.error((error as { message?: string }).message ?? "Erro ao preparar a cópia");
     } finally {
       setCarregando(false);
@@ -96,6 +98,7 @@ export function CopiarDiaAnteriorDialog({
       setOpen(false);
       setPrevia(null);
     } catch (error) {
+      logErroCopiaDia("aplicacao", error);
       toast.error((error as { message?: string }).message ?? "Erro ao copiar equipe");
     } finally {
       setCarregando(false);
@@ -111,7 +114,7 @@ export function CopiarDiaAnteriorDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline">
+        <Button variant="outline" size="sm" className={ALOCACAO_ACTION_BUTTON_CLASS}>
           <Copy className="mr-2 h-4 w-4" />
           Copiar dia anterior
         </Button>

@@ -1,6 +1,8 @@
 export type AlocacoesQueryOperation =
   "funcionarios" | "funcionarios_historicos" | "obras" | "alocacoes" | "registros" | "auditoria";
 
+export const ALOCACAO_ACTION_BUTTON_CLASS = "w-full justify-center sm:w-44";
+
 type QueryErrorLike = {
   name?: unknown;
   code?: unknown;
