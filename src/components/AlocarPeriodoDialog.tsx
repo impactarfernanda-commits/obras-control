@@ -22,6 +22,7 @@ import {
 } from "@/lib/competencias";
 import { useAuth } from "@/hooks/use-auth";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
+import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -405,7 +406,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   return (
     <Dialog open={open} onOpenChange={resetAndClose}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" className={ALOCACAO_ACTION_BUTTON_CLASS}>
           <CalendarRange className="mr-2 h-4 w-4" />
           Alocar período
         </Button>
