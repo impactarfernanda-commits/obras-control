@@ -1,4 +1,4 @@
-import type { CustoBreakdown } from "./custos";
+import type { CustoBreakdown } from "./custos-core";
 import { calcularCustoHorasExtras, isHoraExtra100 } from "./horas-extras.ts";
 
 export type TipoRelatorio = "MOD" | "MOI";

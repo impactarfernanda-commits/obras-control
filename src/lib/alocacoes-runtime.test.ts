@@ -76,7 +76,12 @@ test("ordem e permissões da navegação permanecem restritas", () => {
     { title: "Funcionários", url: "/funcionarios", minLevel: 1 },
     { title: "Centros de custo", url: "/obras", minLevel: 1 },
     { title: "Alocações", url: "/alocacoes", minLevel: 1 },
-    { title: "Relatórios", url: "/relatorios", minLevel: 2 },
+    {
+      title: "Relatórios",
+      url: "/relatorios",
+      minLevel: 2,
+      allowedRoles: ["coordenador", "gerente", "diretor"],
+    },
     { title: "Configurações", url: "/configuracoes", minLevel: 3 },
     {
       title: "Usuários",
@@ -85,7 +90,7 @@ test("ordem e permissões da navegação permanecem restritas", () => {
       requiresUserManagement: true,
     },
   ]);
-  assert.match(sourceSidebar, /i\.requiresUserManagement \? canManageUsers : level >= i\.minLevel/);
+  assert.match(sourceSidebar, /i\.allowedRoles[\s\S]*i\.allowedRoles\.includes\(role\)/);
 });
 
 test("raiz e Dashboard redirecionam para Alocações sem remover sua implementação", () => {

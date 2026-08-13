@@ -27,6 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 import { Button } from "@/components/ui/button";
 import { APP_NAVIGATION_ITEMS } from "@/lib/navigation";
+import type { Role } from "@/lib/access-control";
 
 type Item = {
   title: string;
@@ -34,6 +35,7 @@ type Item = {
   icon: React.ComponentType<{ className?: string }>;
   minLevel: 1 | 2 | 3;
   requiresUserManagement?: boolean;
+  allowedRoles?: readonly Role[];
 };
 
 const icons = {
@@ -58,7 +60,11 @@ export function AppSidebar() {
   const level = isDirector ? 3 : isManagerOrAbove ? 2 : 1;
   const canManageUsers = canGerenciarUsuarios(user?.email);
   const visible = items.filter((i) =>
-    i.requiresUserManagement ? canManageUsers : level >= i.minLevel,
+    i.requiresUserManagement
+      ? canManageUsers
+      : i.allowedRoles
+        ? role !== null && i.allowedRoles.includes(role)
+        : level >= i.minLevel,
   );
 
   return (
