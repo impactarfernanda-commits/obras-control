@@ -61,6 +61,7 @@ import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
+import { CopiarDiaAnteriorDialog } from "@/components/CopiarDiaAnteriorDialog";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import {
@@ -1494,7 +1495,10 @@ function AlocacoesPage() {
                         <TabsTrigger value="calendario">Calendário</TabsTrigger>
                         <TabsTrigger value="grade">Grade semanal (horas)</TabsTrigger>
                       </TabsList>
-                      <AlocarPeriodoDialog obraId={obra.id} obraNome={obra.nome} />
+                      <div className="flex flex-wrap gap-2">
+                        <AlocarPeriodoDialog obraId={obra.id} obraNome={obra.nome} />
+                        <CopiarDiaAnteriorDialog obraId={obra.id} obraNome={obra.nome} />
+                      </div>
                     </div>
 
                     <TabsContent value="calendario" className="mt-3 space-y-4">
