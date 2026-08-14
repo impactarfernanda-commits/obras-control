@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { formatarDataCopia, logErroCopiaDia, type ResumoCopiaDia } from "@/lib/copiar-dia-anterior";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
+import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +29,8 @@ export function CopiarDiaAnteriorDialog({
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [destino, setDestino] = useState(new Date().toISOString().slice(0, 10));
+  const hoje = dataLocalHoje();
+  const [destino, setDestino] = useState(hoje);
   const [previa, setPrevia] = useState<ResumoCopiaDia | null>(null);
   const [carregando, setCarregando] = useState(false);
 
@@ -36,6 +38,7 @@ export function CopiarDiaAnteriorDialog({
     setCarregando(true);
     setPrevia(null);
     try {
+      validarDataLancamento(destino, "alocacao");
       const { data: origem, error: origemErro } = await supabase
         .from("alocacoes")
         .select("data")
@@ -72,6 +75,7 @@ export function CopiarDiaAnteriorDialog({
     if (!previa) return;
     setCarregando(true);
     try {
+      validarDataLancamento(previa.destino_data, "alocacao");
       const { data, error } = await supabase.rpc(
         "obras_copiar_dia_anterior" as never,
         {
@@ -129,6 +133,7 @@ export function CopiarDiaAnteriorDialog({
             <label className="text-sm font-medium">Data destino</label>
             <Input
               type="date"
+              max={hoje}
               value={destino}
               onChange={(e) => {
                 setDestino(e.target.value);

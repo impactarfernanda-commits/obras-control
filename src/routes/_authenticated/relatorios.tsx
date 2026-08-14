@@ -53,6 +53,7 @@ import { rotuloFalta } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
+import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -185,6 +186,10 @@ function RelatoriosPage() {
   });
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
+    queryKey: ["relatorio-sem-alocacao", start, end],
+    queryFn: () => getRelatorioSemAlocacao({ data: { inicio: start, fim: end } }),
+  });
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
     queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
@@ -196,6 +201,17 @@ function RelatoriosPage() {
     () =>
       (funcionarios ?? []).filter((f) => f.deleted_at == null && f.visivel_obras_control !== false),
     [funcionarios],
+  );
+  const funcionariosSemAlocacao = useMemo(
+    () =>
+      (relatorioSemAlocacao?.funcionarios ?? []).filter(
+        (f) => f.deleted_at == null && f.visivel_obras_control !== false,
+      ),
+    [relatorioSemAlocacao],
+  );
+  const alocacoesSemAlocacao = useMemo(
+    () => relatorioSemAlocacao?.alocacoes ?? [],
+    [relatorioSemAlocacao],
   );
 
   const custoPorFunc = useMemo(() => {
@@ -260,12 +276,12 @@ function RelatoriosPage() {
   const semAlocacao = useMemo(() => {
     if (competenciaSemDiasVencidos) return [];
     const alocacoesPorFuncionario = new Map<string, Set<string>>();
-    for (const alocacao of alocacoes ?? []) {
+    for (const alocacao of alocacoesSemAlocacao) {
       const datas = alocacoesPorFuncionario.get(alocacao.funcionario_id) ?? new Set<string>();
       datas.add(alocacao.data);
       alocacoesPorFuncionario.set(alocacao.funcionario_id, datas);
     }
-    return funcionariosRelatorio
+    return funcionariosSemAlocacao
       .filter((f) => {
         if (f.data_admissao && f.data_admissao > dataLimiteAnalise) return false;
         return true;
@@ -325,8 +341,8 @@ function RelatoriosPage() {
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [
-    alocacoes,
-    funcionariosRelatorio,
+    alocacoesSemAlocacao,
+    funcionariosSemAlocacao,
     start,
     end,
     dataLimiteAnalise,
@@ -337,8 +353,8 @@ function RelatoriosPage() {
   ]);
 
   const categoriasPendencias = useMemo(
-    () => Array.from(new Set(funcionariosRelatorio.map((f) => f.categoria_mo))).sort(),
-    [funcionariosRelatorio],
+    () => Array.from(new Set(funcionariosSemAlocacao.map((f) => f.categoria_mo))).sort(),
+    [funcionariosSemAlocacao],
   );
 
   function exportarSemAlocacao() {
@@ -477,6 +493,7 @@ function RelatoriosPage() {
   }
 
   const loading = lf || la || lr;
+  const loadingPendencias = loadingSemAlocacao;
 
   return (
     <div>
@@ -542,7 +559,7 @@ function RelatoriosPage() {
         <TabsList>
           {podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>}
           <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>
-          {podeVerFolha && <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>}
+          <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
         {podeVerFolha && (
@@ -760,155 +777,148 @@ function RelatoriosPage() {
           </Card>
         </TabsContent>
 
-        {podeVerFolha && (
-          <TabsContent value="sem-alocacao">
-            <Card>
-              <CardHeader className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <CardTitle>Funcionários sem alocação na competência</CardTitle>
-                    <div className="text-sm text-muted-foreground">
-                      <p>Competência: {periodoLabel}</p>
-                      <p>
-                        {competenciaSemDiasVencidos
-                          ? "Esta competência ainda não possui dias vencidos para análise."
-                          : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
-                      </p>
-                    </div>
+        <TabsContent value="sem-alocacao">
+          <Card>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle>Funcionários sem alocação na competência</CardTitle>
+                  <div className="text-sm text-muted-foreground">
+                    <p>Competência: {periodoLabel}</p>
+                    <p>
+                      {competenciaSemDiasVencidos
+                        ? "Esta competência ainda não possui dias vencidos para análise."
+                        : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
+                    </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    onClick={exportarSemAlocacao}
-                    disabled={!semAlocacao.length}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Exportar Excel
-                  </Button>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={pendenciaFilter}
-                    onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}
-                  >
-                    <SelectTrigger className="w-[210px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="ativos">Apenas ativos</SelectItem>
-                      <SelectItem value="admitidos">Admitidos no período</SelectItem>
-                      <SelectItem value="desligados">Desligados no período</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
-                    <SelectTrigger className="w-[230px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas as categorias</SelectItem>
-                      {categoriasPendencias.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={coberturaFilter}
-                    onValueChange={(v) => setCoberturaFilter(v as typeof coberturaFilter)}
-                  >
-                    <SelectTrigger className="w-[230px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas as pendências</SelectItem>
-                      <SelectItem value="zero">Sem nenhuma alocação</SelectItem>
-                      <SelectItem value="parcial">Alocação parcial</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <Button
+                  variant="outline"
+                  onClick={exportarSemAlocacao}
+                  disabled={!semAlocacao.length}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Excel
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Select
+                  value={pendenciaFilter}
+                  onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}
+                >
+                  <SelectTrigger className="w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="ativos">Apenas ativos</SelectItem>
+                    <SelectItem value="admitidos">Admitidos no período</SelectItem>
+                    <SelectItem value="desligados">Desligados no período</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
+                  <SelectTrigger className="w-[230px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as categorias</SelectItem>
+                    {categoriasPendencias.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={coberturaFilter}
+                  onValueChange={(v) => setCoberturaFilter(v as typeof coberturaFilter)}
+                >
+                  <SelectTrigger className="w-[230px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as pendências</SelectItem>
+                    <SelectItem value="zero">Sem nenhuma alocação</SelectItem>
+                    <SelectItem value="parcial">Alocação parcial</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingPendencias ? (
+                <div className="space-y-2 p-4">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
                 </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                {loading ? (
-                  <div className="space-y-2 p-4">
-                    <Skeleton className="h-10 w-full" />
-                    <Skeleton className="h-10 w-full" />
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Funcionário</TableHead>
+                      <TableHead>Função/Categoria</TableHead>
+                      <TableHead>Admissão</TableHead>
+                      <TableHead>Desligamento</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Dias disponíveis</TableHead>
+                      <TableHead className="text-right">Dias alocados</TableHead>
+                      <TableHead className="text-right">Dias pendentes</TableHead>
+                      <TableHead>Datas sem alocação</TableHead>
+                      <TableHead>Observação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!semAlocacao.length ? (
                       <TableRow>
-                        <TableHead>Funcionário</TableHead>
-                        <TableHead>Função/Categoria</TableHead>
-                        <TableHead>Admissão</TableHead>
-                        <TableHead>Desligamento</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Dias disponíveis</TableHead>
-                        <TableHead className="text-right">Dias alocados</TableHead>
-                        <TableHead className="text-right">Dias pendentes</TableHead>
-                        <TableHead>Datas sem alocação</TableHead>
-                        <TableHead>Observação</TableHead>
+                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                          {competenciaSemDiasVencidos
+                            ? "Esta competência ainda não possui dias vencidos para análise."
+                            : "Nenhum funcionário com pendências vencidas no período analisado."}
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {!semAlocacao.length ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={10}
-                            className="py-8 text-center text-muted-foreground"
-                          >
-                            {competenciaSemDiasVencidos
-                              ? "Esta competência ainda não possui dias vencidos para análise."
-                              : "Nenhum funcionário com pendências vencidas no período analisado."}
+                    ) : (
+                      semAlocacao.map((f) => (
+                        <TableRow key={f.id}>
+                          <TableCell className="font-medium">{f.nome}</TableCell>
+                          <TableCell>{f.categoria_mo}</TableCell>
+                          <TableCell>
+                            {f.data_admissao
+                              ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString("pt-BR")
+                              : "—"}
                           </TableCell>
-                        </TableRow>
-                      ) : (
-                        semAlocacao.map((f) => (
-                          <TableRow key={f.id}>
-                            <TableCell className="font-medium">{f.nome}</TableCell>
-                            <TableCell>{f.categoria_mo}</TableCell>
-                            <TableCell>
-                              {f.data_admissao
-                                ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString(
-                                    "pt-BR",
-                                  )
-                                : "—"}
-                            </TableCell>
-                            <TableCell>
-                              {f.data_desligamento
-                                ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString(
-                                    "pt-BR",
-                                  )
-                                : "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={f.ativo ? "default" : "secondary"}>
-                                {f.ativo ? "Ativo" : "Desligado"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
-                            <TableCell className="text-right">{f.diasComAlocacao}</TableCell>
-                            <TableCell className="text-right font-medium">
-                              {f.diasSemAlocacao}
-                            </TableCell>
-                            <TableCell className="max-w-[320px] text-xs leading-5">
-                              {f.datasSemAlocacao
-                                .map((data) =>
-                                  new Date(data + "T00:00:00").toLocaleDateString("pt-BR"),
+                          <TableCell>
+                            {f.data_desligamento
+                              ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString(
+                                  "pt-BR",
                                 )
-                                .join(", ")}
-                            </TableCell>
-                            <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={f.ativo ? "default" : "secondary"}>
+                              {f.ativo ? "Ativo" : "Desligado"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
+                          <TableCell className="text-right">{f.diasComAlocacao}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            {f.diasSemAlocacao}
+                          </TableCell>
+                          <TableCell className="max-w-[320px] text-xs leading-5">
+                            {f.datasSemAlocacao
+                              .map((data) =>
+                                new Date(data + "T00:00:00").toLocaleDateString("pt-BR"),
+                              )
+                              .join(", ")}
+                          </TableCell>
+                          <TableCell className="max-w-[360px] text-sm">{f.observacao}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       <Dialog

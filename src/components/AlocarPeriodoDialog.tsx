@@ -23,6 +23,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
+import { validarDataLancamento } from "@/lib/data-lancamento";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,6 +185,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   }
 
   async function verificar() {
+    try {
+      validarDataLancamento(dataInicio, "alocacao");
+      validarDataLancamento(dataFim, "alocacao");
+    } catch (error) {
+      toast.error((error as Error).message);
+      return;
+    }
     if (!funcionarioId) {
       toast.error("Selecione um funcionário");
       return;
@@ -269,6 +277,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   ) {
     setSalvando(true);
     try {
+      validarDataLancamento(dataInicio, "alocacao");
+      validarDataLancamento(dataFim, "alocacao");
       const competenciasBloqueadas = new Set(fechadas.map((c) => c.competencia));
       const datasBloqueadasCompetencia = new Set(
         dias.filter((d) => competenciasBloqueadas.has(calcularCompetencia(d).competencia)),
@@ -454,13 +464,19 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 <Label>Data inicial</Label>
                 <Input
                   type="date"
+                  max={today}
                   value={dataInicio}
                   onChange={(e) => setDataInicio(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
                 <Label>Data final</Label>
-                <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
+                <Input
+                  type="date"
+                  max={today}
+                  value={dataFim}
+                  onChange={(e) => setDataFim(e.target.value)}
+                />
               </div>
             </div>
             <div className="rounded-md border bg-muted/30 p-3 text-sm">

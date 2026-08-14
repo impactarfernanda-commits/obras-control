@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { dataLancamentoFutura, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
@@ -303,6 +304,13 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
     async (key: CellKey, r: Registro) => {
       setSaving((s) => ({ ...s, [key]: "saving" }));
       setGridFeedback(null);
+      try {
+        validarDataLancamento(r.data, "horas");
+      } catch (error) {
+        setSaving((s) => ({ ...s, [key]: "error" }));
+        toast.error((error as Error).message);
+        return;
+      }
       const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
       const hasContent = registroEhFalta(r) || total > 0 || !!r.observacoes?.trim();
 
@@ -651,20 +659,24 @@ function DayCell({
     registro.horas_extras,
   );
   const overflow = total > 16;
+  const dataFutura = dataLancamentoFutura(registro.data);
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
+          disabled={dataFutura}
           className={cn(
             "relative flex h-[68px] w-full flex-col items-center justify-center rounded-md border px-1 text-xs transition hover:ring-2 hover:ring-ring/40",
             bg,
           )}
           title={
-            !alocado && total === 0 && !registroEhFalta(registro)
-              ? "Sem alocação — lançar horas criará automaticamente"
-              : undefined
+            dataFutura
+              ? "Não é permitido lançar horas em datas futuras."
+              : !alocado && total === 0 && !registroEhFalta(registro)
+                ? "Sem alocação — lançar horas criará automaticamente"
+                : undefined
           }
         >
           {registroEhFalta(registro) ? (
