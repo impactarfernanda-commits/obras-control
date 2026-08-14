@@ -86,7 +86,10 @@ test("falta envia horas zeradas", () => {
 });
 
 test("conflito com horas possui mensagem amigável", () => {
-  assert.match(mensagemErroRegistro({ message: "REGISTRO_HORAS_JA_EXISTE" }), /horas registradas/);
+  assert.match(
+    mensagemErroRegistro({ message: "REGISTRO_HORAS_JA_EXISTE" }),
+    /horas trabalhadas lançadas/,
+  );
 });
 
 test("falta duplicada possui mensagem amigável", () => {

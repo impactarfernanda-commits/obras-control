@@ -24,6 +24,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { validarDataLancamento } from "@/lib/data-lancamento";
+import {
+  enumerarDiasCorridos,
+  mensagemErroRegistro,
+  registroEhAusenciaPlanejada,
+  rotuloTipoRegistro,
+  type TipoRegistro,
+} from "@/lib/registro-falta";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -100,6 +107,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [funcionarioId, setFuncionarioId] = useState<string>("");
   const [dataInicio, setDataInicio] = useState<string>(today);
   const [dataFim, setDataFim] = useState<string>(today);
+  const [tipoRegistro, setTipoRegistro] = useState<TipoRegistro>("horas");
+  const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: tipoRegistro });
   const [step, setStep] = useState<"form" | "conflitos">("form");
   const [conflitosAloc, setConflitosAloc] = useState<Set<string>>(new Set());
   const [conflitosReg, setConflitosReg] = useState<Set<string>>(new Set());
@@ -148,16 +157,19 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   );
 
   const dias = useMemo(() => {
-    const all = enumerarDiasUteis(dataInicio, dataFim);
+    const all = ausenciaPlanejada
+      ? enumerarDiasCorridos(dataInicio, dataFim)
+      : enumerarDiasUteis(dataInicio, dataFim);
     const limite = funcSelecionado?.data_desligamento ?? null;
     return limite ? all.filter((d) => d <= limite) : all;
-  }, [dataInicio, dataFim, funcSelecionado]);
+  }, [ausenciaPlanejada, dataInicio, dataFim, funcSelecionado]);
   const diasExcluidosPorDesligamento = useMemo(() => {
     if (!funcSelecionado?.data_desligamento) return 0;
-    return enumerarDiasUteis(dataInicio, dataFim).filter(
-      (d) => d > funcSelecionado.data_desligamento!,
-    ).length;
-  }, [dataInicio, dataFim, funcSelecionado]);
+    const diasIntervalo = ausenciaPlanejada
+      ? enumerarDiasCorridos(dataInicio, dataFim)
+      : enumerarDiasUteis(dataInicio, dataFim);
+    return diasIntervalo.filter((d) => d > funcSelecionado.data_desligamento!).length;
+  }, [ausenciaPlanejada, dataInicio, dataFim, funcSelecionado]);
   const totalDiasIntervalo = useMemo(() => {
     if (!dataInicio || !dataFim) return 0;
     const s = new Date(dataInicio + "T00:00:00");
@@ -181,10 +193,41 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setDataInicio(today);
       setDataFim(today);
       setModo("pular");
+      setTipoRegistro("horas");
     }
   }
 
   async function verificar() {
+    if (ausenciaPlanejada) {
+      if (!funcionarioId) {
+        toast.error("Selecione um funcionário");
+        return;
+      }
+      if (intervaloInvalido || intervaloMuitoGrande) return;
+      setSalvando(true);
+      try {
+        const { error } = await supabase.rpc("obras_salvar_ausencia_planejada_periodo", {
+          p_funcionario_id: funcionarioId,
+          p_obra_id: obraId,
+          p_tipo_registro: tipoRegistro,
+          p_data_inicio: dataInicio,
+          p_data_fim: dataFim,
+          p_observacoes: null,
+        });
+        if (error) throw new Error(mensagemErroRegistro(error));
+        toast.success(`${rotuloTipoRegistro(tipoRegistro)} registrada`);
+        qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
+        qc.invalidateQueries({ queryKey: ["registros-mes"] });
+        qc.invalidateQueries({ queryKey: ["aloc-week", obraId] });
+        qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
+        resetAndClose(false);
+      } catch (error) {
+        toast.error(mensagemErroRegistro(error as Error));
+      } finally {
+        setSalvando(false);
+      }
+      return;
+    }
     try {
       validarDataLancamento(dataInicio, "alocacao");
       validarDataLancamento(dataFim, "alocacao");
@@ -425,8 +468,9 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         <DialogHeader>
           <DialogTitle>Alocar período em {obraNome}</DialogTitle>
           <DialogDescription>
-            Cria alocações para todos os dias úteis (seg–sex) do intervalo e lança horas padrão (9h
-            seg–qui, 8h sex).
+            {ausenciaPlanejada
+              ? "Registra todos os dias corridos do período, sem lançar horas."
+              : "Cria alocações para todos os dias úteis (seg–sex) e lança horas padrão."}
           </DialogDescription>
         </DialogHeader>
 
@@ -459,21 +503,40 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Tipo de registro</Label>
+              <Select
+                value={tipoRegistro}
+                onValueChange={(value: TipoRegistro) => setTipoRegistro(value)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="horas">Horas trabalhadas</SelectItem>
+                  <SelectItem value="falta" disabled>
+                    Falta (use Nova alocação)
+                  </SelectItem>
+                  <SelectItem value="ferias">Férias</SelectItem>
+                  <SelectItem value="folga_campo">Folga de campo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Data inicial</Label>
+                <Label>De</Label>
                 <Input
                   type="date"
-                  max={today}
+                  max={ausenciaPlanejada ? undefined : today}
                   value={dataInicio}
                   onChange={(e) => setDataInicio(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Data final</Label>
+                <Label>Até</Label>
                 <Input
                   type="date"
-                  max={today}
+                  max={ausenciaPlanejada ? undefined : today}
                   value={dataFim}
                   onChange={(e) => setDataFim(e.target.value)}
                 />
@@ -491,8 +554,16 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 </span>
               ) : (
                 <>
-                  <strong>{dias.length}</strong> {dias.length === 1 ? "dia útil" : "dias úteis"} no
-                  intervalo (fins de semana ignorados).
+                  <strong>{dias.length}</strong>{" "}
+                  {ausenciaPlanejada
+                    ? dias.length === 1
+                      ? "dia corrido"
+                      : "dias corridos"
+                    : dias.length === 1
+                      ? "dia útil"
+                      : "dias úteis"}{" "}
+                  no intervalo
+                  {ausenciaPlanejada ? " (inclui fins de semana)." : " (fins de semana ignorados)."}
                   {funcSelecionado?.data_desligamento && (
                     <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                       Desligamento em{" "}
@@ -529,7 +600,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 }
               >
                 {(verificando || salvando) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Verificar e alocar
+                {ausenciaPlanejada ? "Registrar período" : "Verificar e alocar"}
               </Button>
             </DialogFooter>
           </div>

@@ -576,6 +576,17 @@ export type Database = {
       };
     };
     Functions: {
+      obras_salvar_ausencia_planejada_periodo: {
+        Args: {
+          p_data_fim: string;
+          p_data_inicio: string;
+          p_funcionario_id: string;
+          p_observacoes?: string | null;
+          p_obra_id: string;
+          p_tipo_registro: string;
+        };
+        Returns: number;
+      };
       obras_salvar_registro_horas: {
         Args: {
           p_data: string;

@@ -42,7 +42,7 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
     if (!roles.some((role) => role === "coordenador" || role === "gerente" || role === "diretor"))
       throw new Error("Forbidden: relatório indisponível para este perfil");
 
-    const [funcionarios, alocacoes] = await Promise.all([
+    const [funcionarios, alocacoes, ausenciasPlanejadas] = await Promise.all([
       buscarTodasPaginas<FuncionarioSemAlocacaoDTO>((from, to) =>
         supabaseAdmin
           .from("funcionarios")
@@ -62,6 +62,21 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
           .order("funcionario_id", { ascending: true })
           .range(from, to),
       ),
+      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+        supabaseAdmin
+          .from("registros_horas")
+          .select("funcionario_id,data")
+          .in("tipo_registro", ["ferias", "folga_campo"])
+          .gte("data", data.inicio)
+          .lte("data", data.fim)
+          .order("data", { ascending: true })
+          .order("funcionario_id", { ascending: true })
+          .range(from, to),
+      ),
     ]);
-    return { funcionarios, alocacoes };
+    const cobertura = new Map<string, { funcionario_id: string; data: string }>();
+    for (const item of [...alocacoes, ...ausenciasPlanejadas]) {
+      cobertura.set(`${item.funcionario_id}|${item.data}`, item);
+    }
+    return { funcionarios, alocacoes: Array.from(cobertura.values()) };
   });
