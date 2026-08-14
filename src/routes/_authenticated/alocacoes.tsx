@@ -102,6 +102,12 @@ import {
   normalizarFuncionariosAlocacao,
   rotuloFuncionarioAlocacao,
 } from "@/lib/alocacoes-runtime";
+import { useCategorias } from "@/lib/categorias";
+import {
+  compararCategoriasPorTipoENome,
+  ordenarFuncionariosPorTipoENome,
+  semanaInicialDaCompetencia,
+} from "@/lib/alocacoes-visualizacao";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -268,6 +274,8 @@ function AlocacoesPage() {
   const endISO = competenciaPeriodo.data_fim;
   const mesKey = `${year}-${pad(month + 1)}`;
   const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
+  const semanaInicial = useMemo(() => semanaInicialDaCompetencia(year, month), [year, month]);
+  const { data: categorias } = useCategorias();
 
   const funcionariosQuery = useQuery({
     queryKey: ["funcionarios-alocacao-selecao"],
@@ -1446,16 +1454,18 @@ function AlocacoesPage() {
           {porObra.map((obra) => {
             const totalDias = obra.dias.size;
             const totalFuncs = obra.funcs.size;
-            const funcsArr = Array.from(obra.funcs.entries())
-              .map(([id, v]) => ({ id, ...v }))
-              .sort((a, b) => a.nome.localeCompare(b.nome));
+            const funcsArr = ordenarFuncionariosPorTipoENome(
+              Array.from(obra.funcs.entries()).map(([id, v]) => ({ id, ...v })),
+              categorias,
+              (funcionario) => funcionario.categoria,
+            );
             const composicaoEquipe = Array.from(
               funcsArr.reduce((acc, f) => {
                 acc.set(f.categoria, (acc.get(f.categoria) ?? 0) + 1);
                 return acc;
               }, new Map<string, number>()),
-            ).sort(([categoriaA, totalA], [categoriaB, totalB]) =>
-              totalB === totalA ? categoriaA.localeCompare(categoriaB) : totalB - totalA,
+            ).sort(([categoriaA], [categoriaB]) =>
+              compararCategoriasPorTipoENome(categoriaA, categoriaB, categorias),
             );
             const totalFuncoes = composicaoEquipe.length;
             return (
@@ -1777,7 +1787,8 @@ function AlocacoesPage() {
                     <TabsContent value="grade" className="mt-3">
                       <RegistrosGrid
                         obraId={obra.id}
-                        initialWeekStart={new Date(startISO + "T00:00:00")}
+                        categorias={categorias}
+                        initialWeekStart={semanaInicial}
                       />
                     </TabsContent>
                   </Tabs>
