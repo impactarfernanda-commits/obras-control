@@ -74,7 +74,7 @@ const PAGE_SIZE = 10;
 const funcSchema = z.object({
   nome: z.string().trim().min(3, "Mínimo 3 caracteres").max(120),
   categoria_mo: z.string().min(1, "Categoria obrigatória"),
-  salario: z.coerce.number().positive("Salário deve ser maior que zero"),
+  salario: z.coerce.number().nonnegative("Salário inválido"),
   data_admissao: z.string(),
 });
 type FuncForm = z.infer<typeof funcSchema>;
@@ -198,7 +198,7 @@ function FuncionariosPage() {
   const filtered = useMemo(() => {
     const brutos = funcionarios ?? [];
     const naoExcluidos = brutos.filter((f) => f.deleted_at == null);
-    const visiveis = naoExcluidos.filter((f) => f.visivel_obras_control !== false);
+    const visiveis = naoExcluidos.filter((f) => f.visivel_obras_control === true);
     const porStatus = visiveis.filter((f) => {
       if (statusFilter === "ativo") return f.ativo === true;
       if (statusFilter === "inativo") return f.ativo === false;
@@ -233,7 +233,7 @@ function FuncionariosPage() {
     resolver: zodResolver(funcSchema),
     defaultValues: {
       nome: "",
-      salario: canSeeSalario ? 0 : 1,
+      salario: 0,
       categoria_mo: "",
       data_admissao: "",
     },
@@ -247,7 +247,7 @@ function FuncionariosPage() {
     if (salarioDirty) return;
     const padrao = tabelaSalarios.get(watchedCategoria);
     if (padrao && canSeeSalario) {
-      form.setValue("salario", padrao.salario || (canSeeSalario ? 0 : 1));
+      form.setValue("salario", padrao.salario);
     }
   }, [watchedCategoria, tabelaSalarios, open, editing, salarioDirty, canSeeSalario, form]);
 
@@ -260,7 +260,7 @@ function FuncionariosPage() {
   function openCreate() {
     setEditing(null);
     setSalarioDirty(false);
-    form.reset({ nome: "", salario: canSeeSalario ? 0 : 1, categoria_mo: "", data_admissao: "" });
+    form.reset({ nome: "", salario: 0, categoria_mo: "", data_admissao: "" });
     setOpen(true);
   }
 
@@ -270,7 +270,7 @@ function FuncionariosPage() {
     form.reset({
       nome: f.nome,
       categoria_mo: f.categoria_mo,
-      salario: f.salario != null ? Number(f.salario) : canSeeSalario ? 0 : 1,
+      salario: f.salario != null ? Number(f.salario) : 0,
       data_admissao: f.data_admissao ?? "",
     });
     setOpen(true);
@@ -278,6 +278,9 @@ function FuncionariosPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (values: FuncForm) => {
+      if (canSeeSalario && values.salario <= 0) {
+        throw new Error("Informe um salário válido para a função selecionada.");
+      }
       if (editing) {
         const patch: FuncionarioUpdate = {
           nome: values.nome,
@@ -292,11 +295,16 @@ function FuncionariosPage() {
         if (error) throw error;
       } else {
         const payload: FuncionarioInsert = {
-          ...values,
+          nome: values.nome,
+          categoria_mo: values.categoria_mo,
           data_admissao: values.data_admissao || null,
           ativo: true,
+          visivel_obras_control: true,
         };
-        if (canSeeSalario) payload.encargos = Number(values.salario) * ENCARGOS_PCT;
+        if (canSeeSalario) {
+          payload.salario = values.salario;
+          payload.encargos = Number(values.salario) * ENCARGOS_PCT;
+        }
         const { error } = await supabase.from("funcionarios").insert(payload);
         if (error) throw error;
       }

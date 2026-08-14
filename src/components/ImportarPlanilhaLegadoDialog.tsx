@@ -28,6 +28,7 @@ import {
 import { detalhesErroBancoAlocacao } from "@/lib/alocacoes-conflitos";
 import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { dataLancamentoFutura } from "@/lib/data-lancamento";
 import {
   conciliarCentroCusto,
   criarIndiceCentrosExistentes,
@@ -747,6 +748,9 @@ export function ImportarPlanilhaLegadoDialog() {
       );
     }
     const datas = Array.from(new Set(alocacoes.map((a) => a.data))).sort();
+    if (datas.some((data) => dataLancamentoFutura(data))) {
+      erros.push("Não é permitido lançar alocações ou horas em datas futuras.");
+    }
     const competenciasFechadas = await buscarCompetenciasFechadasPorDatas(supabase, datas);
     for (const f of competenciasFechadas)
       erros.push(MENSAGEM_COMPETENCIA_FECHADA + " Competência " + f.competencia + ".");
@@ -893,6 +897,9 @@ export function ImportarPlanilhaLegadoDialog() {
     if (!preview || preview.bloqueado || !user?.id) return;
     setImporting(true);
     try {
+      if (preview.alocacoesValidas.some((item) => dataLancamentoFutura(item.data))) {
+        throw new Error("Não é permitido lançar alocações ou horas em datas futuras.");
+      }
       const { data: obrasAtuaisData, error: obrasAtuaisError } = await supabase
         .from("obras")
         .select("*");

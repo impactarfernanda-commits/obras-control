@@ -59,6 +59,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { CopiarDiaAnteriorDialog } from "@/components/CopiarDiaAnteriorDialog";
@@ -553,7 +554,7 @@ function AlocacoesPage() {
     return days;
   }, [startISO, endISO]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dataLocalHoje();
   const defaultFormValues: FormVals = {
     funcionario_id: "",
     obra_id: "",
@@ -588,6 +589,7 @@ function AlocacoesPage() {
 
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
+      validarDataLancamento(v.data, "horas");
       setAlocacaoFeedback(null);
       const falta = v.tipo_registro === "falta";
       const { hn, he } = falta ? { hn: 0, he: 0 } : calcHoras(v.hora_entrada, v.hora_saida, v.data);
@@ -982,7 +984,7 @@ function AlocacoesPage() {
                         <FormItem>
                           <FormLabel>Data</FormLabel>
                           <FormControl>
-                            <Input type="date" {...field} />
+                            <Input type="date" max={today} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
