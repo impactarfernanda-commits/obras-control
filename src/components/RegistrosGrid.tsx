@@ -43,16 +43,13 @@ import {
   type FaltaTipo,
   type TipoRegistro,
 } from "@/lib/registro-falta";
+import {
+  inicioDaSemanaSegunda,
+  ordenarFuncionariosPorTipoENome,
+} from "@/lib/alocacoes-visualizacao";
+import type { Categoria } from "@/lib/categorias-core";
 
 // ---------- helpers ----------
-function startOfWeek(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = (day + 6) % 7;
-  date.setDate(date.getDate() - diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
 function isoDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
@@ -100,21 +97,23 @@ function cellStatus(r: Registro | undefined): CellStatus {
 
 type Props = {
   obraId: string;
+  categorias: Categoria[] | undefined;
   /** Permite controlar a semana de fora (opcional). */
   initialWeekStart?: Date;
 };
 
-export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
+export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState<Date>(() =>
-    startOfWeek(initialWeekStart ?? new Date()),
+    inicioDaSemanaSegunda(initialWeekStart ?? new Date()),
   );
-  const initialWeekStartKey = initialWeekStart ? isoDate(startOfWeek(initialWeekStart)) : null;
-
+  const initialWeekStartKey = initialWeekStart
+    ? isoDate(inicioDaSemanaSegunda(initialWeekStart))
+    : null;
   useEffect(() => {
     if (!initialWeekStartKey) return;
-    setWeekStart(startOfWeek(new Date(initialWeekStartKey + "T00:00:00")));
+    setWeekStart(inicioDaSemanaSegunda(new Date(initialWeekStartKey + "T00:00:00")));
   }, [initialWeekStartKey]);
 
   const days = useMemo(() => weekDays(weekStart), [weekStart]);
@@ -160,11 +159,12 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
   }, [funcionariosAll]);
   const funcionariosAtivos = useMemo(
     () =>
-      (funcionariosAll ?? [])
-        .filter((f) => funcionarioElegivelNoPeriodo(f, firstDay, lastDay))
-        .slice()
-        .sort((a, b) => a.nome.localeCompare(b.nome)),
-    [funcionariosAll, firstDay, lastDay],
+      ordenarFuncionariosPorTipoENome(
+        (funcionariosAll ?? []).filter((f) => funcionarioElegivelNoPeriodo(f, firstDay, lastDay)),
+        categorias,
+        (funcionario) => funcionario.categoria_mo,
+      ),
+    [funcionariosAll, firstDay, lastDay, categorias],
   );
 
   // alocações da obra na semana
@@ -270,8 +270,12 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
           });
       }
     }
-    return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, infoHistoricoById, extraIds]);
+    return ordenarFuncionariosPorTipoENome(
+      Array.from(map.values()),
+      categorias,
+      (funcionario) => funcionario.categoria_mo,
+    );
+  }, [alocacoes, infoHistoricoById, extraIds, categorias]);
 
   const allocSet = useMemo(() => {
     const s = new Set<string>();
@@ -481,7 +485,11 @@ export function RegistrosGrid({ obraId, initialWeekStart }: Props) {
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setWeekStart(inicioDaSemanaSegunda(new Date()))}
+          >
             Hoje
           </Button>
         </div>
