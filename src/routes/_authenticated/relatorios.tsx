@@ -49,7 +49,7 @@ import {
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
 import { exportCostCenterXlsx } from "@/lib/relatorio-centro-custo-xlsx";
-import { rotuloFalta } from "@/lib/registro-falta";
+import { rotuloFalta, rotuloTipoRegistro } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
@@ -90,7 +90,7 @@ type RegRow = {
   horas_normais: number;
   horas_extras: number;
   ausencia: boolean;
-  tipo_registro: "horas" | "falta";
+  tipo_registro: "horas" | "falta" | "ferias" | "folga_campo";
   falta_tipo: string | null;
   observacoes: string | null;
 };
@@ -114,7 +114,9 @@ function RelatoriosPage() {
   >("all");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
-  const [tipoRegistroFilter, setTipoRegistroFilter] = useState<"all" | "horas" | "falta">("all");
+  const [tipoRegistroFilter, setTipoRegistroFilter] = useState<
+    "all" | "horas" | "falta" | "ferias" | "folga_campo"
+  >("all");
   const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
   const [exportandoCentro, setExportandoCentro] = useState(false);
@@ -390,10 +392,10 @@ function RelatoriosPage() {
         Data: new Date(r.data + "T00:00:00").toLocaleDateString("pt-BR"),
         Funcionário: nomes.get(r.funcionario_id) ?? "—",
         "Centro de custo": centros.get(r.obra_id) ?? "—",
-        "Tipo de registro": r.tipo_registro === "falta" ? "Falta" : "Horas trabalhadas",
+        "Tipo de registro": rotuloTipoRegistro(r.tipo_registro),
         "Classificação da falta": r.tipo_registro === "falta" ? rotuloFalta(r.falta_tipo) : "",
-        "Horas normais": r.tipo_registro === "falta" ? 0 : r.horas_normais,
-        "Horas extras": r.tipo_registro === "falta" ? 0 : r.horas_extras,
+        "Horas normais": r.tipo_registro === "horas" ? r.horas_normais : 0,
+        "Horas extras": r.tipo_registro === "horas" ? r.horas_extras : 0,
         Observação: r.observacoes ?? "",
       }));
     const workbook = XLSX.utils.book_new();
@@ -541,6 +543,8 @@ function RelatoriosPage() {
                 <SelectItem value="all">Todos os apontamentos</SelectItem>
                 <SelectItem value="horas">Horas trabalhadas</SelectItem>
                 <SelectItem value="falta">Faltas</SelectItem>
+                <SelectItem value="ferias">Férias</SelectItem>
+                <SelectItem value="folga_campo">Folga de campo</SelectItem>
               </SelectContent>
             </Select>
             <Badge variant="secondary">
@@ -1156,7 +1160,7 @@ function RelatoriosPage() {
                                   registro.tipo_registro === "falta" ? "destructive" : "secondary"
                                 }
                               >
-                                {registro.tipo_registro === "falta" ? "Falta" : "Horas"}
+                                {rotuloTipoRegistro(registro.tipo_registro)}
                               </Badge>
                             </TableCell>
                             <TableCell>
@@ -1165,30 +1169,30 @@ function RelatoriosPage() {
                                 : "—"}
                             </TableCell>
                             <TableCell>
-                              {registro.tipo_registro === "falta" ? "—" : registro.horaEntrada}
+                              {registro.tipo_registro === "horas" ? registro.horaEntrada : "—"}
                             </TableCell>
                             <TableCell>
-                              {registro.tipo_registro === "falta" ? "—" : registro.horaSaida}
+                              {registro.tipo_registro === "horas" ? registro.horaSaida : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {registro.tipo_registro === "falta"
-                                ? "—"
-                                : formatarHorasDecimais(registro.horas_normais)}
+                              {registro.tipo_registro === "horas"
+                                ? formatarHorasDecimais(registro.horas_normais)
+                                : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {registro.tipo_registro === "falta"
-                                ? "—"
-                                : formatarHorasDecimais(domingo ? 0 : registro.horas_extras)}
+                              {registro.tipo_registro === "horas"
+                                ? formatarHorasDecimais(domingo ? 0 : registro.horas_extras)
+                                : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {registro.tipo_registro === "falta"
-                                ? "—"
-                                : formatarHorasDecimais(domingo ? registro.horas_extras : 0)}
+                              {registro.tipo_registro === "horas"
+                                ? formatarHorasDecimais(domingo ? registro.horas_extras : 0)
+                                : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {registro.tipo_registro === "falta"
-                                ? "—"
-                                : fmtBRL(registro.custoHoraExtra)}
+                              {registro.tipo_registro === "horas"
+                                ? fmtBRL(registro.custoHoraExtra)
+                                : "—"}
                             </TableCell>
                             <TableCell>{registro.observacoes || "—"}</TableCell>
                           </TableRow>

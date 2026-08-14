@@ -1,5 +1,6 @@
-export const TIPOS_REGISTRO = ["horas", "falta"] as const;
+export const TIPOS_REGISTRO = ["horas", "falta", "ferias", "folga_campo"] as const;
 export type TipoRegistro = (typeof TIPOS_REGISTRO)[number];
+export type TipoAusenciaPlanejada = Extract<TipoRegistro, "ferias" | "folga_campo">;
 
 export const CLASSIFICACOES_FALTA = [
   { value: "nao_justificada", label: "Falta não justificada" },
@@ -33,6 +34,33 @@ export function registroEhFalta(registro: {
   return registro.tipo_registro === "falta";
 }
 
+export function registroEhAusenciaPlanejada(registro: { tipo_registro?: string | null }) {
+  return registro.tipo_registro === "ferias" || registro.tipo_registro === "folga_campo";
+}
+
+export function rotuloTipoRegistro(tipo: string | null | undefined) {
+  if (tipo === "falta") return "Falta";
+  if (tipo === "ferias") return "Férias";
+  if (tipo === "folga_campo") return "Folga de campo";
+  return "Horas trabalhadas";
+}
+
+export function enumerarDiasCorridos(inicio: string, fim: string): string[] {
+  if (!inicio || !fim || fim < inicio) return [];
+  const dias: string[] = [];
+  const atual = new Date(inicio + "T00:00:00");
+  const limite = new Date(fim + "T00:00:00");
+  while (atual <= limite) {
+    dias.push(
+      `${atual.getFullYear()}-${String(atual.getMonth() + 1).padStart(2, "0")}-${String(
+        atual.getDate(),
+      ).padStart(2, "0")}`,
+    );
+    atual.setDate(atual.getDate() + 1);
+  }
+  return dias;
+}
+
 export function validarRegistroApontamento(registro: {
   tipo_registro: TipoRegistro;
   falta_tipo?: string | null;
@@ -44,6 +72,13 @@ export function validarRegistroApontamento(registro: {
       return "Selecione a classificação da falta.";
     }
     if (totalHorasRegistro(registro) > 0) return "Uma falta integral não pode conter horas.";
+    return null;
+  }
+  if (registroEhAusenciaPlanejada(registro)) {
+    if (totalHorasRegistro(registro) > 0) return "Uma ausência planejada não pode conter horas.";
+    if (registro.falta_tipo) {
+      return "Uma ausência planejada não pode ter classificação de falta.";
+    }
     return null;
   }
   if (registro.falta_tipo) return "Horas trabalhadas não podem ter classificação de falta.";
@@ -59,7 +94,19 @@ export function mensagemErroRegistro(error: { message?: string } | null | undefi
     return "Este funcionário já possui uma falta registrada nesta data.";
   }
   if (message.includes("REGISTRO_HORAS_JA_EXISTE")) {
-    return "Este funcionário já possui horas registradas nesta data. Corrija ou cancele os apontamentos antes de registrar a falta.";
+    return "Existem horas trabalhadas lançadas para este funcionário no período selecionado.";
+  }
+  if (message.includes("REGISTRO_FERIAS_JA_EXISTE")) {
+    return "Funcionário está de férias neste período.";
+  }
+  if (message.includes("REGISTRO_FOLGA_CAMPO_JA_EXISTE")) {
+    return "Funcionário está em folga de campo neste período.";
+  }
+  if (message.includes("REGISTRO_AUSENCIA_JA_EXISTE")) {
+    return "Funcionário já possui um registro de ausência no período selecionado.";
+  }
+  if (message.includes("PERIODO_AUSENCIA_INVALIDO")) {
+    return "A data Até deve ser igual ou posterior à data De.";
   }
   if (message.includes("REGISTRO_HORAS_ZERO")) {
     return "Informe uma jornada válida com horas efetivamente trabalhadas.";
@@ -87,7 +134,7 @@ export async function buscarConflitoRegistroDiario(
   if (error) throw error;
   const outros = data.filter((item) => item.id !== registro.id);
   if (
-    registro.tipo_registro === "falta" &&
+    registro.tipo_registro !== "horas" &&
     outros.some(
       (item) =>
         item.tipo_registro === "horas" &&
@@ -96,11 +143,21 @@ export async function buscarConflitoRegistroDiario(
   ) {
     return mensagemErroRegistro({ message: "REGISTRO_HORAS_JA_EXISTE" });
   }
+  const ausenciaExistente = outros.find((item) => item.tipo_registro !== "horas");
+  if (registro.tipo_registro === "horas" && ausenciaExistente?.tipo_registro === "ferias") {
+    return mensagemErroRegistro({ message: "REGISTRO_FERIAS_JA_EXISTE" });
+  }
+  if (registro.tipo_registro === "horas" && ausenciaExistente?.tipo_registro === "folga_campo") {
+    return mensagemErroRegistro({ message: "REGISTRO_FOLGA_CAMPO_JA_EXISTE" });
+  }
   if (
-    outros.some((item) => item.tipo_registro === "falta") &&
+    ausenciaExistente &&
     (registro.tipo_registro === "horas" || registro.tipo_registro === "falta")
   ) {
     return mensagemErroRegistro({ message: "REGISTRO_FALTA_JA_EXISTE" });
+  }
+  if (ausenciaExistente && registro.tipo_registro !== "horas") {
+    return mensagemErroRegistro({ message: "REGISTRO_AUSENCIA_JA_EXISTE" });
   }
   return null;
 }

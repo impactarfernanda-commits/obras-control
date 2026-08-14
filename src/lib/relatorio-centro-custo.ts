@@ -17,7 +17,7 @@ export type RegistroRelatorio = {
   horas_normais: number;
   horas_extras: number;
   ausencia: boolean;
-  tipo_registro?: "horas" | "falta";
+  tipo_registro?: "horas" | "falta" | "ferias" | "folga_campo";
   falta_tipo?: string | null;
 };
 
@@ -142,7 +142,9 @@ export function consolidarCustosCentros(input: Input) {
     }
 
     const registro = regIndex.get(chave(alocacao.funcionario_id, alocacao.obra_id, alocacao.data));
-    const falta = registro?.tipo_registro === "falta";
+    const falta = registro
+      ? (registro.tipo_registro != null && registro.tipo_registro !== "horas") || registro.ausencia
+      : false;
     if (!registro) {
       avisos.add(
         "Ha alocacoes sem registro de horas correspondente; foi usada a jornada padrao do dia.",
@@ -179,7 +181,7 @@ export function consolidarCustosCentros(input: Input) {
   }
 
   for (const registro of input.registros) {
-    if (registro.tipo_registro === "falta") continue;
+    if (registro.tipo_registro != null && registro.tipo_registro !== "horas") continue;
     if (Number(registro.horas_extras || 0) <= 0) continue;
     const funcionario = funcMap.get(registro.funcionario_id);
     const custo = input.custos.get(registro.funcionario_id);

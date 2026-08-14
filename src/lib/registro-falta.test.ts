@@ -58,5 +58,8 @@ test("falta explícita não confunde ausência legada com novo tipo", () => {
 
 test("erros transacionais são apresentados de forma amigável", () => {
   assert.match(mensagemErroRegistro({ message: "REGISTRO_FALTA_JA_EXISTE" }), /falta registrada/);
-  assert.match(mensagemErroRegistro({ message: "REGISTRO_HORAS_JA_EXISTE" }), /horas registradas/);
+  assert.match(
+    mensagemErroRegistro({ message: "REGISTRO_HORAS_JA_EXISTE" }),
+    /horas trabalhadas lançadas/,
+  );
 });

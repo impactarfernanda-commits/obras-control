@@ -90,7 +90,9 @@ import {
   buscarConflitoRegistroDiario,
   CLASSIFICACOES_FALTA,
   mensagemErroRegistro,
+  registroEhAusenciaPlanejada,
   rotuloFalta,
+  rotuloTipoRegistro,
   TIPOS_REGISTRO,
   validarRegistroApontamento,
   type FaltaTipo,
@@ -134,6 +136,7 @@ const schema = z
     funcionario_id: z.string().uuid("Selecione um funcionário"),
     obra_id: z.string().uuid("Selecione um centro de custo"),
     data: z.string().min(1, "Data obrigatória"),
+    data_fim: z.string().min(1, "Data final obrigatória"),
     tipo_registro: z.enum(TIPOS_REGISTRO),
     falta_tipo: z.enum(classificacoesFaltaValues).nullable(),
     hora_entrada: z.string(),
@@ -142,6 +145,16 @@ const schema = z
     justificativa_extras: z.string().optional(),
   })
   .superRefine((v, ctx) => {
+    if (registroEhAusenciaPlanejada(v)) {
+      if (v.data_fim < v.data) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["data_fim"],
+          message: "A data Até deve ser igual ou posterior à data De.",
+        });
+      }
+      return;
+    }
     if (v.tipo_registro === "falta") {
       if (!v.falta_tipo) {
         ctx.addIssue({
@@ -225,6 +238,7 @@ type AlocRow = {
   intervalo_padrao_minutos: number;
   obras: { id: string; nome: string } | null;
 };
+type CalendarRow = AlocRow & { registroOnly?: boolean };
 
 type AllocationAuditUser = {
   id: string;
@@ -363,7 +377,7 @@ function AlocacoesPage() {
 
   const registrosQuery = useQuery({
     queryKey: ["registros-mes", mesKey, obraFiltro],
-    enabled: !!alocacoes && alocacoes.length > 0,
+    enabled: true,
     queryFn: async () => {
       type RegistroResumo = {
         id: string;
@@ -406,8 +420,14 @@ function AlocacoesPage() {
   const registros = registrosQuery.data;
 
   const funcionarioIdsHistoricos = useMemo(
-    () => Array.from(new Set((alocacoes ?? []).map((a) => a.funcionario_id))).sort(),
-    [alocacoes],
+    () =>
+      Array.from(
+        new Set([
+          ...(alocacoes ?? []).map((a) => a.funcionario_id),
+          ...(registros ?? []).map((r) => r.funcionario_id),
+        ]),
+      ).sort(),
+    [alocacoes, registros],
   );
   const funcionariosHistoricosQuery = useQuery({
     queryKey: ["funcionarios-historico-alocacoes", funcionarioIdsHistoricos],
@@ -519,7 +539,7 @@ function AlocacoesPage() {
       string,
       {
         nome: string;
-        dias: Map<string, AlocRow[]>;
+        dias: Map<string, CalendarRow[]>;
         funcs: Map<
           string,
           { nome: string; categoria: string; dias: Set<string>; hn: number; he: number }
@@ -551,10 +571,44 @@ function AlocacoesPage() {
         fEntry.he += h.he;
       }
     }
+    for (const r of registros ?? []) {
+      if (!registroEhAusenciaPlanejada(r)) continue;
+      const obraId = r.obra_id;
+      const obraNome = obras?.find((obra) => obra.id === obraId)?.nome ?? "—";
+      if (!out.has(obraId)) out.set(obraId, { nome: obraNome, dias: new Map(), funcs: new Map() });
+      const g = out.get(obraId)!;
+      if (!g.dias.has(r.data)) g.dias.set(r.data, []);
+      const items = g.dias.get(r.data)!;
+      if (!items.some((item) => item.funcionario_id === r.funcionario_id)) {
+        items.push({
+          id: `registro-${r.id}`,
+          data: r.data,
+          funcionario_id: r.funcionario_id,
+          obra_id: r.obra_id,
+          created_by: r.created_by,
+          created_at: r.created_at,
+          hora_entrada: null,
+          hora_saida: null,
+          intervalo_padrao_minutos: 0,
+          obras: { id: obraId, nome: obraNome },
+          registroOnly: true,
+        });
+      }
+      const info = infoHistoricoById.get(r.funcionario_id);
+      if (!g.funcs.has(r.funcionario_id))
+        g.funcs.set(r.funcionario_id, {
+          nome: info?.nome ?? "—",
+          categoria: info?.categoria ?? "Sem função",
+          dias: new Set(),
+          hn: 0,
+          he: 0,
+        });
+      g.funcs.get(r.funcionario_id)!.dias.add(r.data);
+    }
     return Array.from(out.entries())
       .map(([id, v]) => ({ id, ...v }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, horasMap, infoHistoricoById]);
+  }, [alocacoes, registros, horasMap, infoHistoricoById, obras]);
 
   const competenciaDays = useMemo(() => {
     const days: string[] = [];
@@ -567,6 +621,7 @@ function AlocacoesPage() {
     funcionario_id: "",
     obra_id: "",
     data: today,
+    data_fim: today,
     tipo_registro: "horas",
     falta_tipo: null,
     hora_entrada: "07:00",
@@ -580,6 +635,7 @@ function AlocacoesPage() {
   });
   const watchData = form.watch("data");
   const watchTipoRegistro = form.watch("tipo_registro");
+  const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: watchTipoRegistro });
   const watchEntrada = form.watch("hora_entrada");
   const watchSaida = form.watch("hora_saida");
   const previa = useMemo(
@@ -597,8 +653,20 @@ function AlocacoesPage() {
 
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
-      validarDataLancamento(v.data, "horas");
       setAlocacaoFeedback(null);
+      if (registroEhAusenciaPlanejada(v)) {
+        const { error } = await supabase.rpc("obras_salvar_ausencia_planejada_periodo", {
+          p_funcionario_id: v.funcionario_id,
+          p_obra_id: v.obra_id,
+          p_tipo_registro: v.tipo_registro,
+          p_data_inicio: v.data,
+          p_data_fim: v.data_fim,
+          p_observacoes: v.observacoes?.trim() || null,
+        });
+        if (error) throw new Error(mensagemErroRegistro(error));
+        return { tipoRegistro: v.tipo_registro, faltaTipo: null, hn: 0, he: 0 };
+      }
+      validarDataLancamento(v.data, "horas");
       const falta = v.tipo_registro === "falta";
       const { hn, he } = falta ? { hn: 0, he: 0 } : calcHoras(v.hora_entrada, v.hora_saida, v.data);
       const erroValidacao = validarRegistroApontamento({
@@ -668,8 +736,10 @@ function AlocacoesPage() {
     },
     onSuccess: ({ tipoRegistro, faltaTipo, hn, he }) => {
       toast.success(
-        tipoRegistro === "falta"
-          ? `Falta registrada: ${rotuloFalta(faltaTipo)}`
+        tipoRegistro !== "horas"
+          ? tipoRegistro === "falta"
+            ? `Falta registrada: ${rotuloFalta(faltaTipo)}`
+            : `${rotuloTipoRegistro(tipoRegistro)} registrada`
           : `Lançamento salvo: ${formatDecimalHours(hn)}h normais${he > 0 ? ` ${formatExtraHours(he)} extras` : ""}`,
       );
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
@@ -729,17 +799,17 @@ function AlocacoesPage() {
     [alocacaoEmEdicao?.data, editEntrada, editSaida, editTipoRegistro],
   );
   const editHorariosValidos =
-    editTipoRegistro === "falta" ||
+    editTipoRegistro !== "horas" ||
     (timeRegex.test(editEntrada) &&
       timeRegex.test(editSaida) &&
       parseTimeToMinutes(editSaida) > parseTimeToMinutes(editEntrada) &&
       editPrevia.total > 0);
   const editJustificativaValida =
-    editTipoRegistro === "falta" || editPrevia.he <= 2 || editJustificativa.trim().length > 0;
+    editTipoRegistro !== "horas" || editPrevia.he <= 2 || editJustificativa.trim().length > 0;
   const editPodeSalvar =
     editHorariosValidos &&
     editJustificativaValida &&
-    (editTipoRegistro === "horas" || editFaltaTipo !== null);
+    (editTipoRegistro !== "falta" || editFaltaTipo !== null);
 
   function abrirEdicao(a: AlocRow) {
     const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
@@ -750,9 +820,9 @@ function AlocacoesPage() {
     setEditTipoRegistro(tipoRegistro);
     setEditFaltaTipo(registro?.faltaTipo ?? null);
     setEditObservacoes(registro?.observacoes ?? "");
-    setEditEntrada(tipoRegistro === "falta" ? "" : entrada);
+    setEditEntrada(tipoRegistro !== "horas" ? "" : entrada);
     setEditSaida(
-      tipoRegistro === "falta"
+      tipoRegistro !== "horas"
         ? ""
         : a.hora_saida?.slice(0, 5) ||
             `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
@@ -789,8 +859,8 @@ function AlocacoesPage() {
       const { error: alocErr } = await supabase
         .from("alocacoes")
         .update({
-          hora_entrada: editTipoRegistro === "falta" ? null : editEntrada,
-          hora_saida: editTipoRegistro === "falta" ? null : editSaida,
+          hora_entrada: editTipoRegistro !== "horas" ? null : editEntrada,
+          hora_saida: editTipoRegistro !== "horas" ? null : editSaida,
           intervalo_padrao_minutos: 60,
         })
         .eq("id", a.id);
@@ -803,8 +873,8 @@ function AlocacoesPage() {
         p_data: a.data,
         p_tipo_registro: editTipoRegistro,
         p_falta_tipo: editTipoRegistro === "falta" ? editFaltaTipo : null,
-        p_horas_normais: editTipoRegistro === "falta" ? 0 : editPrevia.hn,
-        p_horas_extras: editTipoRegistro === "falta" ? 0 : editPrevia.he,
+        p_horas_normais: editTipoRegistro !== "horas" ? 0 : editPrevia.hn,
+        p_horas_extras: editTipoRegistro !== "horas" ? 0 : editPrevia.he,
         p_justificativa_extras:
           editTipoRegistro === "horas" && editPrevia.he > 0
             ? editJustificativa.trim() || null
@@ -820,8 +890,8 @@ function AlocacoesPage() {
     },
     onSuccess: ({ total, tipoRegistro }) => {
       toast.success(
-        tipoRegistro === "falta"
-          ? "Falta atualizada"
+        tipoRegistro !== "horas"
+          ? `${rotuloTipoRegistro(tipoRegistro)} atualizada`
           : `Horas atualizadas para ${formatDecimalHours(total)}h`,
       );
       setAlocacaoEmEdicao(null);
@@ -990,9 +1060,13 @@ function AlocacoesPage() {
                       name="data"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Data</FormLabel>
+                          <FormLabel>{ausenciaPlanejada ? "De" : "Data"}</FormLabel>
                           <FormControl>
-                            <Input type="date" max={today} {...field} />
+                            <Input
+                              type="date"
+                              max={ausenciaPlanejada ? undefined : today}
+                              {...field}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1028,6 +1102,8 @@ function AlocacoesPage() {
                             <SelectContent>
                               <SelectItem value="horas">Horas trabalhadas</SelectItem>
                               <SelectItem value="falta">Falta</SelectItem>
+                              <SelectItem value="ferias">Férias</SelectItem>
+                              <SelectItem value="folga_campo">Folga de campo</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -1103,7 +1179,7 @@ function AlocacoesPage() {
                           />
                         )}
                       </>
-                    ) : (
+                    ) : watchTipoRegistro === "falta" ? (
                       <div className="space-y-3">
                         <FormField
                           control={form.control}
@@ -1135,6 +1211,28 @@ function AlocacoesPage() {
                         <Alert>
                           <AlertTriangle className="h-4 w-4" />
                           <AlertDescription>{AVISO_FALTA_INTEGRAL}</AlertDescription>
+                        </Alert>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <FormField
+                          control={form.control}
+                          name="data_fim"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Até</FormLabel>
+                              <FormControl>
+                                <Input type="date" min={watchData} {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <Alert>
+                          <AlertDescription>
+                            Todos os dias corridos do período serão registrados, incluindo sábados e
+                            domingos. Não serão lançadas horas.
+                          </AlertDescription>
                         </Alert>
                       </div>
                     )}
@@ -1224,6 +1322,8 @@ function AlocacoesPage() {
                   <SelectContent>
                     <SelectItem value="horas">Horas trabalhadas</SelectItem>
                     <SelectItem value="falta">Falta</SelectItem>
+                    <SelectItem value="ferias">Férias</SelectItem>
+                    <SelectItem value="folga_campo">Folga de campo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1296,7 +1396,7 @@ function AlocacoesPage() {
                     </div>
                   )}
                 </>
-              ) : (
+              ) : editTipoRegistro === "falta" ? (
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Classificação da falta *</label>
@@ -1321,6 +1421,12 @@ function AlocacoesPage() {
                     <AlertDescription>{AVISO_FALTA_INTEGRAL}</AlertDescription>
                   </Alert>
                 </div>
+              ) : (
+                <Alert>
+                  <AlertDescription>
+                    {rotuloTipoRegistro(editTipoRegistro)} — nenhuma hora será lançada neste dia.
+                  </AlertDescription>
+                </Alert>
               )}
               <div className="space-y-2">
                 <label htmlFor="edit-observacoes" className="text-sm font-medium">
@@ -1682,20 +1788,26 @@ function AlocacoesPage() {
                                                   </div>
                                                   <div className="mt-0.5 flex flex-wrap gap-1">
                                                     {h ? (
-                                                      h.tipoRegistro === "falta" ? (
+                                                      h.tipoRegistro !== "horas" ? (
                                                         <>
                                                           <Badge
-                                                            variant="destructive"
+                                                            variant={
+                                                              h.tipoRegistro === "falta"
+                                                                ? "destructive"
+                                                                : "secondary"
+                                                            }
                                                             className="text-[10px]"
                                                           >
-                                                            Falta
+                                                            {rotuloTipoRegistro(h.tipoRegistro)}
                                                           </Badge>
-                                                          <Badge
-                                                            variant="outline"
-                                                            className="text-[10px]"
-                                                          >
-                                                            {rotuloFalta(h.faltaTipo)}
-                                                          </Badge>
+                                                          {h.tipoRegistro === "falta" && (
+                                                            <Badge
+                                                              variant="outline"
+                                                              className="text-[10px]"
+                                                            >
+                                                              {rotuloFalta(h.faltaTipo)}
+                                                            </Badge>
+                                                          )}
                                                           {h.observacoes && (
                                                             <span className="w-full text-[10px] text-muted-foreground">
                                                               {h.observacoes}
@@ -1743,7 +1855,7 @@ function AlocacoesPage() {
                                                   )}
                                                 </div>
                                                 <div className="flex flex-shrink-0 items-center gap-1">
-                                                  {podeEditar && (
+                                                  {podeEditar && !a.registroOnly && (
                                                     <Button
                                                       size="sm"
                                                       variant="ghost"
@@ -1753,21 +1865,23 @@ function AlocacoesPage() {
                                                       Editar
                                                     </Button>
                                                   )}
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    onClick={() =>
-                                                      deleteMutation.mutate({
-                                                        id: a.id,
-                                                        funcionario_id: a.funcionario_id,
-                                                        obra_id: a.obra_id,
-                                                        data: a.data,
-                                                      })
-                                                    }
-                                                    aria-label="Remover"
-                                                  >
-                                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                                  </Button>
+                                                  {!a.registroOnly && (
+                                                    <Button
+                                                      size="icon"
+                                                      variant="ghost"
+                                                      onClick={() =>
+                                                        deleteMutation.mutate({
+                                                          id: a.id,
+                                                          funcionario_id: a.funcionario_id,
+                                                          obra_id: a.obra_id,
+                                                          data: a.data,
+                                                        })
+                                                      }
+                                                      aria-label="Remover"
+                                                    >
+                                                      <Trash2 className="h-4 w-4 text-destructive" />
+                                                    </Button>
+                                                  )}
                                                 </div>
                                               </li>
                                             );

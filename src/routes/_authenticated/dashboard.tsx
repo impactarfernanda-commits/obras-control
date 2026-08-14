@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ResponsiveContainer,
@@ -128,7 +128,7 @@ type RegRow = {
   horas_normais: number;
   horas_extras: number;
   ausencia: boolean;
-  tipo_registro: "horas" | "falta";
+  tipo_registro: "horas" | "falta" | "ferias" | "folga_campo";
   falta_tipo: string | null;
 };
 type CustoIndireto = {
@@ -241,7 +241,10 @@ function DashboardPage() {
   );
 
   const obraAllowed = (id: string) => obraSel.size === 0 || obraSel.has(id);
-  const funcTipo = (f: FuncRow) => tipoCategoria(f.categoria_mo, categoriasMO);
+  const funcTipo = useCallback(
+    (f: FuncRow) => tipoCategoria(f.categoria_mo, categoriasMO),
+    [categoriasMO],
+  );
   const funcAllowed = (f: FuncRow) => tipoMO === "all" || funcTipo(f) === tipoMO;
 
   const funcsAtivos = funcionariosOperacionais.filter((f) => f.ativo && funcAllowed(f));
@@ -258,7 +261,7 @@ function DashboardPage() {
     return funcAllowed(f);
   });
   const ciFiltered = (custosInd ?? []).filter((c) => obraAllowed(c.obra_id));
-  const regsHoras = regsFiltered.filter((r) => r.tipo_registro !== "falta");
+  const regsHoras = regsFiltered.filter((r) => r.tipo_registro === "horas");
   const faltas = regsFiltered.filter((r) => r.tipo_registro === "falta");
 
   // ---------- Cost per active employee (monthly) ----------
@@ -312,7 +315,7 @@ function DashboardPage() {
       { nome: "MOD", qtd: mod },
       { nome: "MOI", qtd: moi },
     ];
-  }, [funcsAtivos, categoriasMO]);
+  }, [funcsAtivos, funcTipo]);
 
   // ---------- Evolução custos mensais (MO prorrateada + indiretos por mês) ----------
   const evolucaoMensal = useMemo(() => {
@@ -575,7 +578,7 @@ function DashboardPage() {
           </div>
           <div>
             <Label className="text-xs">Tipo MO</Label>
-            <Select value={tipoMO} onValueChange={(v) => setTipoMO(v as any)}>
+            <Select value={tipoMO} onValueChange={(v) => setTipoMO(v as "all" | "MOD" | "MOI")}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -685,7 +688,7 @@ function DashboardPage() {
                       dataKey="qtd"
                       nameKey="nome"
                       outerRadius={80}
-                      label={(e: any) => `${e.nome}: ${e.qtd}`}
+                      label={(e: { nome?: string; qtd?: number }) => `${e.nome}: ${e.qtd}`}
                     >
                       {modMoi.map((_, i) => (
                         <Cell key={i} fill={CHART_COLORS[i]} />
@@ -740,7 +743,7 @@ function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis dataKey="label" fontSize={11} />
                     <YAxis fontSize={11} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
+                    <Tooltip formatter={(v: number | string) => fmtBRL(Number(v))} />
                     <Legend />
                     <Area
                       type="monotone"
@@ -783,7 +786,7 @@ function DashboardPage() {
                       tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
                     />
                     <YAxis type="category" dataKey="nome" fontSize={11} width={130} />
-                    <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
+                    <Tooltip formatter={(v: number | string) => fmtBRL(Number(v))} />
                     <Legend />
                     <Bar dataKey="mo" name="MO" stackId="a" fill="hsl(var(--primary))" />
                     <Bar dataKey="indiretos" name="Indiretos" stackId="a" fill="#f59e0b" />
@@ -831,13 +834,13 @@ function DashboardPage() {
                       dataKey="valor"
                       nameKey="nome"
                       outerRadius={90}
-                      label={(e: any) => e.nome}
+                      label={(e: { nome?: string }) => e.nome}
                     >
                       {distCustosInd.map((_, i) => (
                         <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v: any) => fmtBRL(Number(v))} />
+                    <Tooltip formatter={(v: number | string) => fmtBRL(Number(v))} />
                   </PieChart>
                 </ResponsiveContainer>
               )}

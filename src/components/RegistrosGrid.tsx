@@ -37,8 +37,10 @@ import {
   CLASSIFICACOES_FALTA,
   buscarConflitoRegistroDiario,
   mensagemErroRegistro,
+  registroEhAusenciaPlanejada,
   registroEhFalta,
   rotuloFalta,
+  rotuloTipoRegistro,
   validarRegistroApontamento,
   type FaltaTipo,
   type TipoRegistro,
@@ -85,7 +87,7 @@ const ck = (f: string, o: string, d: string): CellKey => `${f}|${o}|${d}`;
 type CellStatus = "empty" | "ok" | "warn" | "error";
 function cellStatus(r: Registro | undefined): CellStatus {
   if (!r) return "empty";
-  if (registroEhFalta(r)) return "warn";
+  if (registroEhFalta(r) || registroEhAusenciaPlanejada(r)) return "warn";
   const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
   if (total <= 0) return "empty";
   if (total > 16) return "error";
@@ -186,9 +188,33 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
       ),
   });
 
+  const { data: registrosRemote, isLoading: loadingReg } = useQuery({
+    enabled: !!obraId,
+    queryKey: ["registros-week", obraId, firstDay, lastDay],
+    queryFn: async () =>
+      buscarTodasPaginas<Registro>((from, to) =>
+        supabase
+          .from("registros_horas")
+          .select("*")
+          .eq("obra_id", obraId)
+          .gte("data", firstDay)
+          .lte("data", lastDay)
+          .order("data")
+          .order("funcionario_id")
+          .order("obra_id")
+          .range(from, to),
+      ),
+  });
+
   const idsHistoricos = useMemo(
-    () => Array.from(new Set((alocacoes ?? []).map((a) => a.funcionario_id))).sort(),
-    [alocacoes],
+    () =>
+      Array.from(
+        new Set([
+          ...(alocacoes ?? []).map((a) => a.funcionario_id),
+          ...(registrosRemote ?? []).map((r) => r.funcionario_id),
+        ]),
+      ).sort(),
+    [alocacoes, registrosRemote],
   );
   const { data: funcionariosHistoricos } = useQuery({
     queryKey: ["funcionarios-historico-registros-grid", idsHistoricos],
@@ -212,24 +238,6 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
       });
     return result;
   }, [infoById, funcionariosHistoricos]);
-
-  const { data: registrosRemote, isLoading: loadingReg } = useQuery({
-    enabled: !!obraId,
-    queryKey: ["registros-week", obraId, firstDay, lastDay],
-    queryFn: async () =>
-      buscarTodasPaginas<Registro>((from, to) =>
-        supabase
-          .from("registros_horas")
-          .select("*")
-          .eq("obra_id", obraId)
-          .gte("data", firstDay)
-          .lte("data", lastDay)
-          .order("data")
-          .order("funcionario_id")
-          .order("obra_id")
-          .range(from, to),
-      ),
-  });
 
   // funcionários a mostrar: alocados na semana
   const [extraIds, setExtraIds] = useState<string[]>([]);
@@ -257,6 +265,17 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
           dataDesligamento: info.dataDesligamento,
         });
     }
+    for (const r of registrosRemote ?? []) {
+      const info = infoHistoricoById.get(r.funcionario_id);
+      if (info)
+        map.set(r.funcionario_id, {
+          id: r.funcionario_id,
+          nome: info.nome,
+          categoria_mo: info.categoria_mo,
+          ativo: info.ativo,
+          dataDesligamento: info.dataDesligamento,
+        });
+    }
     for (const id of extraIds) {
       if (!map.has(id)) {
         const info = infoHistoricoById.get(id);
@@ -275,7 +294,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
       categorias,
       (funcionario) => funcionario.categoria_mo,
     );
-  }, [alocacoes, infoHistoricoById, extraIds, categorias]);
+  }, [alocacoes, registrosRemote, infoHistoricoById, extraIds, categorias]);
 
   const allocSet = useMemo(() => {
     const s = new Set<string>();
@@ -309,7 +328,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
       setSaving((s) => ({ ...s, [key]: "saving" }));
       setGridFeedback(null);
       try {
-        validarDataLancamento(r.data, "horas");
+        if (!registroEhAusenciaPlanejada(r)) validarDataLancamento(r.data, "horas");
       } catch (error) {
         setSaving((s) => ({ ...s, [key]: "error" }));
         toast.error((error as Error).message);
@@ -323,8 +342,8 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
         return;
       }
 
-      // Garante alocação antes de gravar horas/ausência
-      if (hasContent) {
+      // Ausência planejada vive somente em registros_horas; horas/falta continuam exigindo alocação.
+      if (hasContent && !registroEhAusenciaPlanejada(r)) {
         try {
           await garantirCompetenciaAberta(supabase, r.data);
         } catch (e) {
@@ -667,27 +686,32 @@ function DayCell({
     registro.horas_extras,
   );
   const overflow = total > 16;
-  const dataFutura = dataLancamentoFutura(registro.data);
+  const dataFuturaBloqueada =
+    dataLancamentoFutura(registro.data) && !registroEhAusenciaPlanejada(registro);
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          disabled={dataFutura}
+          disabled={dataFuturaBloqueada}
           className={cn(
             "relative flex h-[68px] w-full flex-col items-center justify-center rounded-md border px-1 text-xs transition hover:ring-2 hover:ring-ring/40",
             bg,
           )}
           title={
-            dataFutura
+            dataFuturaBloqueada
               ? "Não é permitido lançar horas em datas futuras."
               : !alocado && total === 0 && !registroEhFalta(registro)
                 ? "Sem alocação — lançar horas criará automaticamente"
                 : undefined
           }
         >
-          {registroEhFalta(registro) ? (
+          {registroEhAusenciaPlanejada(registro) ? (
+            <span className="font-semibold text-sky-700 dark:text-sky-400">
+              {rotuloTipoRegistro(registro.tipo_registro)}
+            </span>
+          ) : registroEhFalta(registro) ? (
             <>
               <span className="font-semibold text-amber-700 dark:text-amber-400">Falta</span>
               <span className="text-[10px] text-amber-700 dark:text-amber-400">
@@ -730,25 +754,26 @@ function DayCell({
           <label className="text-xs text-muted-foreground">Tipo de registro</label>
           <Select
             value={registro.tipo_registro}
-            onValueChange={(value: TipoRegistro) =>
-              onChange(
-                value === "falta"
-                  ? {
-                      tipo_registro: "falta",
-                      ausencia: true,
-                      horas_normais: 0,
-                      horas_extras: 0,
-                      justificativa_extras: null,
-                      falta_tipo: null,
-                    }
-                  : {
-                      tipo_registro: "horas",
-                      ausencia: false,
-                      falta_tipo: null,
-                      motivo_ausencia: null,
-                    },
-              )
-            }
+            onValueChange={(value: TipoRegistro) => {
+              if (value === "horas") {
+                onChange({
+                  tipo_registro: "horas",
+                  ausencia: false,
+                  falta_tipo: null,
+                  motivo_ausencia: null,
+                });
+                return;
+              }
+              onChange({
+                tipo_registro: value,
+                ausencia: true,
+                horas_normais: 0,
+                horas_extras: 0,
+                justificativa_extras: null,
+                falta_tipo: null,
+                motivo_ausencia: value === "ferias" || value === "folga_campo" ? value : null,
+              });
+            }}
           >
             <SelectTrigger>
               <SelectValue />
@@ -756,6 +781,8 @@ function DayCell({
             <SelectContent>
               <SelectItem value="horas">Horas trabalhadas</SelectItem>
               <SelectItem value="falta">Falta</SelectItem>
+              <SelectItem value="ferias">Férias</SelectItem>
+              <SelectItem value="folga_campo">Folga de campo</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -782,6 +809,12 @@ function DayCell({
             </div>
             <p className="text-xs text-amber-700 dark:text-amber-400">{AVISO_FALTA_INTEGRAL}</p>
           </div>
+        ) : registroEhAusenciaPlanejada(registro) ? (
+          <Alert>
+            <AlertDescription>
+              {rotuloTipoRegistro(registro.tipo_registro)} — nenhuma hora é lançada.
+            </AlertDescription>
+          </Alert>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2">
