@@ -34,6 +34,7 @@ const expectedNavigation = [
   ["Centros de custo", "/obras"],
   ["Alocações", "/alocacoes"],
   ["Relatórios", "/relatorios"],
+  ["Planejamento HH e Custos", "/planejamento-hh"],
   ["Configurações", "/configuracoes"],
   ["Usuários", "/admin/usuarios"],
 ];
@@ -79,6 +80,12 @@ test("ordem e permissões da navegação permanecem restritas", () => {
     {
       title: "Relatórios",
       url: "/relatorios",
+      minLevel: 2,
+      allowedRoles: ["coordenador", "gerente", "diretor"],
+    },
+    {
+      title: "Planejamento HH e Custos",
+      url: "/planejamento-hh",
       minLevel: 2,
       allowedRoles: ["coordenador", "gerente", "diretor"],
     },

@@ -43,6 +43,7 @@ const icons = {
   "/obras": Building2,
   "/alocacoes": CalendarRange,
   "/relatorios": BarChart3,
+  "/planejamento-hh": BarChart3,
   "/configuracoes": Settings,
   "/admin/usuarios": ShieldCheck,
 } satisfies Record<(typeof APP_NAVIGATION_ITEMS)[number]["url"], Item["icon"]>;

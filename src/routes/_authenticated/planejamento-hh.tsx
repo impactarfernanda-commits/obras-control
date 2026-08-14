@@ -1,0 +1,559 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { AlertTriangle, FileUp } from "lucide-react";
+import { RequireRole } from "@/components/RouteAccess";
+import { PageHeader } from "@/components/PageHeader";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import { fmtBRL } from "@/lib/custos";
+import {
+  getPlanejamentoHH,
+  previewPlanejamentoHH,
+  salvarPlanejamentoHH,
+} from "@/lib/planejamento-hh.functions";
+import type { PreviaImportacao } from "@/lib/planejamento-hh-parser";
+
+export const Route = createFileRoute("/_authenticated/planejamento-hh")({
+  component: () => (
+    <RequireRole allowed={["coordenador", "gerente", "diretor"]}>
+      <PlanejamentoPage />
+    </RequireRole>
+  ),
+});
+
+const hoje = () => new Date().toISOString().slice(0, 10);
+const inicioAno = () => `${new Date().getFullYear()}-01-01`;
+const n = (v: number | null | undefined) =>
+  Number(v ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${n(v)}%`);
+type Previa = PreviaImportacao;
+
+function PlanejamentoPage() {
+  const { role } = useAuth();
+  const financeiro = role === "gerente" || role === "diretor";
+  const [obraId, setObraId] = useState("");
+  const [dataInicial, setDataInicial] = useState(inicioAno());
+  const [dataFinal, setDataFinal] = useState(hoje());
+  const { data: obras = [] } = useQuery({
+    queryKey: ["obras-planejamento"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("obras")
+        .select("id,nome")
+        .eq("visivel_obras_control", true)
+        .order("nome");
+      if (error) throw error;
+      return data;
+    },
+  });
+  const consulta = useQuery({
+    queryKey: ["planejamento-hh", obraId, dataInicial, dataFinal],
+    enabled: !!obraId,
+    queryFn: () => getPlanejamentoHH({ data: { obraId, dataInicial, dataFinal } }),
+  });
+  const linhas = useMemo(() => consulta.data?.linhas ?? [], [consulta.data?.linhas]);
+  const consolidado = useMemo(
+    () =>
+      ["MOI", "MOD"].map((tipo) => {
+        const filtradas = linhas.filter((l) => l.tipo === tipo);
+        const previsto = filtradas.reduce((s, l) => s + l.hhPrevisto, 0);
+        const realizado = filtradas.reduce((s, l) => s + l.hhRealizado, 0);
+        return { tipo, previsto, realizado };
+      }),
+    [linhas],
+  );
+  const ausenciasResumo = useMemo(
+    () =>
+      Object.entries(
+        linhas.reduce<Record<string, number>>((acc, l) => {
+          for (const [tipo, horas] of Object.entries(l.ausencias))
+            acc[tipo] = (acc[tipo] ?? 0) + horas;
+          return acc;
+        }, {}),
+      ),
+    [linhas],
+  );
+  const custosResumo = useMemo(
+    () =>
+      Object.entries(
+        linhas.reduce<Record<string, number>>((acc, l) => {
+          for (const [tipo, valor] of Object.entries(l.composicaoCusto ?? {}))
+            acc[tipo] = (acc[tipo] ?? 0) + valor;
+          return acc;
+        }, {}),
+      ),
+    [linhas],
+  );
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Planejamento HH e Custos"
+        description="Linha de base orçamentária versus realizado por centro de custo e função."
+      />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-72">
+          <Select value={obraId} onValueChange={setObraId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Centro de custo" />
+            </SelectTrigger>
+            <SelectContent>
+              {obras.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.nome}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Input
+          className="w-40"
+          type="date"
+          value={dataInicial}
+          onChange={(e) => setDataInicial(e.target.value)}
+        />
+        <Input
+          className="w-40"
+          type="date"
+          value={dataFinal}
+          onChange={(e) => setDataFinal(e.target.value)}
+        />
+        {financeiro && obraId && <ImportarBaseline obraId={obraId} />}
+      </div>
+      {!obraId && (
+        <Alert>
+          <AlertTitle>Selecione um centro de custo</AlertTitle>
+          <AlertDescription>
+            O filtro é obrigatório para carregar a baseline e o realizado.
+          </AlertDescription>
+        </Alert>
+      )}
+      {consulta.isError && (
+        <Alert variant="destructive">
+          <AlertTitle>Não foi possível carregar</AlertTitle>
+          <AlertDescription>{consulta.error.message}</AlertDescription>
+        </Alert>
+      )}
+      {consulta.data?.alertas.map((a) => (
+        <Alert key={a}>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Atenção</AlertTitle>
+          <AlertDescription>{a}</AlertDescription>
+        </Alert>
+      ))}
+      {consulta.data?.baseline && (
+        <>
+          <div className="text-sm text-muted-foreground">
+            Baseline ativa: <strong>{consulta.data.baseline.nome}</strong> · versão{" "}
+            {consulta.data.baseline.versao}
+          </div>
+          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
+            <Kpi titulo="HH previsto" valor={n(consulta.data.totais?.hhPrevisto)} />
+            <Kpi titulo="HH realizado" valor={n(consulta.data.totais?.hhRealizado)} />
+            <Kpi titulo="Saldo HH" valor={n(consulta.data.totais?.saldoHH)} />
+            <Kpi
+              titulo="HH consumido"
+              valor={pct(consulta.data.totais?.percentualHH)}
+              alerta={(consulta.data.totais?.percentualHH ?? 0) > 100}
+            />
+            <Kpi titulo="Horas de ausência" valor={n(consulta.data.totais?.horasAusencia)} />
+            {consulta.data.acessoFinanceiro && (
+              <>
+                <Kpi
+                  titulo="Custo previsto"
+                  valor={fmtBRL(consulta.data.totais?.custoPrevisto ?? 0)}
+                />
+                <Kpi
+                  titulo="Custo realizado"
+                  valor={fmtBRL(consulta.data.totais?.custoRealizado ?? 0)}
+                />
+                <Kpi
+                  titulo="Saldo financeiro"
+                  valor={fmtBRL(consulta.data.totais?.saldoCusto ?? 0)}
+                />
+                <Kpi
+                  titulo="Custo consumido"
+                  valor={pct(consulta.data.totais?.percentualCusto)}
+                  alerta={(consulta.data.totais?.percentualCusto ?? 0) > 100}
+                />
+              </>
+            )}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Grafico
+              titulo="Previsto x realizado por função — HH"
+              dados={linhas.map((l) => ({
+                nome: l.funcao,
+                previsto: l.hhPrevisto,
+                realizado: l.hhRealizado,
+              }))}
+            />
+            <Grafico
+              titulo="MOI x MOD — HH"
+              dados={consolidado.map((l) => ({
+                nome: l.tipo,
+                previsto: l.previsto,
+                realizado: l.realizado,
+              }))}
+            />
+            {consulta.data.acessoFinanceiro && (
+              <Grafico
+                titulo="Previsto x realizado por função — R$"
+                dados={linhas.map((l) => ({
+                  nome: l.funcao,
+                  previsto: l.custoPrevisto ?? 0,
+                  realizado: l.custoRealizado ?? 0,
+                }))}
+              />
+            )}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Resumo titulo="Ausências por tipo" itens={ausenciasResumo} moeda={false} />
+            {consulta.data.acessoFinanceiro && (
+              <Resumo
+                titulo="Composição do custo realizado"
+                itens={custosResumo.filter(
+                  ([tipo]) => !["falta_nao_justificada", "suspensao", "outro"].includes(tipo),
+                )}
+                moeda
+              />
+            )}
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Comparativo por função</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Função</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>HH previsto</TableHead>
+                    <TableHead>HH realizado</TableHead>
+                    <TableHead>Ausência</TableHead>
+                    <TableHead>Saldo HH</TableHead>
+                    <TableHead>% HH</TableHead>
+                    {consulta.data.acessoFinanceiro && (
+                      <>
+                        <TableHead>Custo previsto</TableHead>
+                        <TableHead>Custo realizado</TableHead>
+                        <TableHead>Saldo R$</TableHead>
+                        <TableHead>% custo</TableHead>
+                      </>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {linhas.map((l) => (
+                    <TableRow
+                      key={`${l.funcao}-${l.tipo}`}
+                      className={l.semMapeamento ? "bg-amber-50" : ""}
+                    >
+                      <TableCell>
+                        {l.funcao}
+                        {l.semMapeamento && (
+                          <Badge className="ml-2" variant="outline">
+                            Não mapeado
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{l.tipo}</TableCell>
+                      <TableCell>{n(l.hhPrevisto)}</TableCell>
+                      <TableCell>{n(l.hhRealizado)}</TableCell>
+                      <TableCell>{n(l.horasAusencia)}</TableCell>
+                      <TableCell>{n(l.saldo)}</TableCell>
+                      <TableCell>{pct(l.percentual)}</TableCell>
+                      {consulta.data.acessoFinanceiro && (
+                        <>
+                          <TableCell>{fmtBRL(l.custoPrevisto ?? 0)}</TableCell>
+                          <TableCell>{fmtBRL(l.custoRealizado ?? 0)}</TableCell>
+                          <TableCell>{fmtBRL(l.saldoCusto ?? 0)}</TableCell>
+                          <TableCell>{pct(l.percentualCusto)}</TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Kpi({ titulo, valor, alerta }: { titulo: string; valor: string; alerta?: boolean }) {
+  return (
+    <Card className={alerta ? "border-destructive" : ""}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm text-muted-foreground">{titulo}</CardTitle>
+      </CardHeader>
+      <CardContent className="text-2xl font-bold">{valor}</CardContent>
+    </Card>
+  );
+}
+function Grafico({
+  titulo,
+  dados,
+}: {
+  titulo: string;
+  dados: Array<{ nome: string; previsto: number; realizado: number }>;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{titulo}</CardTitle>
+      </CardHeader>
+      <CardContent className="h-80">
+        <ResponsiveContainer>
+          <BarChart data={dados} layout="vertical" margin={{ left: 32 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis type="number" />
+            <YAxis dataKey="nome" type="category" width={120} />
+            <Tooltip />
+            <Legend />
+            <Bar dataKey="previsto" name="Previsto" fill="#64748b" />
+            <Bar dataKey="realizado" name="Realizado" fill="#2563eb" />
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+function Resumo({
+  titulo,
+  itens,
+  moeda,
+}: {
+  titulo: string;
+  itens: Array<[string, number]>;
+  moeda: boolean;
+}) {
+  const labels: Record<string, string> = {
+    horas_trabalhadas: "Horas trabalhadas",
+    ferias: "Férias",
+    folga_campo: "Folga de campo",
+    atestado: "Atestado",
+    falta_justificada: "Falta justificada",
+    falta_nao_justificada: "Falta não justificada",
+    suspensao: "Suspensão",
+    afastamento: "Afastamento",
+    outro: "Outro",
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{titulo}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableBody>
+            {itens.map(([tipo, valor]) => (
+              <TableRow key={tipo}>
+                <TableCell>{labels[tipo] ?? tipo}</TableCell>
+                <TableCell className="text-right">
+                  {moeda ? fmtBRL(valor) : `${n(valor)} h`}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ImportarBaseline({ obraId }: { obraId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [previa, setPrevia] = useState<Previa | null>(null);
+  const [arquivo, setArquivo] = useState("");
+  const [nome, setNome] = useState("Baseline contratual");
+  const [versao, setVersao] = useState(1);
+  const [mapas, setMapas] = useState<Record<string, string>>({});
+  const { data: categorias = [] } = useQuery({
+    queryKey: ["categorias-mapeamento-hh"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("categorias").select("nome,tipo").order("nome");
+      if (error) throw error;
+      return data;
+    },
+  });
+  const preview = useMutation({
+    mutationFn: async (file: File) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 32768)
+        bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      setArquivo(file.name);
+      return previewPlanejamentoHH({
+        data: { nomeArquivo: file.name, arquivoBase64: btoa(bin) },
+      }) as Promise<PreviaImportacao>;
+    },
+    onSuccess: setPrevia,
+  });
+  const salvar = useMutation({
+    mutationFn: async () => {
+      if (!previa) throw new Error("Gere a prévia primeiro");
+      const result = await salvarPlanejamentoHH({
+        data: {
+          obraId,
+          nome,
+          versao,
+          nomeArquivo: arquivo,
+          itens: previa.itens,
+          mapeamentos: previa.itens.map((i) => ({
+            funcaoOrcamento: i.funcaoOrcamento,
+            tipoMo: i.tipoMo,
+            categoriaMo: mapas[`${i.funcaoOrcamento}|${i.tipoMo}`] ?? null,
+          })),
+        },
+      });
+      const { error } = await supabase.rpc(
+        "ativar_planejamento_hh_baseline" as never,
+        { p_baseline_id: result.baselineId } as never,
+      );
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      setOpen(false);
+      setPrevia(null);
+      await qc.invalidateQueries({ queryKey: ["planejamento-hh"] });
+    },
+  });
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>
+          <FileUp className="mr-2 h-4 w-4" />
+          Importar baseline
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Importar orçamento XLSM/XLSX</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Input
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder="Nome da baseline"
+          />
+          <Input
+            type="number"
+            min={1}
+            value={versao}
+            onChange={(e) => setVersao(Number(e.target.value))}
+          />
+          <Input
+            type="file"
+            accept=".xlsm,.xlsx"
+            onChange={(e) => e.target.files?.[0] && preview.mutate(e.target.files[0])}
+          />
+        </div>
+        {preview.isPending && <p>Analisando workbook sem executar macros…</p>}
+        {previa && (
+          <>
+            <div className="text-sm">Abas: {previa.abas.join(", ")}</div>
+            {[...previa.erros, ...previa.avisos].map((a) => (
+              <Alert key={a}>
+                <AlertDescription>{a}</AlertDescription>
+              </Alert>
+            ))}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Função orçamento</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>HH previsto</TableHead>
+                  <TableHead>Custo previsto</TableHead>
+                  <TableHead>Origem</TableHead>
+                  <TableHead>Mapeamento confirmado</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previa.itens.map((i) => {
+                  const key = `${i.funcaoOrcamento}|${i.tipoMo}`;
+                  return (
+                    <TableRow key={key}>
+                      <TableCell>{i.funcaoOrcamento}</TableCell>
+                      <TableCell>{i.tipoMo}</TableCell>
+                      <TableCell>{n(i.hhPrevisto)}</TableCell>
+                      <TableCell>{fmtBRL(i.custoPrevisto)}</TableCell>
+                      <TableCell>{i.origem}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={mapas[key] ?? ""}
+                          onValueChange={(v) => setMapas((m) => ({ ...m, [key]: v }))}
+                        >
+                          <SelectTrigger className="w-56">
+                            <SelectValue placeholder="Aguardando mapeamento" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categorias
+                              .filter((c) => c.tipo === i.tipoMo)
+                              .map((c) => (
+                                <SelectItem key={c.nome} value={c.nome}>
+                                  {c.nome}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <Button
+              disabled={!!previa.erros.length || salvar.isPending}
+              onClick={() => salvar.mutate()}
+            >
+              Salvar e ativar baseline
+            </Button>
+            {salvar.isError && <p className="text-sm text-destructive">{salvar.error.message}</p>}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
