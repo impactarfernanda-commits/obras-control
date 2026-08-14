@@ -64,3 +64,9 @@ dist/
 doc/00-progress/*.zip
 
 supabase/.temp/
+
+# Planilhas orcamentarias sao referencias locais de importacao, nunca artefatos versionados.
+docs/amostras-hh/*.xlsm
+docs/amostras-hh/*.xlsx
+doc/amostras-hh/*.xlsm
+doc/amostras-hh/*.xlsx

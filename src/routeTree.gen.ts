@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SsoCallbackRouteImport } from './routes/sso.callback'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as AuthenticatedRegistrosRouteImport } from './routes/_authenticated/registros'
+import { Route as AuthenticatedPlanejamentoHhRouteImport } from './routes/_authenticated/planejamento-hh'
 import { Route as AuthenticatedObrasRouteImport } from './routes/_authenticated/obras'
 import { Route as AuthenticatedNotificacoesConfigRouteImport } from './routes/_authenticated/notificacoes-config'
 import { Route as AuthenticatedFuncionariosRouteImport } from './routes/_authenticated/funcionarios'
@@ -61,6 +62,12 @@ const AuthenticatedRegistrosRoute = AuthenticatedRegistrosRouteImport.update({
   path: '/registros',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPlanejamentoHhRoute =
+  AuthenticatedPlanejamentoHhRouteImport.update({
+    id: '/planejamento-hh',
+    path: '/planejamento-hh',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedObrasRoute = AuthenticatedObrasRouteImport.update({
   id: '/obras',
   path: '/obras',
@@ -129,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/funcionarios': typeof AuthenticatedFuncionariosRoute
   '/notificacoes-config': typeof AuthenticatedNotificacoesConfigRoute
   '/obras': typeof AuthenticatedObrasRoute
+  '/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/sso/callback': typeof SsoCallbackRoute
@@ -147,6 +155,7 @@ export interface FileRoutesByTo {
   '/funcionarios': typeof AuthenticatedFuncionariosRoute
   '/notificacoes-config': typeof AuthenticatedNotificacoesConfigRoute
   '/obras': typeof AuthenticatedObrasRoute
+  '/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/sso/callback': typeof SsoCallbackRoute
@@ -167,6 +176,7 @@ export interface FileRoutesById {
   '/_authenticated/funcionarios': typeof AuthenticatedFuncionariosRoute
   '/_authenticated/notificacoes-config': typeof AuthenticatedNotificacoesConfigRoute
   '/_authenticated/obras': typeof AuthenticatedObrasRoute
+  '/_authenticated/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/_authenticated/registros': typeof AuthenticatedRegistrosRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
   '/sso/callback': typeof SsoCallbackRoute
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/funcionarios'
     | '/notificacoes-config'
     | '/obras'
+    | '/planejamento-hh'
     | '/registros'
     | '/relatorios'
     | '/sso/callback'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/funcionarios'
     | '/notificacoes-config'
     | '/obras'
+    | '/planejamento-hh'
     | '/registros'
     | '/relatorios'
     | '/sso/callback'
@@ -224,6 +236,7 @@ export interface FileRouteTypes {
     | '/_authenticated/funcionarios'
     | '/_authenticated/notificacoes-config'
     | '/_authenticated/obras'
+    | '/_authenticated/planejamento-hh'
     | '/_authenticated/registros'
     | '/_authenticated/relatorios'
     | '/sso/callback'
@@ -289,6 +302,13 @@ declare module '@tanstack/react-router' {
       path: '/registros'
       fullPath: '/registros'
       preLoaderRoute: typeof AuthenticatedRegistrosRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/planejamento-hh': {
+      id: '/_authenticated/planejamento-hh'
+      path: '/planejamento-hh'
+      fullPath: '/planejamento-hh'
+      preLoaderRoute: typeof AuthenticatedPlanejamentoHhRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/obras': {
@@ -373,6 +393,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedFuncionariosRoute: typeof AuthenticatedFuncionariosRoute
   AuthenticatedNotificacoesConfigRoute: typeof AuthenticatedNotificacoesConfigRoute
   AuthenticatedObrasRoute: typeof AuthenticatedObrasRoute
+  AuthenticatedPlanejamentoHhRoute: typeof AuthenticatedPlanejamentoHhRoute
   AuthenticatedRegistrosRoute: typeof AuthenticatedRegistrosRoute
   AuthenticatedRelatoriosRoute: typeof AuthenticatedRelatoriosRoute
   AuthenticatedAdminUsuariosRoute: typeof AuthenticatedAdminUsuariosRoute
@@ -387,6 +408,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedFuncionariosRoute: AuthenticatedFuncionariosRoute,
   AuthenticatedNotificacoesConfigRoute: AuthenticatedNotificacoesConfigRoute,
   AuthenticatedObrasRoute: AuthenticatedObrasRoute,
+  AuthenticatedPlanejamentoHhRoute: AuthenticatedPlanejamentoHhRoute,
   AuthenticatedRegistrosRoute: AuthenticatedRegistrosRoute,
   AuthenticatedRelatoriosRoute: AuthenticatedRelatoriosRoute,
   AuthenticatedAdminUsuariosRoute: AuthenticatedAdminUsuariosRoute,
