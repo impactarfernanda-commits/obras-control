@@ -41,6 +41,14 @@ export type MapeamentoBaseline = {
   categoriaMo: string | null;
 };
 
+export function tipoEfetivoMapeamento(
+  tipoOrigem: TipoMO,
+  categoriaMo: string | null,
+  tiposCategorias: ReadonlyMap<string, TipoMO>,
+) {
+  return categoriaMo ? (tiposCategorias.get(categoriaMo) ?? tipoOrigem) : tipoOrigem;
+}
+
 export function conflitosCategoriaEntreTipos(mapeamentos: MapeamentoBaseline[]) {
   const tiposPorCategoria = new Map<string, Set<TipoMO>>();
   for (const item of mapeamentos) {
@@ -53,6 +61,18 @@ export function conflitosCategoriaEntreTipos(mapeamentos: MapeamentoBaseline[]) 
     .filter(([, tipos]) => tipos.size > 1)
     .map(([categoria]) => categoria)
     .sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+export function pendenciasAtivacaoBaseline(erros: string[], mapeamentos: MapeamentoBaseline[]) {
+  return [
+    ...erros,
+    ...mapeamentos
+      .filter((item) => !item.categoriaMo)
+      .map((item) => `Função sem mapeamento: ${item.funcaoOrcamento}.`),
+    ...conflitosCategoriaEntreTipos(mapeamentos).map(
+      (categoria) => `Categoria ${categoria} associada a mais de um tipo efetivo.`,
+    ),
+  ];
 }
 
 export function consolidarPrevistoPorCategoria(

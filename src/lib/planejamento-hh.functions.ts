@@ -9,6 +9,8 @@ import {
   custoRegistroNaVigencia,
   indicadores,
   normalizarFuncaoOrcamento,
+  pendenciasAtivacaoBaseline,
+  tipoEfetivoMapeamento,
   vigenciaNaData,
   type CustoVigencia,
   type TipoAusencia,
@@ -23,6 +25,7 @@ type ItemBase = {
   tipo_mo: TipoMO;
   hh_previsto: number;
   custo_previsto: number;
+  metadata_calculo?: Record<string, unknown>;
 };
 type Registro = {
   funcionario_id: string;
@@ -191,9 +194,12 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
     const linhas = new Map<string, Acum>();
     for (const item of itens) {
       const chave = item.categoria_mo_mapeada ?? `orcamento:${item.id}`;
+      const tipoEfetivo = item.categoria_mo_mapeada
+        ? (tipoMap.get(item.categoria_mo_mapeada) ?? item.tipo_mo)
+        : item.tipo_mo;
       const l = linhas.get(chave) ?? {
         funcao: item.categoria_mo_mapeada ?? item.funcao_orcamento,
-        tipo: item.tipo_mo,
+        tipo: tipoEfetivo,
         hhPrevisto: 0,
         hhRealizado: 0,
         horasAusencia: 0,
@@ -334,10 +340,14 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
   .inputValidator((v: unknown) =>
     z
       .object({
+        baselineId: z.string().uuid().nullable().optional(),
         obraId: z.string().uuid(),
         nome: z.string().min(1),
         versao: z.number().int().positive(),
         nomeArquivo: z.string().min(1),
+        abas: z.array(z.string()),
+        pendencias: z.array(z.string()),
+        avisos: z.array(z.string()),
         itens: z.array(itemImportadoSchema).min(1),
         mapeamentos: z.array(
           z.object({
@@ -351,13 +361,19 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     if (!(await permissoes(context.userId)).financeiro) throw new Error("Forbidden");
-    const conflitos = conflitosCategoriaEntreTipos(data.mapeamentos);
-    if (conflitos.length)
-      throw new Error(
-        `A categoria ${conflitos.join(", ")} esta associada simultaneamente a itens MOI e MOD. O Obras Control nao possui informacao suficiente para dividir o HH realizado.`,
-      );
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const confirmados = data.mapeamentos
+    const categoriasRes = await supabaseAdmin.from("categorias").select("nome,tipo");
+    if (categoriasRes.error) throw new Error(categoriasRes.error.message);
+    const tiposCategorias = new Map(
+      (categoriasRes.data ?? []).map((c) => [c.nome, c.tipo as TipoMO]),
+    );
+    const mapeamentosEfetivos = data.mapeamentos.map((m) => ({
+      ...m,
+      tipoOrigem: m.tipoMo,
+      tipoMo: tipoEfetivoMapeamento(m.tipoMo, m.categoriaMo, tiposCategorias),
+    }));
+    const conflitos = conflitosCategoriaEntreTipos(mapeamentosEfetivos);
+    const confirmados = mapeamentosEfetivos
       .filter((m) => m.categoriaMo)
       .map((m) => ({
         funcao_orcamento_normalizada: normalizarFuncaoOrcamento(m.funcaoOrcamento),
@@ -376,46 +392,255 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
         );
       if (mappingRes.error) throw new Error(mappingRes.error.message);
     }
-    const baselineRes = await supabaseAdmin
-      .from("planejamento_hh_baselines" as never)
-      .insert({
-        obra_id: data.obraId,
-        nome: data.nome,
-        versao: data.versao,
-        arquivo_origem: data.nomeArquivo,
-        criado_por: context.userId,
-      } as never)
-      .select("id" as never)
-      .single();
-    if (baselineRes.error) throw new Error(baselineRes.error.message);
-    const baselineId = (baselineRes.data as unknown as { id: string }).id;
+    let baselineId = data.baselineId ?? null;
+    if (baselineId) {
+      const existente = await supabaseAdmin
+        .from("planejamento_hh_baselines" as never)
+        .select("id,status,obra_id" as never)
+        .eq("id" as never, baselineId as never)
+        .maybeSingle();
+      const atual = existente.data as unknown as {
+        id: string;
+        status: string;
+        obra_id: string;
+      } | null;
+      if (existente.error) throw new Error(existente.error.message);
+      if (!atual || atual.obra_id !== data.obraId || atual.status !== "rascunho")
+        throw new Error("Somente um rascunho da mesma obra pode ser atualizado.");
+      const updateRes = await supabaseAdmin
+        .from("planejamento_hh_baselines" as never)
+        .update({
+          nome: data.nome,
+          versao: data.versao,
+          arquivo_origem: data.nomeArquivo,
+        } as never)
+        .eq("id" as never, baselineId as never);
+      if (updateRes.error) throw new Error(updateRes.error.message);
+    } else {
+      const baselineRes = await supabaseAdmin
+        .from("planejamento_hh_baselines" as never)
+        .insert({
+          obra_id: data.obraId,
+          nome: data.nome,
+          versao: data.versao,
+          arquivo_origem: data.nomeArquivo,
+          status: "rascunho",
+          ativa: false,
+        } as never)
+        .select("id" as never)
+        .single();
+      if (baselineRes.error) throw new Error(baselineRes.error.message);
+      baselineId = (baselineRes.data as unknown as { id: string }).id;
+    }
     const mapa = new Map(
-      data.mapeamentos.map((m) => [
-        `${normalizarFuncaoOrcamento(m.funcaoOrcamento)}|${m.tipoMo}`,
-        m.categoriaMo,
+      mapeamentosEfetivos.map((m) => [
+        `${normalizarFuncaoOrcamento(m.funcaoOrcamento)}|${m.tipoOrigem}`,
+        { categoriaMo: m.categoriaMo, tipoEfetivo: m.tipoMo },
       ]),
     );
-    const rows = data.itens.map((i) => ({
-      baseline_id: baselineId,
-      funcao_orcamento: i.funcaoOrcamento,
-      funcao_orcamento_normalizada: normalizarFuncaoOrcamento(i.funcaoOrcamento),
-      categoria_mo_mapeada:
-        mapa.get(`${normalizarFuncaoOrcamento(i.funcaoOrcamento)}|${i.tipoMo}`) ?? null,
-      tipo_mo: i.tipoMo,
-      hh_previsto: i.hhPrevisto,
-      custo_previsto: i.custoPrevisto,
-      origem: i.origem,
-      metadata_calculo: i.metadataCalculo,
-    }));
+    const rows = data.itens.map((i, index) => {
+      const mapeamento = mapa.get(`${normalizarFuncaoOrcamento(i.funcaoOrcamento)}|${i.tipoMo}`);
+      return {
+        baseline_id: baselineId,
+        funcao_orcamento: i.funcaoOrcamento,
+        funcao_orcamento_normalizada: normalizarFuncaoOrcamento(i.funcaoOrcamento),
+        categoria_mo_mapeada: mapeamento?.categoriaMo ?? null,
+        tipo_mo: mapeamento?.tipoEfetivo ?? i.tipoMo,
+        hh_previsto: i.hhPrevisto,
+        custo_previsto: i.custoPrevisto,
+        origem: i.origem,
+        metadata_calculo: {
+          ...i.metadataCalculo,
+          tipo_mo_origem: i.tipoMo,
+          ...(index === 0
+            ? {
+                planejamento_hh: {
+                  abas: data.abas,
+                  pendencias: data.pendencias,
+                  avisos: data.avisos,
+                  conflitos,
+                },
+              }
+            : {}),
+        },
+      };
+    });
     const itemsRes = await supabaseAdmin
       .from("planejamento_hh_baseline_itens" as never)
-      .insert(rows as never);
+      .upsert(
+        rows as never,
+        { onConflict: "baseline_id,funcao_orcamento_normalizada,tipo_mo" } as never,
+      )
+      .select("id" as never);
     if (itemsRes.error) {
-      await supabaseAdmin
-        .from("planejamento_hh_baselines" as never)
-        .delete()
-        .eq("id" as never, baselineId as never);
+      if (!data.baselineId)
+        await supabaseAdmin
+          .from("planejamento_hh_baselines" as never)
+          .delete()
+          .eq("id" as never, baselineId as never);
       throw new Error(itemsRes.error.message);
     }
-    return { baselineId };
+    const idsMantidos = (itemsRes.data as unknown as Array<{ id: string }>).map((item) => item.id);
+    if (idsMantidos.length) {
+      const limparRes = await supabaseAdmin
+        .from("planejamento_hh_baseline_itens" as never)
+        .delete()
+        .eq("baseline_id" as never, baselineId as never)
+        .not("id" as never, "in" as never, `(${idsMantidos.join(",")})` as never);
+      if (limparRes.error) throw new Error(limparRes.error.message);
+    }
+    return { baselineId, status: "rascunho" as const };
+  });
+
+export const getRascunhoPlanejamentoHH = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ obraId: z.string().uuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    if (!(await permissoes(context.userId)).financeiro) throw new Error("Forbidden");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const baselineRes = await supabaseAdmin
+      .from("planejamento_hh_baselines" as never)
+      .select("id,nome,versao,arquivo_origem,status,criado_em" as never)
+      .eq("obra_id" as never, data.obraId as never)
+      .eq("status" as never, "rascunho" as never)
+      .order("criado_em" as never, { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (baselineRes.error) throw new Error(baselineRes.error.message);
+    const baseline = baselineRes.data as unknown as {
+      id: string;
+      nome: string;
+      versao: number;
+      arquivo_origem: string;
+    } | null;
+    if (!baseline) return null;
+    const itensRes = await supabaseAdmin
+      .from("planejamento_hh_baseline_itens" as never)
+      .select(
+        "funcao_orcamento,categoria_mo_mapeada,tipo_mo,hh_previsto,custo_previsto,origem,metadata_calculo" as never,
+      )
+      .eq("baseline_id" as never, baseline.id as never)
+      .order("criado_em" as never);
+    if (itensRes.error) throw new Error(itensRes.error.message);
+    const itens = (itensRes.data ?? []) as unknown as Array<{
+      funcao_orcamento: string;
+      categoria_mo_mapeada: string | null;
+      tipo_mo: TipoMO;
+      hh_previsto: number;
+      custo_previsto: number;
+      origem: "MO" | "EAP/CPUs";
+      metadata_calculo: Record<string, unknown>;
+    }>;
+    const controle = itens[0]?.metadata_calculo?.planejamento_hh as
+      { abas?: string[]; pendencias?: string[]; avisos?: string[] } | undefined;
+    return {
+      baselineId: baseline.id,
+      nome: baseline.nome,
+      versao: baseline.versao,
+      nomeArquivo: baseline.arquivo_origem,
+      previa: {
+        abas: controle?.abas ?? [],
+        erros: controle?.pendencias ?? [],
+        avisos: controle?.avisos ?? [],
+        itens: itens.map((i) => {
+          const {
+            planejamento_hh: _controle,
+            tipo_mo_origem: tipoOrigem,
+            ...metadataPersistida
+          } = i.metadata_calculo;
+          const metadataCalculo = Object.fromEntries(
+            Object.entries(metadataPersistida).filter(
+              ([, valor]) =>
+                valor == null ||
+                typeof valor === "string" ||
+                typeof valor === "number" ||
+                typeof valor === "boolean",
+            ),
+          ) as Record<string, string | number | boolean | null>;
+          return {
+            funcaoOrcamento: i.funcao_orcamento,
+            tipoMo: (tipoOrigem as TipoMO | undefined) ?? i.tipo_mo,
+            tipoEfetivo: i.tipo_mo,
+            categoriaMo: i.categoria_mo_mapeada,
+            hhPrevisto: Number(i.hh_previsto),
+            custoPrevisto: Number(i.custo_previsto),
+            origem: i.origem,
+            metadataCalculo,
+          };
+        }),
+      },
+    };
+  });
+
+export const ativarPlanejamentoHH = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ baselineId: z.string().uuid() }).parse(v))
+  .handler(async ({ data, context }) => {
+    if (!(await permissoes(context.userId)).financeiro) throw new Error("Forbidden");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const baselineRes = await supabaseAdmin
+      .from("planejamento_hh_baselines" as never)
+      .select("id,status,ativa" as never)
+      .eq("id" as never, data.baselineId as never)
+      .maybeSingle();
+    if (baselineRes.error) throw new Error(baselineRes.error.message);
+    const baseline = baselineRes.data as unknown as {
+      id: string;
+      status: string;
+      ativa: boolean;
+    } | null;
+    if (!baseline || baseline.status !== "rascunho" || baseline.ativa)
+      throw new Error("Somente uma baseline em rascunho pode ser ativada.");
+    const itensRes = await supabaseAdmin
+      .from("planejamento_hh_baseline_itens" as never)
+      .select("funcao_orcamento,categoria_mo_mapeada,tipo_mo,metadata_calculo" as never)
+      .eq("baseline_id" as never, data.baselineId as never);
+    if (itensRes.error) throw new Error(itensRes.error.message);
+    const itens = (itensRes.data ?? []) as unknown as Array<{
+      funcao_orcamento: string;
+      categoria_mo_mapeada: string | null;
+      tipo_mo: TipoMO;
+      metadata_calculo: Record<string, unknown>;
+    }>;
+    if (!itens.length) throw new Error("Baseline sem itens não pode ser ativada.");
+    const controle = itens[0]?.metadata_calculo?.planejamento_hh as
+      { pendencias?: string[]; conflitos?: string[] } | undefined;
+    const pendencias = pendenciasAtivacaoBaseline(
+      [...(controle?.pendencias ?? []), ...(controle?.conflitos ?? [])],
+      itens.map((i) => ({
+        funcaoOrcamento: i.funcao_orcamento,
+        categoriaMo: i.categoria_mo_mapeada,
+        tipoMo: i.tipo_mo,
+      })),
+    );
+    if (pendencias.length) throw new Error(pendencias.join(" "));
+    const categoriasRes = await supabaseAdmin.from("categorias").select("nome,tipo");
+    if (categoriasRes.error) throw new Error(categoriasRes.error.message);
+    const tiposCategorias = new Map(
+      (categoriasRes.data ?? []).map((categoria) => [categoria.nome, categoria.tipo as TipoMO]),
+    );
+    const classificacoesDesatualizadas = itens.filter(
+      (item) =>
+        item.categoria_mo_mapeada &&
+        tiposCategorias.get(item.categoria_mo_mapeada) !== item.tipo_mo,
+    );
+    if (classificacoesDesatualizadas.length)
+      throw new Error(
+        "A classificação oficial de uma categoria mudou. Salve o rascunho novamente.",
+      );
+    const conflitos = conflitosCategoriaEntreTipos(
+      itens.map((i) => ({
+        funcaoOrcamento: i.funcao_orcamento,
+        categoriaMo: i.categoria_mo_mapeada,
+        tipoMo: i.tipo_mo,
+      })),
+    );
+    if (conflitos.length)
+      throw new Error(`Conflito de classificação efetiva: ${conflitos.join(", ")}.`);
+    const { error } = await context.supabase.rpc(
+      "ativar_planejamento_hh_baseline" as never,
+      { p_baseline_id: data.baselineId } as never,
+    );
+    if (error) throw new Error(error.message);
+    return { baselineId: data.baselineId, status: "ativa" as const };
   });

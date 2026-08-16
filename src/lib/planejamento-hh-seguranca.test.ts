@@ -107,27 +107,27 @@ test("categoria selecionada fica mapeada e divergencia operacional e apenas info
   assert.match(route, /categoriaSelecionada && \(/);
   assert.match(route, />\s*Mapeado\s*</);
   assert.match(route, /categoriaSelecionada\.tipo !== i\.tipoMo/);
-  assert.match(
-    route,
-    /Classificação operacional: \{categoriaSelecionada\.tipo\} · orçamento:[\s\S]*\{i\.tipoMo\}/,
-  );
+  assert.match(route, /Tipo considerado: \{categoriaSelecionada\.tipo\}/);
+  assert.match(route, /orçamento originalmente classificado como \{i\.tipoMo\}/);
   assert.doesNotMatch(route, /text-amber-700/);
   assert.doesNotMatch(route, /ClassificaÃ|orÃ/);
   assert.match(server, /\.filter\(\(m\) => m\.categoriaMo\)/);
   assert.doesNotMatch(server, /m\.categoriaMo[\s\S]{0,100}categoria.*tipo.*===.*tipoMo/i);
 });
 
-test("realizado consolida pela categoria mapeada e preserva o tipo da baseline", () => {
+test("realizado consolida pela categoria mapeada e usa o tipo oficial da categoria", () => {
   assert.match(server, /const chave = item\.categoria_mo_mapeada \?\?/);
-  assert.match(server, /tipo: item\.tipo_mo/);
+  assert.match(server, /tipoMap\.get\(item\.categoria_mo_mapeada\) \?\? item\.tipo_mo/);
   assert.match(server, /const l = linhas\.get\(categoria\) \?\?/);
   assert.match(server, /l\.hhRealizado \+= classif\.hhRealizado/);
   assert.match(server, /funcoesOrcamento/);
 });
 
-test("MOI para categoria operacional MOD e validado sem mudar o tipo previsto", () => {
-  assert.match(server, /conflitosCategoriaEntreTipos\(data\.mapeamentos\)/);
-  assert.doesNotMatch(server, /categoria.*tipo.*===.*tipoMo/i);
+test("MOI para categoria operacional MOD usa tipo efetivo e audita a origem", () => {
+  assert.match(server, /tipoEfetivoMapeamento\(m\.tipoMo, m\.categoriaMo, tiposCategorias\)/);
+  assert.match(server, /tipo_mo_origem: i\.tipoMo/);
+  assert.match(server, /tipo_mo: mapeamento\?\.tipoEfetivo \?\? i\.tipoMo/);
+  assert.match(server, /conflitosCategoriaEntreTipos\(mapeamentosEfetivos\)/);
   assert.match(route, /MESTRE DE OBRAS|categorias\.map/);
 });
 
@@ -144,7 +144,31 @@ test("bloqueio de composicao ABA permanece independente do mapeamento", () => {
     parser,
     /Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas/,
   );
-  assert.match(route, /disabled=\{!!previa\.erros\.length/);
+  assert.match(route, /pendencias: previa\.erros/);
+  assert.match(route, /pendenciasAtivacao/);
+  assert.match(route, /Salvar baseline/);
+  assert.match(route, /Ativar baseline/);
+  assert.doesNotMatch(route, /Salvar e ativar baseline/);
+  assert.match(server, /pendenciasAtivacaoBaseline/);
+});
+
+test("rascunho salva pendencias, reabre e nao alimenta dashboard oficial", () => {
+  assert.match(server, /status: "rascunho"/);
+  assert.match(server, /export const getRascunhoPlanejamentoHH/);
+  assert.match(server, /\.eq\("status" as never, "rascunho" as never\)/);
+  assert.match(route, /Reabrir rascunho/);
+  assert.match(server, /\.eq\("ativa" as never, true as never\)/);
+  assert.match(route, /disabled=\{salvar\.isPending\}/);
+});
+
+test("ativacao e separada e revalida pendencias no servidor", () => {
+  assert.match(server, /export const ativarPlanejamentoHH/);
+  assert.match(server, /Somente uma baseline em rascunho pode ser ativada/);
+  assert.match(server, /Baseline sem itens não pode ser ativada/);
+  assert.match(server, /pendenciasAtivacaoBaseline/);
+  assert.match(server, /classificacoesDesatualizadas/);
+  assert.match(server, /context\.supabase\.rpc/);
+  assert.doesNotMatch(route, /supabase\.rpc\(/);
 });
 
 test("dry-run incremental e transacional e nao executavel pelo cliente anonimo", () => {

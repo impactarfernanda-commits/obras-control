@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import * as XLSX from "xlsx";
+import { tipoEfetivoMapeamento } from "./planejamento-hh-core.ts";
 import { parseOrcamentoBuffer } from "./planejamento-hh-parser.ts";
 
 function workbookMinimo() {
@@ -233,4 +235,39 @@ test("parser interpreta o leiaute real com CalculaCPUs, MO em blocos e custo cac
     false,
   );
   assert.ok(previa.erros.some((erro) => erro.includes("NAOEXISTE")));
+});
+
+test("Matinhos preserva totais e move Mestre de obras I para o subtotal MOD confirmado", () => {
+  const previa = parseOrcamentoBuffer(
+    readFileSync("doc/amostras-hh/Planilha de atividades - SANEPAR Matinhos.xlsm"),
+  );
+  const tiposCategorias = new Map([["MESTRE DE OBRA I", "MOD" as const]]);
+  const itensEfetivos = previa.itens.map((item) => ({
+    ...item,
+    tipoEfetivo:
+      item.funcaoOrcamento === "Mestre de obras I"
+        ? tipoEfetivoMapeamento(item.tipoMo, "MESTRE DE OBRA I", tiposCategorias)
+        : item.tipoMo,
+  }));
+  const mestre = itensEfetivos.find((item) => item.funcaoOrcamento === "Mestre de obras I");
+  assert.equal(mestre?.tipoMo, "MOI");
+  assert.equal(mestre?.tipoEfetivo, "MOD");
+  assert.equal(mestre?.hhPrevisto, 990);
+  assert.equal(mestre?.custoPrevisto, 49036.23);
+  assert.ok(
+    previa.erros.some((erro) => erro.includes("ABA")),
+    "CPU ABA deve continuar como pendência de ativação",
+  );
+  const totalHH = itensEfetivos.reduce((soma, item) => soma + item.hhPrevisto, 0);
+  const totalCusto = itensEfetivos.reduce((soma, item) => soma + item.custoPrevisto, 0);
+  const subtotal = (tipo: "MOI" | "MOD", campo: "hhPrevisto" | "custoPrevisto") =>
+    itensEfetivos
+      .filter((item) => item.tipoEfetivo === tipo)
+      .reduce((soma, item) => soma + item[campo], 0);
+  assert.ok(Math.abs(totalHH - 23634.4567) < 0.0001);
+  assert.ok(Math.abs(totalCusto - 781380.9514) < 0.0001);
+  assert.ok(Math.abs(subtotal("MOI", "hhPrevisto") - 4510) < 0.0001);
+  assert.ok(Math.abs(subtotal("MOD", "hhPrevisto") - 19124.4567) < 0.0001);
+  assert.ok(Math.abs(subtotal("MOI", "custoPrevisto") - 201757.7525) < 0.0001);
+  assert.ok(Math.abs(subtotal("MOD", "custoPrevisto") - 579623.1989) < 0.0001);
 });

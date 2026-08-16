@@ -44,8 +44,14 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fmtBRL } from "@/lib/custos";
-import { conflitosCategoriaEntreTipos } from "@/lib/planejamento-hh-core";
 import {
+  conflitosCategoriaEntreTipos,
+  pendenciasAtivacaoBaseline,
+  type TipoMO,
+} from "@/lib/planejamento-hh-core";
+import {
+  ativarPlanejamentoHH,
+  getRascunhoPlanejamentoHH,
   getPlanejamentoHH,
   previewPlanejamentoHH,
   salvarPlanejamentoHH,
@@ -297,7 +303,7 @@ function PlanejamentoPage() {
                         )}
                         {l.funcoesOrcamento.length > 1 && (
                           <div className="mt-1 text-xs text-muted-foreground">
-                            OrÃ§amento: {l.funcoesOrcamento.join(", ")}
+                            Orçamento: {l.funcoesOrcamento.join(", ")}
                           </div>
                         )}
                       </TableCell>
@@ -416,6 +422,8 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
   const [nome, setNome] = useState("Baseline contratual");
   const [versao, setVersao] = useState(1);
   const [mapas, setMapas] = useState<Record<string, string>>({});
+  const [baselineIdSalvo, setBaselineIdSalvo] = useState<string | null>(null);
+  const [alteracoesPendentes, setAlteracoesPendentes] = useState(false);
   const { data: categorias = [] } = useQuery({
     queryKey: ["categorias-mapeamento-hh"],
     queryFn: async () => {
@@ -424,18 +432,40 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
       return data;
     },
   });
+  const rascunho = useQuery({
+    queryKey: ["rascunho-planejamento-hh", obraId],
+    queryFn: () => getRascunhoPlanejamentoHH({ data: { obraId } }),
+    enabled: open,
+  });
+  const tiposCategorias = useMemo(
+    () =>
+      new Map(categorias.map((categoria) => [categoria.nome, categoria.tipo as TipoMO] as const)),
+    [categorias],
+  );
   const conflitosTipos = useMemo(
     () =>
       previa
         ? conflitosCategoriaEntreTipos(
             previa.itens.map((i) => ({
               funcaoOrcamento: i.funcaoOrcamento,
-              tipoMo: i.tipoMo,
+              tipoMo: tiposCategorias.get(mapas[`${i.funcaoOrcamento}|${i.tipoMo}`]) ?? i.tipoMo,
               categoriaMo: mapas[`${i.funcaoOrcamento}|${i.tipoMo}`] ?? null,
             })),
           )
         : [],
-    [mapas, previa],
+    [mapas, previa, tiposCategorias],
+  );
+  const pendenciasAtivacao = useMemo(
+    () =>
+      pendenciasAtivacaoBaseline(
+        previa?.erros ?? [],
+        previa?.itens.map((i) => ({
+          funcaoOrcamento: i.funcaoOrcamento,
+          tipoMo: tiposCategorias.get(mapas[`${i.funcaoOrcamento}|${i.tipoMo}`]) ?? i.tipoMo,
+          categoriaMo: mapas[`${i.funcaoOrcamento}|${i.tipoMo}`] ?? null,
+        })) ?? [],
+      ),
+    [mapas, previa, tiposCategorias],
   );
   const preview = useMutation({
     mutationFn: async (file: File) => {
@@ -448,17 +478,26 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
         data: { nomeArquivo: file.name, arquivoBase64: btoa(bin) },
       }) as Promise<PreviaImportacao>;
     },
-    onSuccess: setPrevia,
+    onSuccess: (resultado) => {
+      setPrevia(resultado);
+      setMapas({});
+      setBaselineIdSalvo(null);
+      setAlteracoesPendentes(true);
+    },
   });
   const salvar = useMutation({
     mutationFn: async () => {
       if (!previa) throw new Error("Gere a prévia primeiro");
       const result = await salvarPlanejamentoHH({
         data: {
+          baselineId: baselineIdSalvo,
           obraId,
           nome,
           versao,
           nomeArquivo: arquivo,
+          abas: previa.abas,
+          pendencias: previa.erros,
+          avisos: previa.avisos,
           itens: previa.itens,
           mapeamentos: previa.itens.map((i) => ({
             funcaoOrcamento: i.funcaoOrcamento,
@@ -467,18 +506,48 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
           })),
         },
       });
-      const { error } = await supabase.rpc(
-        "ativar_planejamento_hh_baseline" as never,
-        { p_baseline_id: result.baselineId } as never,
-      );
-      if (error) throw error;
+      return result;
+    },
+    onSuccess: async (result) => {
+      setBaselineIdSalvo(result.baselineId);
+      setAlteracoesPendentes(false);
+      await qc.invalidateQueries({ queryKey: ["rascunho-planejamento-hh", obraId] });
+    },
+  });
+  const ativar = useMutation({
+    mutationFn: async () => {
+      if (!baselineIdSalvo || alteracoesPendentes)
+        throw new Error("Salve o rascunho atualizado antes de ativar.");
+      return ativarPlanejamentoHH({ data: { baselineId: baselineIdSalvo } });
     },
     onSuccess: async () => {
       setOpen(false);
       setPrevia(null);
-      await qc.invalidateQueries({ queryKey: ["planejamento-hh"] });
+      setMapas({});
+      setBaselineIdSalvo(null);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["planejamento-hh"] }),
+        qc.invalidateQueries({ queryKey: ["rascunho-planejamento-hh", obraId] }),
+      ]);
     },
   });
+  const reabrirRascunho = () => {
+    const salvo = rascunho.data;
+    if (!salvo) return;
+    setNome(salvo.nome);
+    setVersao(salvo.versao);
+    setArquivo(salvo.nomeArquivo);
+    setPrevia(salvo.previa as Previa);
+    setMapas(
+      Object.fromEntries(
+        salvo.previa.itens
+          .filter((item) => item.categoriaMo)
+          .map((item) => [`${item.funcaoOrcamento}|${item.tipoMo}`, item.categoriaMo as string]),
+      ),
+    );
+    setBaselineIdSalvo(salvo.baselineId);
+    setAlteracoesPendentes(false);
+  };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -491,17 +560,36 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
         <DialogHeader>
           <DialogTitle>Importar orçamento XLSM/XLSX</DialogTitle>
         </DialogHeader>
+        {rascunho.data && !previa && (
+          <Alert>
+            <AlertTitle>Rascunho disponível</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {rascunho.data.nome} · versão {rascunho.data.versao} · {rascunho.data.nomeArquivo}
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={reabrirRascunho}>
+                Reabrir rascunho
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
         <div className="grid gap-3 md:grid-cols-3">
           <Input
             value={nome}
-            onChange={(e) => setNome(e.target.value)}
+            onChange={(e) => {
+              setNome(e.target.value);
+              setAlteracoesPendentes(true);
+            }}
             placeholder="Nome da baseline"
           />
           <Input
             type="number"
             min={1}
             value={versao}
-            onChange={(e) => setVersao(Number(e.target.value))}
+            onChange={(e) => {
+              setVersao(Number(e.target.value));
+              setAlteracoesPendentes(true);
+            }}
           />
           <Input
             type="file"
@@ -521,8 +609,8 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
             {conflitosTipos.map((categoria) => (
               <Alert key={categoria} variant="destructive">
                 <AlertDescription>
-                  A categoria {categoria} estÃ¡ associada simultaneamente a itens MOI e MOD. O Obras
-                  Control nÃ£o possui informaÃ§Ã£o suficiente para dividir o HH realizado.
+                  A categoria {categoria} está associada simultaneamente a itens MOI e MOD. O Obras
+                  Control não possui informação suficiente para dividir o HH realizado.
                 </AlertDescription>
               </Alert>
             ))}
@@ -530,7 +618,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Função orçamento</TableHead>
-                  <TableHead>Tipo</TableHead>
+                  <TableHead>Tipo orçamento</TableHead>
                   <TableHead>HH previsto</TableHead>
                   <TableHead>Custo previsto</TableHead>
                   <TableHead>Origem</TableHead>
@@ -551,7 +639,10 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                       <TableCell>
                         <Select
                           value={mapas[key] ?? ""}
-                          onValueChange={(v) => setMapas((m) => ({ ...m, [key]: v }))}
+                          onValueChange={(v) => {
+                            setMapas((m) => ({ ...m, [key]: v }));
+                            setAlteracoesPendentes(true);
+                          }}
                         >
                           <SelectTrigger className="w-56">
                             <SelectValue placeholder="Aguardando mapeamento" />
@@ -572,11 +663,9 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                             <Badge variant="outline" className="font-normal">
                               Mapeado
                             </Badge>
+                            <span>Tipo considerado: {categoriaSelecionada.tipo}</span>
                             {categoriaSelecionada.tipo !== i.tipoMo && (
-                              <span>
-                                Classificação operacional: {categoriaSelecionada.tipo} · orçamento:{" "}
-                                {i.tipoMo}
-                              </span>
+                              <span>· orçamento originalmente classificado como {i.tipoMo}</span>
                             )}
                           </div>
                         )}
@@ -586,13 +675,44 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                 })}
               </TableBody>
             </Table>
-            <Button
-              disabled={!!previa.erros.length || !!conflitosTipos.length || salvar.isPending}
-              onClick={() => salvar.mutate()}
-            >
-              Salvar e ativar baseline
-            </Button>
+            {!!pendenciasAtivacao.length && (
+              <Alert>
+                <AlertTitle>
+                  {pendenciasAtivacao.length}{" "}
+                  {pendenciasAtivacao.length === 1 ? "pendência impede" : "pendências impedem"} a
+                  ativação
+                </AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc pl-5">
+                    {pendenciasAtivacao.map((pendencia) => (
+                      <li key={pendencia}>{pendencia}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={salvar.isPending} onClick={() => salvar.mutate()}>
+                Salvar baseline
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={
+                  !baselineIdSalvo ||
+                  alteracoesPendentes ||
+                  !!pendenciasAtivacao.length ||
+                  ativar.isPending
+                }
+                onClick={() => ativar.mutate()}
+              >
+                Ativar baseline
+              </Button>
+              {baselineIdSalvo && !alteracoesPendentes && (
+                <span className="self-center text-sm text-muted-foreground">Rascunho salvo.</span>
+              )}
+            </div>
             {salvar.isError && <p className="text-sm text-destructive">{salvar.error.message}</p>}
+            {ativar.isError && <p className="text-sm text-destructive">{ativar.error.message}</p>}
           </>
         )}
       </DialogContent>

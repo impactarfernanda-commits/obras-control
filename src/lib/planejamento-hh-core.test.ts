@@ -8,9 +8,63 @@ import {
   custoRegistroNaVigencia,
   indicadores,
   normalizarFuncaoOrcamento,
+  pendenciasAtivacaoBaseline,
+  tipoEfetivoMapeamento,
   vigenciaNaData,
   type CustoVigencia,
 } from "./planejamento-hh-core.ts";
+
+test("tipo efetivo usa categoria oficial e preserva origem separadamente", () => {
+  const categorias = new Map([
+    ["MESTRE DE OBRA I", "MOD" as const],
+    ["ADMINISTRATIVO", "MOI" as const],
+  ]);
+  assert.equal(tipoEfetivoMapeamento("MOI", "MESTRE DE OBRA I", categorias), "MOD");
+  assert.equal(tipoEfetivoMapeamento("MOD", "ADMINISTRATIVO", categorias), "MOI");
+  assert.equal(tipoEfetivoMapeamento("MOI", null, categorias), "MOI");
+});
+
+test("pendências bloqueiam ativação sem impedir a representação do rascunho", () => {
+  const aba = "Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas: ABA.";
+  const pendencias = pendenciasAtivacaoBaseline(
+    [aba],
+    [
+      { funcaoOrcamento: "Mestre de obras I", tipoMo: "MOD", categoriaMo: "MESTRE DE OBRA I" },
+      { funcaoOrcamento: "Sem categoria", tipoMo: "MOI", categoriaMo: null },
+    ],
+  );
+  assert.deepEqual(pendencias, [aba, "Função sem mapeamento: Sem categoria."]);
+  assert.deepEqual(
+    pendenciasAtivacaoBaseline(
+      [],
+      [{ funcaoOrcamento: "Mestre de obras I", tipoMo: "MOD", categoriaMo: "MESTRE DE OBRA I" }],
+    ),
+    [],
+  );
+});
+
+test("conflito considera somente tipos efetivos persistidos", () => {
+  assert.deepEqual(
+    pendenciasAtivacaoBaseline(
+      [],
+      [
+        { funcaoOrcamento: "Origem MOI", tipoMo: "MOD", categoriaMo: "MESTRE DE OBRA I" },
+        { funcaoOrcamento: "Origem MOD", tipoMo: "MOD", categoriaMo: "MESTRE DE OBRA I" },
+      ],
+    ),
+    [],
+  );
+  assert.equal(
+    pendenciasAtivacaoBaseline(
+      [],
+      [
+        { funcaoOrcamento: "Efetivo MOI", tipoMo: "MOI", categoriaMo: "CATEGORIA" },
+        { funcaoOrcamento: "Efetivo MOD", tipoMo: "MOD", categoriaMo: "CATEGORIA" },
+      ],
+    ).length,
+    1,
+  );
+});
 
 test("HH realizado soma horas normais e extras", () => {
   assert.equal(
