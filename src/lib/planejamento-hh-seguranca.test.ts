@@ -161,6 +161,26 @@ test("rascunho salva pendencias, reabre e nao alimenta dashboard oficial", () =>
   assert.match(route, /disabled=\{salvar\.isPending\}/);
 });
 
+test("novo rascunho registra o usuario autenticado sem aceitar autor do frontend", () => {
+  assert.match(migration, /criado_por uuid NOT NULL REFERENCES auth\.users\(id\)/);
+  assert.doesNotMatch(
+    server,
+    /\.object\(\{[\s\S]{0,600}criadoPor|\.object\(\{[\s\S]{0,600}criado_por/,
+  );
+  assert.match(
+    server,
+    /\.insert\(\{[\s\S]{0,500}criado_por: context\.userId,[\s\S]{0,200}status: "rascunho",[\s\S]{0,100}ativa: false/,
+  );
+  assert.match(server, /confirmado_por: context\.userId/);
+});
+
+test("edicao do rascunho preserva o autor original", () => {
+  const inicioUpdate = server.indexOf(".update({", server.indexOf("if (baselineId)"));
+  const fimUpdate = server.indexOf("} as never)", inicioUpdate);
+  assert.ok(inicioUpdate >= 0 && fimUpdate > inicioUpdate);
+  assert.doesNotMatch(server.slice(inicioUpdate, fimUpdate), /criado_por/);
+});
+
 test("ativacao e separada e revalida pendencias no servidor", () => {
   assert.match(server, /export const ativarPlanejamentoHH/);
   assert.match(server, /Somente uma baseline em rascunho pode ser ativada/);

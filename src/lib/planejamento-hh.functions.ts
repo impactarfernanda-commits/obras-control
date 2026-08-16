@@ -424,6 +424,7 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
           nome: data.nome,
           versao: data.versao,
           arquivo_origem: data.nomeArquivo,
+          criado_por: context.userId,
           status: "rascunho",
           ativa: false,
         } as never)
