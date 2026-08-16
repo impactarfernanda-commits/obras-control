@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classificarRegistroGerencial,
+  composicoesNaoReconciliadas,
   conflitosCategoriaEntreTipos,
   consolidarPrevistoPorCategoria,
   custoAusenciaDoDia,
@@ -41,6 +42,38 @@ test("pendências bloqueiam ativação sem impedir a representação do rascunho
     ),
     [],
   );
+});
+
+test("composicao fora do escopo deixa de bloquear sem adicionar HH ou custo de MO", () => {
+  const aba = "Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas: ABA.";
+  const resolucao = {
+    codigoComposicao: "ABA",
+    descricao: "SERVIÇO DE MONTAGEM ELETROMECÂNICA",
+    resolucao: "fora_escopo_mo" as const,
+    motivo: "servico_terceirizado" as const,
+    hhMoConsiderado: 0 as const,
+    custoMoConsiderado: 0 as const,
+    quantidade: 1,
+    valorGlobalCacheado: 105382.5,
+  };
+  assert.deepEqual(composicoesNaoReconciliadas([aba]), ["ABA"]);
+  assert.deepEqual(pendenciasAtivacaoBaseline([aba], [], [resolucao]), []);
+  assert.equal(resolucao.hhMoConsiderado, 0);
+  assert.equal(resolucao.custoMoConsiderado, 0);
+  assert.equal(resolucao.valorGlobalCacheado, 105382.5);
+});
+
+test("outra composicao desconhecida sem resolucao continua bloqueando", () => {
+  const aba = "Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas: ABA.";
+  const xyz = "Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas: XYZ.";
+  const resolucaoAba = {
+    codigoComposicao: "ABA",
+    resolucao: "fora_escopo_mo" as const,
+    motivo: "servico_terceirizado" as const,
+    hhMoConsiderado: 0 as const,
+    custoMoConsiderado: 0 as const,
+  };
+  assert.deepEqual(pendenciasAtivacaoBaseline([aba, xyz], [], [resolucaoAba]), [xyz]);
 });
 
 test("conflito considera somente tipos efetivos persistidos", () => {

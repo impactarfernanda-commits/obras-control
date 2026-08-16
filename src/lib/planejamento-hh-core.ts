@@ -41,6 +41,19 @@ export type MapeamentoBaseline = {
   categoriaMo: string | null;
 };
 
+export type ResolucaoComposicao = {
+  codigoComposicao: string;
+  descricao?: string | null;
+  resolucao: "fora_escopo_mo";
+  motivo: "servico_terceirizado";
+  hhMoConsiderado: 0;
+  custoMoConsiderado: 0;
+  quantidade?: number | null;
+  valorGlobalCacheado?: number | null;
+  resolvidoPor?: string;
+  resolvidoEm?: string;
+};
+
 export function tipoEfetivoMapeamento(
   tipoOrigem: TipoMO,
   categoriaMo: string | null,
@@ -63,9 +76,39 @@ export function conflitosCategoriaEntreTipos(mapeamentos: MapeamentoBaseline[]) 
     .sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
-export function pendenciasAtivacaoBaseline(erros: string[], mapeamentos: MapeamentoBaseline[]) {
+export function composicoesNaoReconciliadas(erros: string[]) {
+  const prefixo = "Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas:";
+  return erros.flatMap((erro) => {
+    if (!erro.startsWith(prefixo)) return [];
+    return erro
+      .slice(prefixo.length)
+      .replace(/\.$/, "")
+      .split(",")
+      .map((codigo) => codigo.trim())
+      .filter(Boolean);
+  });
+}
+
+export function pendenciasAtivacaoBaseline(
+  erros: string[],
+  mapeamentos: MapeamentoBaseline[],
+  resolucoes: ResolucaoComposicao[] = [],
+) {
+  const resolvidos = new Set(
+    resolucoes
+      .filter(
+        (item) =>
+          item.resolucao === "fora_escopo_mo" &&
+          item.hhMoConsiderado === 0 &&
+          item.custoMoConsiderado === 0,
+      )
+      .map((item) => item.codigoComposicao),
+  );
   return [
-    ...erros,
+    ...erros.filter((erro) => {
+      const codigos = composicoesNaoReconciliadas([erro]);
+      return !codigos.length || codigos.some((codigo) => !resolvidos.has(codigo));
+    }),
     ...mapeamentos
       .filter((item) => !item.categoriaMo)
       .map((item) => `Função sem mapeamento: ${item.funcaoOrcamento}.`),

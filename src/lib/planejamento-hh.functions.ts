@@ -5,6 +5,7 @@ import { buscarTodasPaginas } from "@/lib/paginacao";
 import { diasUteisNoIntervalo } from "@/lib/custos-core";
 import {
   classificarRegistroGerencial,
+  composicoesNaoReconciliadas,
   conflitosCategoriaEntreTipos,
   custoRegistroNaVigencia,
   indicadores,
@@ -13,6 +14,7 @@ import {
   tipoEfetivoMapeamento,
   vigenciaNaData,
   type CustoVigencia,
+  type ResolucaoComposicao,
   type TipoAusencia,
   type TipoMO,
 } from "@/lib/planejamento-hh-core";
@@ -63,6 +65,16 @@ const itemImportadoSchema = z.object({
   custoPrevisto: z.number().nonnegative(),
   origem: z.enum(["MO", "EAP/CPUs"]),
   metadataCalculo: z.record(z.unknown()),
+});
+const resolucaoComposicaoSchema = z.object({
+  codigoComposicao: z.string().trim().min(1),
+  descricao: z.string().trim().min(1).nullable().optional(),
+  resolucao: z.literal("fora_escopo_mo"),
+  motivo: z.literal("servico_terceirizado"),
+  hhMoConsiderado: z.literal(0),
+  custoMoConsiderado: z.literal(0),
+  quantidade: z.number().nonnegative().nullable().optional(),
+  valorGlobalCacheado: z.number().nonnegative().nullable().optional(),
 });
 
 async function permissoes(userId: string) {
@@ -348,6 +360,7 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
         abas: z.array(z.string()),
         pendencias: z.array(z.string()),
         avisos: z.array(z.string()),
+        resolucoesComposicoes: z.array(resolucaoComposicaoSchema),
         itens: z.array(itemImportadoSchema).min(1),
         mapeamentos: z.array(
           z.object({
@@ -373,6 +386,9 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
       tipoMo: tipoEfetivoMapeamento(m.tipoMo, m.categoriaMo, tiposCategorias),
     }));
     const conflitos = conflitosCategoriaEntreTipos(mapeamentosEfetivos);
+    const codigosPendentes = new Set(composicoesNaoReconciliadas(data.pendencias));
+    if (data.resolucoesComposicoes.some((item) => !codigosPendentes.has(item.codigoComposicao)))
+      throw new Error("Composição informada não corresponde a uma pendência desta importação.");
     const confirmados = mapeamentosEfetivos
       .filter((m) => m.categoriaMo)
       .map((m) => ({
@@ -393,6 +409,7 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
       if (mappingRes.error) throw new Error(mappingRes.error.message);
     }
     let baselineId = data.baselineId ?? null;
+    let resolucoesExistentes: ResolucaoComposicao[] = [];
     if (baselineId) {
       const existente = await supabaseAdmin
         .from("planejamento_hh_baselines" as never)
@@ -407,6 +424,19 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
       if (existente.error) throw new Error(existente.error.message);
       if (!atual || atual.obra_id !== data.obraId || atual.status !== "rascunho")
         throw new Error("Somente um rascunho da mesma obra pode ser atualizado.");
+      const controleRes = await supabaseAdmin
+        .from("planejamento_hh_baseline_itens" as never)
+        .select("metadata_calculo" as never)
+        .eq("baseline_id" as never, baselineId as never)
+        .order("criado_em" as never)
+        .limit(1)
+        .maybeSingle();
+      if (controleRes.error) throw new Error(controleRes.error.message);
+      const metadataExistente = controleRes.data as unknown as {
+        metadata_calculo?: { planejamento_hh?: { resolucoes_composicoes?: ResolucaoComposicao[] } };
+      } | null;
+      resolucoesExistentes =
+        metadataExistente?.metadata_calculo?.planejamento_hh?.resolucoes_composicoes ?? [];
       const updateRes = await supabaseAdmin
         .from("planejamento_hh_baselines" as never)
         .update({
@@ -433,6 +463,19 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
       if (baselineRes.error) throw new Error(baselineRes.error.message);
       baselineId = (baselineRes.data as unknown as { id: string }).id;
     }
+    const resolucoesAnteriores = new Map(
+      resolucoesExistentes.map((item) => [item.codigoComposicao, item]),
+    );
+    const resolucoesAuditadas: ResolucaoComposicao[] = data.resolucoesComposicoes.map((item) => {
+      const anterior = resolucoesAnteriores.get(item.codigoComposicao);
+      return anterior?.resolucao === item.resolucao
+        ? anterior
+        : {
+            ...item,
+            resolvidoPor: context.userId,
+            resolvidoEm: new Date().toISOString(),
+          };
+    });
     const mapa = new Map(
       mapeamentosEfetivos.map((m) => [
         `${normalizarFuncaoOrcamento(m.funcaoOrcamento)}|${m.tipoOrigem}`,
@@ -460,6 +503,7 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
                   pendencias: data.pendencias,
                   avisos: data.avisos,
                   conflitos,
+                  resolucoes_composicoes: resolucoesAuditadas,
                 },
               }
             : {}),
@@ -532,8 +576,15 @@ export const getRascunhoPlanejamentoHH = createServerFn({ method: "POST" })
       origem: "MO" | "EAP/CPUs";
       metadata_calculo: Record<string, unknown>;
     }>;
-    const controle = itens[0]?.metadata_calculo?.planejamento_hh as
-      { abas?: string[]; pendencias?: string[]; avisos?: string[] } | undefined;
+    const controle = itens.find((item) => item.metadata_calculo?.planejamento_hh)?.metadata_calculo
+      ?.planejamento_hh as
+      | {
+          abas?: string[];
+          pendencias?: string[];
+          avisos?: string[];
+          resolucoes_composicoes?: ResolucaoComposicao[];
+        }
+      | undefined;
     return {
       baselineId: baseline.id,
       nome: baseline.nome,
@@ -543,6 +594,7 @@ export const getRascunhoPlanejamentoHH = createServerFn({ method: "POST" })
         abas: controle?.abas ?? [],
         erros: controle?.pendencias ?? [],
         avisos: controle?.avisos ?? [],
+        resolucoesComposicoes: controle?.resolucoes_composicoes ?? [],
         itens: itens.map((i) => {
           const {
             planejamento_hh: _controle,
@@ -604,8 +656,14 @@ export const ativarPlanejamentoHH = createServerFn({ method: "POST" })
       metadata_calculo: Record<string, unknown>;
     }>;
     if (!itens.length) throw new Error("Baseline sem itens não pode ser ativada.");
-    const controle = itens[0]?.metadata_calculo?.planejamento_hh as
-      { pendencias?: string[]; conflitos?: string[] } | undefined;
+    const controle = itens.find((item) => item.metadata_calculo?.planejamento_hh)?.metadata_calculo
+      ?.planejamento_hh as
+      | {
+          pendencias?: string[];
+          conflitos?: string[];
+          resolucoes_composicoes?: ResolucaoComposicao[];
+        }
+      | undefined;
     const pendencias = pendenciasAtivacaoBaseline(
       [...(controle?.pendencias ?? []), ...(controle?.conflitos ?? [])],
       itens.map((i) => ({
@@ -613,6 +671,7 @@ export const ativarPlanejamentoHH = createServerFn({ method: "POST" })
         categoriaMo: i.categoria_mo_mapeada,
         tipoMo: i.tipo_mo,
       })),
+      controle?.resolucoes_composicoes ?? [],
     );
     if (pendencias.length) throw new Error(pendencias.join(" "));
     const categoriasRes = await supabaseAdmin.from("categorias").select("nome,tipo");

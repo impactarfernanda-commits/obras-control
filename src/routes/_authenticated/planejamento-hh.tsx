@@ -45,8 +45,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fmtBRL } from "@/lib/custos";
 import {
+  composicoesNaoReconciliadas,
   conflitosCategoriaEntreTipos,
   pendenciasAtivacaoBaseline,
+  type ResolucaoComposicao,
   type TipoMO,
 } from "@/lib/planejamento-hh-core";
 import {
@@ -71,7 +73,7 @@ const inicioAno = () => `${new Date().getFullYear()}-01-01`;
 const n = (v: number | null | undefined) =>
   Number(v ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${n(v)}%`);
-type Previa = PreviaImportacao;
+type Previa = PreviaImportacao & { resolucoesComposicoes?: ResolucaoComposicao[] };
 
 function PlanejamentoPage() {
   const { role } = useAuth();
@@ -422,6 +424,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
   const [nome, setNome] = useState("Baseline contratual");
   const [versao, setVersao] = useState(1);
   const [mapas, setMapas] = useState<Record<string, string>>({});
+  const [resolucoesComposicoes, setResolucoesComposicoes] = useState<ResolucaoComposicao[]>([]);
   const [baselineIdSalvo, setBaselineIdSalvo] = useState<string | null>(null);
   const [alteracoesPendentes, setAlteracoesPendentes] = useState(false);
   const { data: categorias = [] } = useQuery({
@@ -464,8 +467,13 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
           tipoMo: tiposCategorias.get(mapas[`${i.funcaoOrcamento}|${i.tipoMo}`]) ?? i.tipoMo,
           categoriaMo: mapas[`${i.funcaoOrcamento}|${i.tipoMo}`] ?? null,
         })) ?? [],
+        resolucoesComposicoes,
       ),
-    [mapas, previa, tiposCategorias],
+    [mapas, previa, resolucoesComposicoes, tiposCategorias],
+  );
+  const composicoesPendentes = useMemo(
+    () => composicoesNaoReconciliadas(previa?.erros ?? []),
+    [previa],
   );
   const preview = useMutation({
     mutationFn: async (file: File) => {
@@ -481,6 +489,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
     onSuccess: (resultado) => {
       setPrevia(resultado);
       setMapas({});
+      setResolucoesComposicoes([]);
       setBaselineIdSalvo(null);
       setAlteracoesPendentes(true);
     },
@@ -498,6 +507,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
           abas: previa.abas,
           pendencias: previa.erros,
           avisos: previa.avisos,
+          resolucoesComposicoes,
           itens: previa.itens,
           mapeamentos: previa.itens.map((i) => ({
             funcaoOrcamento: i.funcaoOrcamento,
@@ -524,6 +534,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
       setOpen(false);
       setPrevia(null);
       setMapas({});
+      setResolucoesComposicoes([]);
       setBaselineIdSalvo(null);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["planejamento-hh"] }),
@@ -538,6 +549,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
     setVersao(salvo.versao);
     setArquivo(salvo.nomeArquivo);
     setPrevia(salvo.previa as Previa);
+    setResolucoesComposicoes(salvo.previa.resolucoesComposicoes ?? []);
     setMapas(
       Object.fromEntries(
         salvo.previa.itens
@@ -601,11 +613,70 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
         {previa && (
           <>
             <div className="text-sm">Abas: {previa.abas.join(", ")}</div>
-            {[...previa.erros, ...previa.avisos].map((a) => (
+            {[
+              ...previa.erros.filter((erro) => !composicoesNaoReconciliadas([erro]).length),
+              ...previa.avisos,
+            ].map((a) => (
               <Alert key={a}>
                 <AlertDescription>{a}</AlertDescription>
               </Alert>
             ))}
+            {composicoesPendentes.map((codigo) => {
+              const resolucao = resolucoesComposicoes.find(
+                (item) => item.codigoComposicao === codigo,
+              );
+              return (
+                <Card key={codigo} className="border-muted">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Composição {codigo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <p className="text-muted-foreground">
+                      Composição não disponível para decomposição de mão de obra própria.
+                    </p>
+                    {resolucao?.descricao && <p>{resolucao.descricao}</p>}
+                    {resolucao?.valorGlobalCacheado != null && (
+                      <p>Valor global da composição: {fmtBRL(resolucao.valorGlobalCacheado)}</p>
+                    )}
+                    {resolucao ? (
+                      <div className="space-y-1">
+                        <Badge variant="outline">✓ Fora do escopo de MO própria</Badge>
+                        <p className="text-muted-foreground">
+                          Serviço terceirizado / não considerado no HH e custo de MO.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setResolucoesComposicoes((atuais) => [
+                              ...atuais,
+                              {
+                                codigoComposicao: codigo,
+                                resolucao: "fora_escopo_mo",
+                                motivo: "servico_terceirizado",
+                                hhMoConsiderado: 0,
+                                custoMoConsiderado: 0,
+                              },
+                            ]);
+                            setAlteracoesPendentes(true);
+                          }}
+                        >
+                          Fora do escopo de MO própria
+                        </Button>
+                        <p className="text-xs text-muted-foreground">
+                          Serviço terceirizado ou composição sem mão de obra própria controlada pelo
+                          Obras Control.
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
             {conflitosTipos.map((categoria) => (
               <Alert key={categoria} variant="destructive">
                 <AlertDescription>

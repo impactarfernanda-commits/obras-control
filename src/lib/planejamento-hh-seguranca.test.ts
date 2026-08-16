@@ -211,6 +211,15 @@ test("dry-run incremental e transacional e nao executavel pelo cliente anonimo",
   assert.match(dryRunTipos, /ROLLBACK;\s*$/);
 });
 
+test("resolucao de composicao e persistida com ator server-side e reaberta", () => {
+  assert.match(server, /resolucoes_composicoes: resolucoesAuditadas/);
+  assert.match(server, /resolvidoPor: context\.userId/);
+  assert.match(server, /resolvidoEm: new Date\(\)\.toISOString\(\)/);
+  assert.match(server, /resolucoesComposicoes: controle\?\.resolucoes_composicoes \?\? \[\]/);
+  assert.doesNotMatch(server, /resolvidoPor: z\.|resolvidoEm: z\./);
+  assert.match(server, /if \(!\(await permissoes\(context\.userId\)\)\.financeiro\)/);
+});
+
 test("troca de baseline e transacional e funcao nao e publica", () => {
   assert.match(migration, /FUNCTION public\.ativar_planejamento_hh_baseline/);
   assert.match(
