@@ -115,6 +115,15 @@ test("categoria selecionada fica mapeada e divergencia operacional e apenas info
   assert.doesNotMatch(server, /m\.categoriaMo[\s\S]{0,100}categoria.*tipo.*===.*tipoMo/i);
 });
 
+test("graficos por funcao exibem todos os labels com altura dinamica e eixo legivel", () => {
+  assert.match(route, /const altura = Math\.max\(350, dados\.length \* 48\)/);
+  assert.match(route, /<CardContent style=\{\{ height: altura \}\}>/);
+  assert.match(route, /<ResponsiveContainer width="100%" height="100%">/);
+  assert.match(route, /<YAxis[\s\S]*interval=\{0\}[\s\S]*width=\{240\}/);
+  assert.doesNotMatch(route, /<CardContent className="h-80">/);
+  assert.match(route, /ordenarCategoriasPlanejamento\(consulta\.data\?\.linhas \?\? \[\]\)/);
+});
+
 test("realizado consolida pela categoria mapeada e usa o tipo oficial da categoria", () => {
   assert.match(server, /const chave = item\.categoria_mo_mapeada \?\?/);
   assert.match(server, /tipoMap\.get\(item\.categoria_mo_mapeada\) \?\? item\.tipo_mo/);

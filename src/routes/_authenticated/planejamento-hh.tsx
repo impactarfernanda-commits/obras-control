@@ -47,6 +47,7 @@ import { fmtBRL } from "@/lib/custos";
 import {
   composicoesNaoReconciliadas,
   conflitosCategoriaEntreTipos,
+  ordenarCategoriasPlanejamento,
   pendenciasAtivacaoBaseline,
   type ResolucaoComposicao,
   type TipoMO,
@@ -98,7 +99,10 @@ function PlanejamentoPage() {
     enabled: !!obraId,
     queryFn: () => getPlanejamentoHH({ data: { obraId, dataInicial, dataFinal } }),
   });
-  const linhas = useMemo(() => consulta.data?.linhas ?? [], [consulta.data?.linhas]);
+  const linhas = useMemo(
+    () => ordenarCategoriasPlanejamento(consulta.data?.linhas ?? []),
+    [consulta.data?.linhas],
+  );
   const consolidado = useMemo(
     () =>
       ["MOI", "MOD"].map((tipo) => {
@@ -352,17 +356,24 @@ function Grafico({
   titulo: string;
   dados: Array<{ nome: string; previsto: number; realizado: number }>;
 }) {
+  const altura = Math.max(350, dados.length * 48);
   return (
     <Card>
       <CardHeader>
         <CardTitle>{titulo}</CardTitle>
       </CardHeader>
-      <CardContent className="h-80">
-        <ResponsiveContainer>
-          <BarChart data={dados} layout="vertical" margin={{ left: 32 }}>
+      <CardContent style={{ height: altura }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={dados} layout="vertical" margin={{ left: 16, right: 24 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" />
-            <YAxis dataKey="nome" type="category" width={120} />
+            <YAxis
+              dataKey="nome"
+              type="category"
+              interval={0}
+              width={240}
+              tick={{ fontSize: 12 }}
+            />
             <Tooltip />
             <Legend />
             <Bar dataKey="previsto" name="Previsto" fill="#64748b" />

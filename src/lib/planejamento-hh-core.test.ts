@@ -9,6 +9,7 @@ import {
   custoRegistroNaVigencia,
   indicadores,
   normalizarFuncaoOrcamento,
+  ordenarCategoriasPlanejamento,
   pendenciasAtivacaoBaseline,
   tipoEfetivoMapeamento,
   vigenciaNaData,
@@ -169,6 +170,29 @@ test("itens da mesma categoria e tipo consolidam previsto sem duplicar realizado
   ]);
   const hhRealizadoCategoria = 320;
   assert.equal(hhRealizadoCategoria, 320);
+});
+
+test("grafico de Matinhos preserva as 11 categorias canonicas em ordem deterministica", () => {
+  const categorias = ordenarCategoriasPlanejamento([
+    { funcao: "SUPERVISOR III", tipo: "MOD" as const },
+    { funcao: "AJUDANTE", tipo: "MOD" as const },
+    { funcao: "MESTRE DE OBRA I", tipo: "MOD" as const },
+    { funcao: "ASSISTENTE ADMINISTRATIVO OBRAS", tipo: "MOI" as const },
+    { funcao: "ARMADOR", tipo: "MOD" as const },
+    { funcao: "AUXILIAR DE ENGENHARIA", tipo: "MOI" as const },
+    { funcao: "CARPINTEIRO", tipo: "MOD" as const },
+    { funcao: "LIDER DE MONTAGEM", tipo: "MOD" as const },
+    { funcao: "MONTADOR I", tipo: "MOD" as const },
+    { funcao: "PEDREIRO", tipo: "MOD" as const },
+    { funcao: "SUPERVISOR II", tipo: "MOD" as const },
+  ]);
+  assert.equal(categorias.length, 11);
+  assert.deepEqual(
+    categorias.slice(0, 2).map((item) => item.funcao),
+    ["ASSISTENTE ADMINISTRATIVO OBRAS", "AUXILIAR DE ENGENHARIA"],
+  );
+  for (const nome of ["AJUDANTE", "MESTRE DE OBRA I", "SUPERVISOR III"])
+    assert.ok(categorias.some((item) => item.funcao === nome));
 });
 
 test("mesma categoria em MOI e MOD e ambigua e deve bloquear ativacao", () => {

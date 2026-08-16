@@ -155,6 +155,15 @@ export function consolidarPrevistoPorCategoria(
   return [...consolidados.values()];
 }
 
+export function ordenarCategoriasPlanejamento<T extends { funcao: string; tipo: TipoMO }>(
+  linhas: T[],
+) {
+  const ordemTipo: Record<TipoMO, number> = { MOI: 0, MOD: 1 };
+  return [...linhas].sort(
+    (a, b) => ordemTipo[a.tipo] - ordemTipo[b.tipo] || a.funcao.localeCompare(b.funcao, "pt-BR"),
+  );
+}
+
 export function vigenciaNaData(vigencias: CustoVigencia[], funcionarioId: string, data: string) {
   return vigencias.find(
     (v) =>
