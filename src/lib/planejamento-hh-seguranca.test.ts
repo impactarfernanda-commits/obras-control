@@ -101,11 +101,20 @@ test("servidor usa vigencia por data e nao recalcula passado com configuracao at
   );
 });
 
-test("dropdown oferece todas as categorias e apenas informa divergencia operacional", () => {
+test("categoria selecionada fica mapeada e divergencia operacional e apenas informativa", () => {
   assert.doesNotMatch(route, /categorias\s*\.filter\(\(c\) => c\.tipo === i\.tipoMo\)/);
   assert.match(route, /categorias\.map\(\(c\) =>/);
+  assert.match(route, /categoriaSelecionada && \(/);
+  assert.match(route, />\s*Mapeado\s*</);
   assert.match(route, /categoriaSelecionada\.tipo !== i\.tipoMo/);
-  assert.match(route, /Classifica[^<]*categoria no Obras Control difere do or[^<]*amento/);
+  assert.match(
+    route,
+    /Classificação operacional: \{categoriaSelecionada\.tipo\} · orçamento:[\s\S]*\{i\.tipoMo\}/,
+  );
+  assert.doesNotMatch(route, /text-amber-700/);
+  assert.doesNotMatch(route, /ClassificaÃ|orÃ/);
+  assert.match(server, /\.filter\(\(m\) => m\.categoriaMo\)/);
+  assert.doesNotMatch(server, /m\.categoriaMo[\s\S]{0,100}categoria.*tipo.*===.*tipoMo/i);
 });
 
 test("realizado consolida pela categoria mapeada e preserva o tipo da baseline", () => {

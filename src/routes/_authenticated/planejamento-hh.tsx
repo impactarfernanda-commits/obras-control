@@ -567,10 +567,18 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                             ))}
                           </SelectContent>
                         </Select>
-                        {categoriaSelecionada && categoriaSelecionada.tipo !== i.tipoMo && (
-                          <p className="mt-1 max-w-56 text-xs text-amber-700">
-                            ClassificaÃ§Ã£o da categoria no Obras Control difere do orÃ§amento.
-                          </p>
+                        {categoriaSelecionada && (
+                          <div className="mt-1 flex max-w-56 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                            <Badge variant="outline" className="font-normal">
+                              Mapeado
+                            </Badge>
+                            {categoriaSelecionada.tipo !== i.tipoMo && (
+                              <span>
+                                Classificação operacional: {categoriaSelecionada.tipo} · orçamento:{" "}
+                                {i.tipoMo}
+                              </span>
+                            )}
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
