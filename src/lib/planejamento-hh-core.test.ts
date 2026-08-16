@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classificarRegistroGerencial,
+  conflitosCategoriaEntreTipos,
+  consolidarPrevistoPorCategoria,
   custoAusenciaDoDia,
   custoRegistroNaVigencia,
   indicadores,
@@ -19,6 +21,76 @@ test("HH realizado soma horas normais e extras", () => {
       horas_extras: 2,
     }).hhRealizado,
     10,
+  );
+});
+
+test("mapeamento permite divergencia entre tipo orcamentario e operacional", () => {
+  const mestre = {
+    funcaoOrcamento: "Mestre de obras I",
+    tipoMo: "MOI" as const,
+    categoriaMo: "MESTRE DE OBRAS",
+  };
+  assert.deepEqual(conflitosCategoriaEntreTipos([mestre]), []);
+  assert.equal(mestre.tipoMo, "MOI");
+  assert.deepEqual(
+    conflitosCategoriaEntreTipos([
+      { funcaoOrcamento: "Equipe de apoio", tipoMo: "MOD", categoriaMo: "SUPERVISOR III" },
+    ]),
+    [],
+  );
+  assert.deepEqual(
+    conflitosCategoriaEntreTipos([
+      { funcaoOrcamento: "Supervisor", tipoMo: "MOI", categoriaMo: "SUPERVISOR III" },
+      { funcaoOrcamento: "Montador", tipoMo: "MOD", categoriaMo: "SUPERVISOR III" },
+    ]),
+    ["SUPERVISOR III"],
+  );
+});
+
+test("itens da mesma categoria e tipo consolidam previsto sem duplicar realizado", () => {
+  const linhas = consolidarPrevistoPorCategoria([
+    {
+      funcaoOrcamento: "Ajudante civil",
+      tipoMo: "MOD",
+      categoriaMo: "AJUDANTE",
+      hhPrevisto: 6772.83,
+      custoPrevisto: 208684.34,
+    },
+    {
+      funcaoOrcamento: "Servente",
+      tipoMo: "MOD",
+      categoriaMo: "AJUDANTE",
+      hhPrevisto: 779.3,
+      custoPrevisto: 24016.12,
+    },
+    {
+      funcaoOrcamento: "Ajudante de montagem",
+      tipoMo: "MOD",
+      categoriaMo: "AJUDANTE",
+      hhPrevisto: 1540,
+      custoPrevisto: 33702.41,
+    },
+  ]);
+  assert.equal(linhas.length, 1);
+  assert.equal(linhas[0]?.categoriaMo, "AJUDANTE");
+  assert.equal(linhas[0]?.tipoMo, "MOD");
+  assert.ok(Math.abs((linhas[0]?.hhPrevisto ?? 0) - 9092.13) < 1e-9);
+  assert.deepEqual(linhas[0]?.funcoesOrcamento, [
+    "Ajudante civil",
+    "Servente",
+    "Ajudante de montagem",
+  ]);
+  const hhRealizadoCategoria = 320;
+  assert.equal(hhRealizadoCategoria, 320);
+});
+
+test("mesma categoria em MOI e MOD e ambigua e deve bloquear ativacao", () => {
+  assert.deepEqual(
+    conflitosCategoriaEntreTipos([
+      { funcaoOrcamento: "Ajudante indireto", tipoMo: "MOI", categoriaMo: "AJUDANTE" },
+      { funcaoOrcamento: "Ajudante civil", tipoMo: "MOD", categoriaMo: "AJUDANTE" },
+    ]),
+    ["AJUDANTE"],
   );
 });
 

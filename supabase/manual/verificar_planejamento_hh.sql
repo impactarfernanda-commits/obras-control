@@ -43,3 +43,13 @@ SELECT funcionario_id, count(*) AS sobreposicoes
  ) GROUP BY funcionario_id;
 SELECT status_historico, count(*) FROM public.funcionario_custos_vigencias
  GROUP BY status_historico ORDER BY status_historico;
+
+-- Deve retornar zero linhas: a mesma categoria nao pode alimentar MOI e MOD
+-- simultaneamente dentro de uma baseline ativa.
+SELECT b.id AS baseline_id, i.categoria_mo_mapeada,
+       array_agg(DISTINCT i.tipo_mo ORDER BY i.tipo_mo) AS tipos
+  FROM public.planejamento_hh_baselines b
+  JOIN public.planejamento_hh_baseline_itens i ON i.baseline_id = b.id
+ WHERE b.ativa AND i.categoria_mo_mapeada IS NOT NULL
+ GROUP BY b.id, i.categoria_mo_mapeada
+HAVING count(DISTINCT i.tipo_mo) > 1;

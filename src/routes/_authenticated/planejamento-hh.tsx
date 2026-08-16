@@ -44,6 +44,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fmtBRL } from "@/lib/custos";
+import { conflitosCategoriaEntreTipos } from "@/lib/planejamento-hh-core";
 import {
   getPlanejamentoHH,
   previewPlanejamentoHH,
@@ -294,6 +295,11 @@ function PlanejamentoPage() {
                             Não mapeado
                           </Badge>
                         )}
+                        {l.funcoesOrcamento.length > 1 && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            OrÃ§amento: {l.funcoesOrcamento.join(", ")}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>{l.tipo}</TableCell>
                       <TableCell>{n(l.hhPrevisto)}</TableCell>
@@ -418,6 +424,19 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
       return data;
     },
   });
+  const conflitosTipos = useMemo(
+    () =>
+      previa
+        ? conflitosCategoriaEntreTipos(
+            previa.itens.map((i) => ({
+              funcaoOrcamento: i.funcaoOrcamento,
+              tipoMo: i.tipoMo,
+              categoriaMo: mapas[`${i.funcaoOrcamento}|${i.tipoMo}`] ?? null,
+            })),
+          )
+        : [],
+    [mapas, previa],
+  );
   const preview = useMutation({
     mutationFn: async (file: File) => {
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -499,6 +518,14 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                 <AlertDescription>{a}</AlertDescription>
               </Alert>
             ))}
+            {conflitosTipos.map((categoria) => (
+              <Alert key={categoria} variant="destructive">
+                <AlertDescription>
+                  A categoria {categoria} estÃ¡ associada simultaneamente a itens MOI e MOD. O Obras
+                  Control nÃ£o possui informaÃ§Ã£o suficiente para dividir o HH realizado.
+                </AlertDescription>
+              </Alert>
+            ))}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -513,6 +540,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
               <TableBody>
                 {previa.itens.map((i) => {
                   const key = `${i.funcaoOrcamento}|${i.tipoMo}`;
+                  const categoriaSelecionada = categorias.find((c) => c.nome === mapas[key]);
                   return (
                     <TableRow key={key}>
                       <TableCell>{i.funcaoOrcamento}</TableCell>
@@ -529,15 +557,21 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
                             <SelectValue placeholder="Aguardando mapeamento" />
                           </SelectTrigger>
                           <SelectContent>
-                            {categorias
-                              .filter((c) => c.tipo === i.tipoMo)
-                              .map((c) => (
-                                <SelectItem key={c.nome} value={c.nome}>
-                                  {c.nome}
-                                </SelectItem>
-                              ))}
+                            {categorias.map((c) => (
+                              <SelectItem key={c.nome} value={c.nome}>
+                                <span className="flex w-full items-center justify-between gap-3">
+                                  <span>{c.nome}</span>
+                                  <span className="text-xs text-muted-foreground">{c.tipo}</span>
+                                </span>
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
+                        {categoriaSelecionada && categoriaSelecionada.tipo !== i.tipoMo && (
+                          <p className="mt-1 max-w-56 text-xs text-amber-700">
+                            ClassificaÃ§Ã£o da categoria no Obras Control difere do orÃ§amento.
+                          </p>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -545,7 +579,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
               </TableBody>
             </Table>
             <Button
-              disabled={!!previa.erros.length || salvar.isPending}
+              disabled={!!previa.erros.length || !!conflitosTipos.length || salvar.isPending}
               onClick={() => salvar.mutate()}
             >
               Salvar e ativar baseline

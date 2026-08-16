@@ -8,6 +8,20 @@ const migration = readFileSync(
 );
 const dryRun = readFileSync("supabase/manual/DRY_RUN_20260814174317_planejamento_hh.sql", "utf8");
 const server = readFileSync("src/lib/planejamento-hh.functions.ts", "utf8");
+const route = readFileSync("src/routes/_authenticated/planejamento-hh.tsx", "utf8");
+const parser = readFileSync("src/lib/planejamento-hh-parser.ts", "utf8");
+const incremental = readFileSync(
+  "supabase/migrations/20260814210000_valida_mapeamento_tipos_planejamento_hh.sql",
+  "utf8",
+);
+const dryRunTipos = readFileSync(
+  "supabase/manual/DRY_RUN_20260814210000_valida_mapeamento_tipos_planejamento_hh.sql",
+  "utf8",
+);
+const verificacaoPlanejamento = readFileSync(
+  "supabase/manual/verificar_planejamento_hh.sql",
+  "utf8",
+);
 
 test("baseline possui numericos, checks, versao e uma unica ativa por obra", () => {
   assert.match(migration, /numeric\(16,4\).*CHECK \(hh_previsto >= 0\)/s);
@@ -85,6 +99,63 @@ test("servidor usa vigencia por data e nao recalcula passado com configuracao at
     server,
     /Parte do custo historico utiliza a base financeira disponivel na implantacao/,
   );
+});
+
+test("dropdown oferece todas as categorias e apenas informa divergencia operacional", () => {
+  assert.doesNotMatch(route, /categorias\s*\.filter\(\(c\) => c\.tipo === i\.tipoMo\)/);
+  assert.match(route, /categorias\.map\(\(c\) =>/);
+  assert.match(route, /categoriaSelecionada\.tipo !== i\.tipoMo/);
+  assert.match(route, /Classifica[^<]*categoria no Obras Control difere do or[^<]*amento/);
+});
+
+test("realizado consolida pela categoria mapeada e preserva o tipo da baseline", () => {
+  assert.match(server, /const chave = item\.categoria_mo_mapeada \?\?/);
+  assert.match(server, /tipo: item\.tipo_mo/);
+  assert.match(server, /const l = linhas\.get\(categoria\) \?\?/);
+  assert.match(server, /l\.hhRealizado \+= classif\.hhRealizado/);
+  assert.match(server, /funcoesOrcamento/);
+});
+
+test("MOI para categoria operacional MOD e validado sem mudar o tipo previsto", () => {
+  assert.match(server, /conflitosCategoriaEntreTipos\(data\.mapeamentos\)/);
+  assert.doesNotMatch(server, /categoria.*tipo.*===.*tipoMo/i);
+  assert.match(route, /MESTRE DE OBRAS|categorias\.map/);
+});
+
+test("ativacao bloqueia somente categoria compartilhada entre MOI e MOD", () => {
+  assert.match(incremental, /GROUP BY categoria_mo_mapeada/);
+  assert.match(incremental, /HAVING count\(DISTINCT tipo_mo\) > 1/);
+  assert.match(incremental, /associada simultaneamente a itens MOI e MOD/);
+  assert.doesNotMatch(incremental, /HAVING count\(\*\) > 1/);
+  assert.match(incremental, /REVOKE ALL.*FROM PUBLIC, anon/s);
+});
+
+test("bloqueio de composicao ABA permanece independente do mapeamento", () => {
+  assert.match(
+    parser,
+    /Existem composicoes utilizadas no orcamento que nao puderam ser reconciliadas/,
+  );
+  assert.match(route, /disabled=\{!!previa\.erros\.length/);
+});
+
+test("dry-run incremental e transacional e nao executavel pelo cliente anonimo", () => {
+  assert.match(dryRunTipos, /^BEGIN;/m);
+  assert.match(dryRunTipos, /HAVING count\(DISTINCT tipo_mo\) > 1/);
+  assert.match(dryRunTipos, /has_function_privilege\('anon'/);
+  assert.match(dryRunTipos, /aclexplode\(coalesce\(p\.proacl, acldefault\('f', p\.proowner\)\)\)/);
+  assert.match(dryRunTipos, /acl\.grantee = 0 AND acl\.privilege_type = 'EXECUTE'/);
+  assert.match(dryRunTipos, /NOT has_function_privilege\('authenticated', v_oid, 'EXECUTE'\)/);
+  assert.doesNotMatch(dryRunTipos, /has_function_privilege\(['"]public['"]/i);
+  assert.doesNotMatch(verificacaoPlanejamento, /has_function_privilege\(['"]public['"]/i);
+  assert.match(dryRunTipos, /FROM public\.categorias WHERE tipo = 'MOI'/);
+  assert.match(dryRunTipos, /FROM public\.categorias WHERE tipo = 'MOD'/);
+  assert.match(dryRunTipos, /v_categoria_mod, 'MOI'/);
+  assert.match(dryRunTipos, /v_categoria_moi, 'MOD'/);
+  assert.doesNotMatch(dryRunTipos, /Categoria MESTRE DE OBRAS ausente/);
+  assert.match(dryRunTipos, /v_previsto <> 150 OR v_realizado <> 20/);
+  assert.match(dryRunTipos, /Ativacao MOI\+MOD nao foi bloqueada/);
+  assert.match(dryRunTipos, /bloqueio de composicoes nao reconciliadas \(como ABA\) permanece/);
+  assert.match(dryRunTipos, /ROLLBACK;\s*$/);
 });
 
 test("troca de baseline e transacional e funcao nao e publica", () => {

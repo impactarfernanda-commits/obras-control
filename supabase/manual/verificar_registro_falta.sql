@@ -91,15 +91,17 @@ SELECT
   pg_get_function_identity_arguments(p.oid) AS argumentos,
   has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_executa,
   has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_executa,
-  has_function_privilege('public', p.oid, 'EXECUTE') AS public_executa
+  coalesce(bool_or(acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'), false) AS public_executa
 FROM pg_proc AS p
 JOIN pg_namespace AS n ON n.oid = p.pronamespace
+LEFT JOIN LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl ON true
 WHERE n.nspname = 'public'
   AND p.proname IN (
     'obras_salvar_registro_horas',
     'obras_normalizar_validar_registro_horas',
     'obras_validar_conflito_apontamento_diario'
   )
+GROUP BY p.oid, p.proname
 ORDER BY p.proname, pg_get_function_identity_arguments(p.oid);
 
 -- 6. Indices

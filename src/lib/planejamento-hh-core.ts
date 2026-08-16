@@ -35,6 +35,63 @@ export type CustoVigencia = {
   statusHistorico: "estimado_inicial" | "apurado_por_vigencia";
 };
 
+export type MapeamentoBaseline = {
+  funcaoOrcamento: string;
+  tipoMo: TipoMO;
+  categoriaMo: string | null;
+};
+
+export function conflitosCategoriaEntreTipos(mapeamentos: MapeamentoBaseline[]) {
+  const tiposPorCategoria = new Map<string, Set<TipoMO>>();
+  for (const item of mapeamentos) {
+    if (!item.categoriaMo) continue;
+    const tipos = tiposPorCategoria.get(item.categoriaMo) ?? new Set<TipoMO>();
+    tipos.add(item.tipoMo);
+    tiposPorCategoria.set(item.categoriaMo, tipos);
+  }
+  return [...tiposPorCategoria]
+    .filter(([, tipos]) => tipos.size > 1)
+    .map(([categoria]) => categoria)
+    .sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+export function consolidarPrevistoPorCategoria(
+  itens: Array<{
+    funcaoOrcamento: string;
+    tipoMo: TipoMO;
+    categoriaMo: string | null;
+    hhPrevisto: number;
+    custoPrevisto: number;
+  }>,
+) {
+  const consolidados = new Map<
+    string,
+    {
+      categoriaMo: string;
+      tipoMo: TipoMO;
+      hhPrevisto: number;
+      custoPrevisto: number;
+      funcoesOrcamento: string[];
+    }
+  >();
+  for (const item of itens) {
+    if (!item.categoriaMo) continue;
+    const chave = `${item.categoriaMo}|${item.tipoMo}`;
+    const atual = consolidados.get(chave) ?? {
+      categoriaMo: item.categoriaMo,
+      tipoMo: item.tipoMo,
+      hhPrevisto: 0,
+      custoPrevisto: 0,
+      funcoesOrcamento: [],
+    };
+    atual.hhPrevisto += item.hhPrevisto;
+    atual.custoPrevisto += item.custoPrevisto;
+    atual.funcoesOrcamento.push(item.funcaoOrcamento);
+    consolidados.set(chave, atual);
+  }
+  return [...consolidados.values()];
+}
+
 export function vigenciaNaData(vigencias: CustoVigencia[], funcionarioId: string, data: string) {
   return vigencias.find(
     (v) =>

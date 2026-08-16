@@ -5,6 +5,7 @@ import { buscarTodasPaginas } from "@/lib/paginacao";
 import { diasUteisNoIntervalo } from "@/lib/custos-core";
 import {
   classificarRegistroGerencial,
+  conflitosCategoriaEntreTipos,
   custoRegistroNaVigencia,
   indicadores,
   normalizarFuncaoOrcamento,
@@ -185,6 +186,7 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       custos: Record<string, number>;
       ausencias: Record<string, number>;
       semMapeamento: boolean;
+      funcoesOrcamento: string[];
     };
     const linhas = new Map<string, Acum>();
     for (const item of itens) {
@@ -200,9 +202,12 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
         custos: {},
         ausencias: {},
         semMapeamento: !item.categoria_mo_mapeada,
+        funcoesOrcamento: [],
       };
       l.hhPrevisto += Number(item.hh_previsto);
       l.custoPrevisto += Number(item.custo_previsto);
+      if (!l.funcoesOrcamento.includes(item.funcao_orcamento))
+        l.funcoesOrcamento.push(item.funcao_orcamento);
       linhas.set(chave, l);
     }
     for (const registro of registros) {
@@ -222,6 +227,7 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
         custos: {},
         ausencias: {},
         semMapeamento: true,
+        funcoesOrcamento: [],
       };
       const classif = classificarRegistroGerencial(registro);
       l.hhRealizado += classif.hhRealizado;
@@ -248,6 +254,7 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       horasAusencia: l.horasAusencia,
       ...indicadores(l.hhPrevisto, l.hhRealizado),
       semMapeamento: l.semMapeamento,
+      funcoesOrcamento: l.funcoesOrcamento,
       ausencias: l.ausencias,
       ...(acesso.financeiro
         ? {
@@ -344,6 +351,11 @@ export const salvarPlanejamentoHH = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     if (!(await permissoes(context.userId)).financeiro) throw new Error("Forbidden");
+    const conflitos = conflitosCategoriaEntreTipos(data.mapeamentos);
+    if (conflitos.length)
+      throw new Error(
+        `A categoria ${conflitos.join(", ")} esta associada simultaneamente a itens MOI e MOD. O Obras Control nao possui informacao suficiente para dividir o HH realizado.`,
+      );
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const confirmados = data.mapeamentos
       .filter((m) => m.categoriaMo)
