@@ -103,7 +103,7 @@ import {
   justificativaExtrasObrigatoria,
   totalHorasTrabalhadas,
 } from "@/lib/jornada-horas";
-import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
+import { formatDecimalHours, formatExtraHours, roundHours } from "@/lib/formatacao-horas";
 import {
   AVISO_FALTA_INTEGRAL,
   buscarConflitoRegistroDiario,
@@ -679,6 +679,12 @@ function AlocacoesPage() {
           he: 0,
         });
       g.funcs.get(r.funcionario_id)!.dias.add(r.data);
+    }
+    for (const grupo of out.values()) {
+      for (const funcionario of grupo.funcs.values()) {
+        funcionario.hn = roundHours(funcionario.hn);
+        funcionario.he = roundHours(funcionario.he);
+      }
     }
     return Array.from(out.entries())
       .map(([id, v]) => ({ id, ...v }))
@@ -2006,7 +2012,7 @@ function AlocacoesPage() {
                                   <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
                                     Horas normais
                                   </div>
-                                  <Badge variant="secondary">{f.hn}h</Badge>
+                                  <Badge variant="secondary">{formatDecimalHours(f.hn)}h</Badge>
                                 </div>
                                 <div>
                                   <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
@@ -2170,7 +2176,7 @@ function AlocacoesPage() {
                                                             variant="secondary"
                                                             className="text-[10px]"
                                                           >
-                                                            {h.hn}h
+                                                            {formatDecimalHours(h.hn)}h
                                                           </Badge>
                                                           {h.he > 0 && (
                                                             <Badge className="bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400">
