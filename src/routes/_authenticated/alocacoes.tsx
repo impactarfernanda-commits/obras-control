@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -57,6 +58,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
@@ -74,6 +93,7 @@ import {
   type MensagemAlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
 import {
+  buscarCompetenciasFechadasPorDatas,
   calcularCompetencia,
   formatarPeriodoCompetencia,
   garantirCompetenciaAberta,
@@ -106,10 +126,19 @@ import {
 } from "@/lib/alocacoes-runtime";
 import { useCategorias } from "@/lib/categorias";
 import {
+  categoriaEhAjudante,
+  competenciaUsaSegmentacaoMod,
+  type EspecialidadeAjudante,
+} from "@/lib/especialidade-ajudante";
+import {
   compararCategoriasPorTipoENome,
   ordenarFuncionariosPorTipoENome,
   semanaInicialDaCompetencia,
 } from "@/lib/alocacoes-visualizacao";
+import {
+  filtrarAlocacoesSelecionadas,
+  filtrarPendenciasClassificacaoAjudante,
+} from "@/lib/pendencias-classificacao-ajudante";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -143,6 +172,7 @@ const schema = z
     hora_saida: z.string(),
     observacoes: z.string().optional(),
     justificativa_extras: z.string().optional(),
+    especialidade_ajudante: z.enum(["civil", "montagem"]).nullable(),
   })
   .superRefine((v, ctx) => {
     if (registroEhAusenciaPlanejada(v)) {
@@ -236,6 +266,7 @@ type AlocRow = {
   hora_entrada: string | null;
   hora_saida: string | null;
   intervalo_padrao_minutos: number;
+  especialidade_ajudante?: EspecialidadeAjudante | null;
   obras: { id: string; nome: string } | null;
 };
 type CalendarRow = AlocRow & { registroOnly?: boolean };
@@ -274,7 +305,12 @@ function AlocacoesPage() {
   const [editTipoRegistro, setEditTipoRegistro] = useState<TipoRegistro>("horas");
   const [editFaltaTipo, setEditFaltaTipo] = useState<FaltaTipo | null>(null);
   const [editObservacoes, setEditObservacoes] = useState("");
+  const [editEspecialidadeAjudante, setEditEspecialidadeAjudante] =
+    useState<EspecialidadeAjudante | null>(null);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
+  const [pendenciasSelecionadas, setPendenciasSelecionadas] = useState<Set<string>>(new Set());
+  const [confirmarClassificacao, setConfirmarClassificacao] =
+    useState<EspecialidadeAjudante | null>(null);
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -355,7 +391,7 @@ function AlocacoesPage() {
           let q = supabase
             .from("alocacoes")
             .select(
-              "id, data, funcionario_id, obra_id, created_by, created_at, hora_entrada, hora_saida, intervalo_padrao_minutos, obras(id,nome)",
+              "id, data, funcionario_id, obra_id, created_by, created_at, hora_entrada, hora_saida, intervalo_padrao_minutos, especialidade_ajudante, obras(id,nome)",
             )
             .gte("data", startISO)
             .lte("data", endISO)
@@ -374,6 +410,13 @@ function AlocacoesPage() {
     },
   });
   const alocacoes = alocacoesQuery.data;
+  const fechamentoSelecionadoQuery = useQuery({
+    queryKey: ["competencia-fechada-alocacoes", competenciaPeriodo.competencia],
+    queryFn: () => buscarCompetenciasFechadasPorDatas(supabase, [startISO]),
+  });
+  const competenciaSelecionadaFechada = (fechamentoSelecionadoQuery.data?.length ?? 0) > 0;
+  const classificacaoBloqueada =
+    competenciaSelecionadaFechada || fechamentoSelecionadoQuery.isError;
 
   const registrosQuery = useQuery({
     queryKey: ["registros-mes", mesKey, obraFiltro],
@@ -533,6 +576,44 @@ function AlocacoesPage() {
     return m;
   }, [registros]);
 
+  const categoriasHistoricas = useMemo(
+    () => new Map(Array.from(infoHistoricoById, ([id, info]) => [id, info.categoria] as const)),
+    [infoHistoricoById],
+  );
+  const pendenciasClassificacao = useMemo(
+    () => filtrarPendenciasClassificacaoAjudante(alocacoes ?? [], categoriasHistoricas),
+    [alocacoes, categoriasHistoricas],
+  );
+  const podeClassificarAlocacao = useCallback(
+    (alocacao: AlocRow) => {
+      const registro = horasMap.get(
+        `${alocacao.funcionario_id}|${alocacao.obra_id}|${alocacao.data}`,
+      );
+      return (
+        !classificacaoBloqueada &&
+        (canEditAllocationHoursByRole ||
+          (alocacao.created_by === user?.id && (!registro || registro.createdBy === user?.id)))
+      );
+    },
+    [canEditAllocationHoursByRole, classificacaoBloqueada, horasMap, user?.id],
+  );
+  const pendenciasSelecionaveis = useMemo(
+    () => pendenciasClassificacao.filter(podeClassificarAlocacao),
+    [pendenciasClassificacao, podeClassificarAlocacao],
+  );
+  const pendenciasSelecionadasValidas = useMemo(
+    () => filtrarAlocacoesSelecionadas(pendenciasSelecionaveis, pendenciasSelecionadas),
+    [pendenciasSelecionadas, pendenciasSelecionaveis],
+  );
+
+  useEffect(() => {
+    const idsDisponiveis = new Set(pendenciasSelecionaveis.map(({ id }) => id));
+    setPendenciasSelecionadas((atuais) => {
+      const validas = new Set(Array.from(atuais).filter((id) => idsDisponiveis.has(id)));
+      return validas.size === atuais.size ? atuais : validas;
+    });
+  }, [pendenciasSelecionaveis]);
+
   // Cada funcionario aparece uma vez por obra, ainda que tenha alocacoes em varias datas.
   const porObra = useMemo(() => {
     const out = new Map<
@@ -628,12 +709,26 @@ function AlocacoesPage() {
     hora_saida: "17:00",
     observacoes: "",
     justificativa_extras: "",
+    especialidade_ajudante: null,
   };
   const form = useForm<FormVals>({
     resolver: zodResolver(schema),
     defaultValues: defaultFormValues,
   });
   const watchData = form.watch("data");
+  const watchFuncionarioId = form.watch("funcionario_id");
+  const funcionarioSelecionado = funcionariosSelecionaveis.find(
+    (funcionario) => funcionario.id === watchFuncionarioId,
+  );
+  const funcionarioSelecionadoEhAjudante = categoriaEhAjudante(
+    funcionarioSelecionado?.categoria_mo,
+  );
+  const funcionarioSelecionadoExigeEspecialidade =
+    funcionarioSelecionadoEhAjudante &&
+    competenciaUsaSegmentacaoMod(calcularCompetencia(watchData || today).competencia);
+  useEffect(() => {
+    if (!funcionarioSelecionadoExigeEspecialidade) form.setValue("especialidade_ajudante", null);
+  }, [form, funcionarioSelecionadoExigeEspecialidade]);
   const watchTipoRegistro = form.watch("tipo_registro");
   const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: watchTipoRegistro });
   const watchEntrada = form.watch("hora_entrada");
@@ -654,6 +749,13 @@ function AlocacoesPage() {
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
       setAlocacaoFeedback(null);
+      const funcionario = funcionariosSelecionaveis.find((item) => item.id === v.funcionario_id);
+      if (
+        categoriaEhAjudante(funcionario?.categoria_mo) &&
+        competenciaUsaSegmentacaoMod(calcularCompetencia(v.data).competencia) &&
+        !v.especialidade_ajudante
+      )
+        throw new Error("Informe se o ajudante atuarÃ¡ em Civil ou Montagem.");
       if (registroEhAusenciaPlanejada(v)) {
         const { error } = await supabase.rpc("obras_salvar_ausencia_planejada_periodo", {
           p_funcionario_id: v.funcionario_id,
@@ -704,6 +806,11 @@ function AlocacoesPage() {
             hora_entrada: falta ? null : v.hora_entrada,
             hora_saida: falta ? null : v.hora_saida,
             intervalo_padrao_minutos: 60,
+            especialidade_ajudante:
+              categoriaEhAjudante(funcionario?.categoria_mo) &&
+              competenciaUsaSegmentacaoMod(calcularCompetencia(v.data).competencia)
+                ? v.especialidade_ajudante
+                : null,
           },
         ],
         { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
@@ -759,6 +866,51 @@ function AlocacoesPage() {
     },
   });
 
+  const classificarPendenciasMutation = useMutation({
+    mutationFn: async ({
+      ids,
+      especialidade,
+    }: {
+      ids: string[];
+      especialidade: EspecialidadeAjudante;
+    }) => {
+      const selecionadas = pendenciasClassificacao.filter((alocacao) => ids.includes(alocacao.id));
+      if (
+        selecionadas.length !== ids.length ||
+        selecionadas.some((a) => !podeClassificarAlocacao(a))
+      )
+        throw new Error("Uma ou mais alocaÃ§Ãµes selecionadas nÃ£o podem mais ser classificadas.");
+
+      for (const data of new Set(selecionadas.map(({ data }) => data)))
+        await garantirCompetenciaAberta(supabase, data);
+
+      const { data, error } = await supabase
+        .from("alocacoes")
+        .update({ especialidade_ajudante: especialidade })
+        .in("id", ids)
+        .is("especialidade_ajudante", null)
+        .select("id");
+      if (error) throw new Error(mensagemErroCompetenciaFechada(error) ?? error.message);
+      if ((data?.length ?? 0) !== ids.length)
+        throw new Error(
+          "Algumas alocaÃ§Ãµes nÃ£o foram atualizadas. Recarregue e tente novamente.",
+        );
+      return { quantidade: ids.length, especialidade };
+    },
+    onSuccess: ({ quantidade, especialidade }) => {
+      toast.success(
+        `${quantidade} ${quantidade === 1 ? "alocaÃ§Ã£o classificada" : "alocaÃ§Ãµes classificadas"} como ${especialidade === "civil" ? "Civil" : "Montagem"}.`,
+      );
+      setPendenciasSelecionadas(new Set());
+      setConfirmarClassificacao(null);
+      qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
+    },
+    onError: (e: ErrorLike) => {
+      setConfirmarClassificacao(null);
+      toast.error(e.message ?? "Erro ao classificar alocaÃ§Ãµes");
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (a: {
       id: string;
@@ -809,7 +961,11 @@ function AlocacoesPage() {
   const editPodeSalvar =
     editHorariosValidos &&
     editJustificativaValida &&
-    (editTipoRegistro !== "falta" || editFaltaTipo !== null);
+    (editTipoRegistro !== "falta" || editFaltaTipo !== null) &&
+    (!alocacaoEmEdicao ||
+      !competenciaUsaSegmentacaoMod(calcularCompetencia(alocacaoEmEdicao.data).competencia) ||
+      !categoriaEhAjudante(infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.categoria) ||
+      editEspecialidadeAjudante !== null);
 
   function abrirEdicao(a: AlocRow) {
     const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
@@ -828,6 +984,7 @@ function AlocacoesPage() {
             `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
     );
     setEditJustificativa(registro?.justificativaExtras ?? "");
+    setEditEspecialidadeAjudante(a.especialidade_ajudante ?? null);
     setAlocacaoEmEdicao(a);
   }
 
@@ -862,6 +1019,15 @@ function AlocacoesPage() {
           hora_entrada: editTipoRegistro !== "horas" ? null : editEntrada,
           hora_saida: editTipoRegistro !== "horas" ? null : editSaida,
           intervalo_padrao_minutos: 60,
+          ...(competenciaUsaSegmentacaoMod(calcularCompetencia(a.data).competencia)
+            ? {
+                especialidade_ajudante: categoriaEhAjudante(
+                  infoHistoricoById.get(a.funcionario_id)?.categoria,
+                )
+                  ? editEspecialidadeAjudante
+                  : null,
+              }
+            : {}),
         })
         .eq("id", a.id);
       if (alocErr) throw new Error(mensagemErroCompetenciaFechada(alocErr) ?? alocErr.message);
@@ -1031,6 +1197,34 @@ function AlocacoesPage() {
                         </FormItem>
                       )}
                     />
+                    {funcionarioSelecionadoExigeEspecialidade && (
+                      <FormField
+                        control={form.control}
+                        name="especialidade_ajudante"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>AtuaÃ§Ã£o do ajudante *</FormLabel>
+                            <Select
+                              value={field.value ?? ""}
+                              onValueChange={(value: EspecialidadeAjudante) =>
+                                field.onChange(value)
+                              }
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="civil">Civil</SelectItem>
+                                <SelectItem value="montagem">Montagem</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                     <FormField
                       control={form.control}
                       name="obra_id"
@@ -1304,6 +1498,35 @@ function AlocacoesPage() {
                   </dd>
                 </div>
               </dl>
+              {competenciaUsaSegmentacaoMod(
+                calcularCompetencia(alocacaoEmEdicao.data).competencia,
+              ) &&
+                categoriaEhAjudante(
+                  infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.categoria,
+                ) && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">AtuaÃ§Ã£o do ajudante *</label>
+                    <Select
+                      value={editEspecialidadeAjudante ?? ""}
+                      onValueChange={(value: EspecialidadeAjudante) =>
+                        setEditEspecialidadeAjudante(value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="civil">Civil</SelectItem>
+                        <SelectItem value="montagem">Montagem</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!editEspecialidadeAjudante && (
+                      <p className="text-sm text-destructive">
+                        Informe se o ajudante atuarÃ¡ em Civil ou Montagem.
+                      </p>
+                    )}
+                  </div>
+                )}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Tipo de registro</label>
                 <Select
@@ -1543,6 +1766,207 @@ function AlocacoesPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {!alocacoesQuery.isLoading && !alocacoesQuery.isError && (
+        <Card className="mb-4">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">Pendentes de classificaÃ§Ã£o</h2>
+                <p className="text-sm text-muted-foreground">
+                  {pendenciasClassificacao.length}{" "}
+                  {pendenciasClassificacao.length === 1
+                    ? "alocaÃ§Ã£o de ajudante pendente"
+                    : "alocaÃ§Ãµes de ajudantes pendentes"}
+                </p>
+              </div>
+              {competenciaSelecionadaFechada && pendenciasClassificacao.length > 0 && (
+                <Badge variant="outline">CompetÃªncia fechada â€” somente leitura</Badge>
+              )}
+              {fechamentoSelecionadoQuery.isError && pendenciasClassificacao.length > 0 && (
+                <Badge variant="outline">Fechamento indisponÃ­vel â€” somente leitura</Badge>
+              )}
+            </div>
+
+            {pendenciasClassificacao.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma alocaÃ§Ã£o exige classificaÃ§Ã£o nesta competÃªncia.
+              </p>
+            ) : (
+              <>
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            aria-label="Selecionar todas as pendÃªncias editÃ¡veis"
+                            checked={
+                              pendenciasSelecionaveis.length > 0 &&
+                              pendenciasSelecionadasValidas.length ===
+                                pendenciasSelecionaveis.length
+                            }
+                            disabled={pendenciasSelecionaveis.length === 0}
+                            onCheckedChange={(checked) =>
+                              setPendenciasSelecionadas(
+                                checked
+                                  ? new Set(pendenciasSelecionaveis.map(({ id }) => id))
+                                  : new Set(),
+                              )
+                            }
+                          />
+                        </TableHead>
+                        <TableHead>Data</TableHead>
+                        <TableHead>FuncionÃ¡rio</TableHead>
+                        <TableHead>Centro de custo</TableHead>
+                        <TableHead>Categoria</TableHead>
+                        <TableHead>Especialidade atual</TableHead>
+                        <TableHead className="text-right">AtuaÃ§Ã£o do ajudante</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendenciasClassificacao.map((alocacao) => {
+                        const editavel = podeClassificarAlocacao(alocacao);
+                        return (
+                          <TableRow key={alocacao.id}>
+                            <TableCell>
+                              <Checkbox
+                                aria-label={`Selecionar alocaÃ§Ã£o de ${alocacao.data}`}
+                                checked={pendenciasSelecionadas.has(alocacao.id)}
+                                disabled={!editavel || classificarPendenciasMutation.isPending}
+                                onCheckedChange={(checked) =>
+                                  setPendenciasSelecionadas((atuais) => {
+                                    const proximas = new Set(atuais);
+                                    if (checked) proximas.add(alocacao.id);
+                                    else proximas.delete(alocacao.id);
+                                    return proximas;
+                                  })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {new Date(`${alocacao.data}T00:00:00`).toLocaleDateString("pt-BR")}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {infoHistoricoById.get(alocacao.funcionario_id)?.nome ?? "â€”"}
+                            </TableCell>
+                            <TableCell>{alocacao.obras?.nome ?? "â€”"}</TableCell>
+                            <TableCell>
+                              {infoHistoricoById.get(alocacao.funcionario_id)?.categoria ??
+                                "AJUDANTE"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">A classificar</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!editavel || classificarPendenciasMutation.isPending}
+                                  onClick={() =>
+                                    classificarPendenciasMutation.mutate({
+                                      ids: [alocacao.id],
+                                      especialidade: "civil",
+                                    })
+                                  }
+                                >
+                                  Civil
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!editavel || classificarPendenciasMutation.isPending}
+                                  onClick={() =>
+                                    classificarPendenciasMutation.mutate({
+                                      ids: [alocacao.id],
+                                      especialidade: "montagem",
+                                    })
+                                  }
+                                >
+                                  Montagem
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-sm font-medium">
+                    Selecionados: {pendenciasSelecionadasValidas.length}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={
+                        pendenciasSelecionadasValidas.length === 0 ||
+                        classificarPendenciasMutation.isPending
+                      }
+                      onClick={() => setConfirmarClassificacao("civil")}
+                    >
+                      Classificar como Civil
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={
+                        pendenciasSelecionadasValidas.length === 0 ||
+                        classificarPendenciasMutation.isPending
+                      }
+                      onClick={() => setConfirmarClassificacao("montagem")}
+                    >
+                      Classificar como Montagem
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <AlertDialog
+        open={confirmarClassificacao !== null}
+        onOpenChange={(aberto) => {
+          if (!aberto && !classificarPendenciasMutation.isPending) setConfirmarClassificacao(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar classificaÃ§Ã£o</AlertDialogTitle>
+            <AlertDialogDescription>
+              Classificar {pendenciasSelecionadasValidas.length}{" "}
+              {pendenciasSelecionadasValidas.length === 1 ? "alocaÃ§Ã£o" : "alocaÃ§Ãµes"} de
+              ajudantes como {confirmarClassificacao === "civil" ? "Civil" : "Montagem"}?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={classificarPendenciasMutation.isPending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                !confirmarClassificacao ||
+                pendenciasSelecionadasValidas.length === 0 ||
+                classificarPendenciasMutation.isPending
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                if (!confirmarClassificacao) return;
+                classificarPendenciasMutation.mutate({
+                  ids: pendenciasSelecionadasValidas.map(({ id }) => id),
+                  especialidade: confirmarClassificacao,
+                });
+              }}
+            >
+              {classificarPendenciasMutation.isPending ? "Classificando..." : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {alocacoesQuery.isLoading ? (
         <div className="space-y-2">

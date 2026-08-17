@@ -19,6 +19,7 @@ export type Database = {
           id: string;
           intervalo_padrao_minutos: number;
           obra_id: string;
+          especialidade_ajudante: "civil" | "montagem" | null;
         };
         Insert: {
           created_at?: string;
@@ -30,6 +31,7 @@ export type Database = {
           id?: string;
           intervalo_padrao_minutos?: number;
           obra_id: string;
+          especialidade_ajudante?: "civil" | "montagem" | null;
         };
         Update: {
           created_at?: string;
@@ -41,6 +43,7 @@ export type Database = {
           id?: string;
           intervalo_padrao_minutos?: number;
           obra_id?: string;
+          especialidade_ajudante?: "civil" | "montagem" | null;
         };
         Relationships: [
           {
