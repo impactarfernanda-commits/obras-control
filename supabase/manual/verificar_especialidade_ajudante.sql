@@ -6,10 +6,13 @@ ORDER BY c.tipo, c.nome;
 -- Confirma os nomes reais de operador existentes sem criar aliases/categorias.
 SELECT c.nome, c.tipo,
   CASE
-    WHEN upper(btrim(c.nome)) IN ('OPERADOR DE RETRO', 'OPERADOR DE RETROESCAVADEIRA')
+    WHEN upper(btrim(c.nome)) IN (
+      'OPERADOR DE RETRO',
+      'OPERADOR DE RETROESCAVADEIRA',
+      'OPERADOR ESCAVADEIRA',
+      'OPERADOR DE ESCAVADEIRA'
+    )
       THEN 'MOD Civil'
-    WHEN upper(btrim(c.nome)) IN ('OPERADOR ESCAVADEIRA', 'OPERADOR DE ESCAVADEIRA')
-      THEN 'MOD a classificar'
     ELSE 'revisar variante real antes de mapear'
   END AS classificacao_relatorio
 FROM public.categorias c

@@ -161,7 +161,7 @@ test("segmenta o cenário controlado sem alterar o total financeiro", () => {
   );
 });
 
-test("relatorio integra MONTADOR, MESTRE DE OBRAS e OPERADOR DE RETROESCAVADEIRA", () => {
+test("relatorio integra categorias genericas e todas as variantes conhecidas de escavadeira", () => {
   const lista = [
     { id: "montador-generico", nome: "Montador", categoria_mo: "MONTADOR" },
     { id: "mestre-generico", nome: "Mestre", categoria_mo: "MESTRE DE OBRAS" },
@@ -169,6 +169,12 @@ test("relatorio integra MONTADOR, MESTRE DE OBRAS e OPERADOR DE RETROESCAVADEIRA
       id: "retroescavadeira",
       nome: "Operador",
       categoria_mo: "OPERADOR DE RETROESCAVADEIRA",
+    },
+    { id: "escavadeira", nome: "Operador", categoria_mo: "OPERADOR ESCAVADEIRA" },
+    {
+      id: "de-escavadeira",
+      nome: "Operador",
+      categoria_mo: "OPERADOR DE ESCAVADEIRA",
     },
   ];
   const data = "2026-08-04";
@@ -185,12 +191,66 @@ test("relatorio integra MONTADOR, MESTRE DE OBRAS e OPERADOR DE RETROESCAVADEIRA
   assert.equal(
     centro.modCivil,
     centro.linhas
-      .filter((linha) => ["mestre-generico", "retroescavadeira"].includes(linha.funcionarioId))
+      .filter((linha) =>
+        ["mestre-generico", "retroescavadeira", "escavadeira", "de-escavadeira"].includes(
+          linha.funcionarioId,
+        ),
+      )
       .reduce((total, linha) => total + linha.total, 0),
   );
+  assert.equal(centro.modAClassificar, 0);
   assert.equal(
     centro.total,
     centro.modCivil + centro.modMontagem + centro.modAClassificar + centro.moi,
+  );
+});
+
+test("operadores de escavadeira migram de a classificar para Civil sem alterar o total", () => {
+  for (const categoria_mo of ["OPERADOR ESCAVADEIRA", "OPERADOR DE ESCAVADEIRA"]) {
+    const lista = [{ id: "operador", nome: "Operador", categoria_mo }];
+    const centro = consolidar(
+      [alocacao("operador", "o1", "2026-08-04", "civil")],
+      [registro("operador", "o1", "2026-08-04")],
+      lista,
+    ).centros[0];
+    assert.equal(centro.modCivil, centro.total, categoria_mo);
+    assert.equal(centro.modAClassificar, 0, categoria_mo);
+    assert.equal(
+      centro.total,
+      centro.modCivil + centro.modMontagem + centro.modAClassificar + centro.moi,
+    );
+  }
+});
+
+test("avisos distinguem AJUDANTE pendente de categoria MOD desconhecida", () => {
+  const data = "2026-08-04";
+  const ajudante = [{ id: "aj", nome: "Ajudante", categoria_mo: "AJUDANTE" }];
+  const resultadoAjudante = consolidar(
+    [{ ...alocacao("aj", "o1", data, "civil"), especialidade_ajudante: null }],
+    [registro("aj", "o1", data)],
+    ajudante,
+  );
+  assert.ok(
+    resultadoAjudante.avisos.includes(
+      "Há alocações de ajudantes sem classificação entre Civil e Montagem.",
+    ),
+  );
+  assert.ok(
+    !resultadoAjudante.avisos.includes(
+      "Há categorias de mão de obra direta ainda sem classificação entre Civil e Montagem.",
+    ),
+  );
+
+  const desconhecido = [{ id: "novo", nome: "Nova função", categoria_mo: "MOD FUTURA" }];
+  const resultadoDesconhecido = consolidar(
+    [alocacao("novo", "o1", data, "civil")],
+    [registro("novo", "o1", data)],
+    desconhecido,
+  );
+  assert.ok(
+    resultadoDesconhecido.avisos.includes(
+      "Há categorias de mão de obra direta ainda sem classificação entre Civil e Montagem.",
+    ),
   );
 });
 

@@ -19,25 +19,30 @@ export function categoriaEhAjudante(categoria: string | null | undefined) {
   return normalizarCategoriaMo(categoria) === "AJUDANTE";
 }
 
-const MOD_CIVIL = new Set([
+export const CATEGORIAS_MOD_CIVIL_CONHECIDAS = [
   "PEDREIRO",
   "CARPINTEIRO",
   "ARMADOR",
+  "MESTRE DE OBRAS",
   "MESTRE DE OBRAS I",
   "MESTRE DE OBRAS II",
-  "MESTRE DE OBRAS",
   "OPERADOR DE RETRO",
   "OPERADOR DE RETROESCAVADEIRA",
-]);
+  "OPERADOR ESCAVADEIRA",
+  "OPERADOR DE ESCAVADEIRA",
+] as const;
 
-const MOD_MONTAGEM = new Set([
+export const CATEGORIAS_MOD_MONTAGEM_CONHECIDAS = [
+  "MONTADOR",
   "MONTADOR I",
   "MONTADOR II",
-  "MONTADOR",
   "MEIO OFICIAL MONTADOR",
   "ENCARREGADO DE MONTAGEM",
   "LIDER DE MONTAGEM",
-]);
+] as const;
+
+const MOD_CIVIL = new Set<string>(CATEGORIAS_MOD_CIVIL_CONHECIDAS);
+const MOD_MONTAGEM = new Set<string>(CATEGORIAS_MOD_MONTAGEM_CONHECIDAS);
 
 export function classificarTipoMod(
   categoria: string | null | undefined,

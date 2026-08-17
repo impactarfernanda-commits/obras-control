@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { calcularCompetencia } from "./competencias.ts";
 import {
+  CATEGORIAS_MOD_CIVIL_CONHECIDAS,
+  CATEGORIAS_MOD_MONTAGEM_CONHECIDAS,
   categoriaEhAjudante,
   classificarTipoMod,
   competenciaUsaSegmentacaoMod,
@@ -31,6 +33,20 @@ test("classifica a matriz civil, montagem e pendencias sem fallback silencioso",
   assert.equal(classificarTipoMod("AJUDANTE", "civil"), "Civil");
   assert.equal(classificarTipoMod("AJUDANTE", "montagem"), "Montagem");
   assert.equal(classificarTipoMod("AJUDANTE", null), "A classificar");
-  assert.equal(classificarTipoMod("OPERADOR DE ESCAVADEIRA", null), "A classificar");
-  assert.equal(classificarTipoMod("OPERADOR ESCAVADEIRA", null), "A classificar");
+  assert.equal(classificarTipoMod("OPERADOR DE ESCAVADEIRA", null), "Civil");
+  assert.equal(classificarTipoMod("OPERADOR ESCAVADEIRA", null), "Civil");
+  assert.notEqual(classificarTipoMod("OPERADOR DE ESCAVADEIRA", null), "A classificar");
+  assert.notEqual(classificarTipoMod("OPERADOR ESCAVADEIRA", null), "A classificar");
+  assert.equal(classificarTipoMod("CATEGORIA MOD FUTURA", null), "A classificar");
+});
+
+test("todas as categorias MOD conhecidas possuem destino salvo AJUDANTE dependente da alocacao", () => {
+  for (const categoria of CATEGORIAS_MOD_CIVIL_CONHECIDAS)
+    assert.equal(classificarTipoMod(categoria, null), "Civil", categoria);
+  for (const categoria of CATEGORIAS_MOD_MONTAGEM_CONHECIDAS)
+    assert.equal(classificarTipoMod(categoria, null), "Montagem", categoria);
+
+  assert.equal(classificarTipoMod("AJUDANTE", null), "A classificar");
+  assert.equal(classificarTipoMod("AJUDANTE", "civil"), "Civil");
+  assert.equal(classificarTipoMod("AJUDANTE", "montagem"), "Montagem");
 });

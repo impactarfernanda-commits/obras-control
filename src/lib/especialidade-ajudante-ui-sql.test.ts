@@ -78,8 +78,12 @@ test("dry-run cobre legado, matriz MOD e igualdade financeira", () => {
     "OPERADOR DE RETRO",
     "OPERADOR DE RETROESCAVADEIRA",
     "OPERADOR ESCAVADEIRA",
+    "OPERADOR DE ESCAVADEIRA",
   ])
     assert.ok(dryRun.includes(`'${categoria}'`));
+  assert.match(dryRun, /\('OPERADOR ESCAVADEIRA', 'MOD Civil'\)/);
+  assert.match(dryRun, /\('OPERADOR DE ESCAVADEIRA', 'MOD Civil'\)/);
+  assert.doesNotMatch(dryRun, /\('OPERADOR(?: DE)? ESCAVADEIRA', 'MOD a classificar'\)/);
   assert.match(
     dryRun,
     /v_mod_civil \+ v_mod_montagem \+ v_mod_a_classificar \+ v_moi <> v_total_antes/,

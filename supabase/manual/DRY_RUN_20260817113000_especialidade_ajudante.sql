@@ -215,8 +215,8 @@ WITH matriz(categoria, classificacao_esperada) AS (
     ('MESTRE DE OBRAS', 'MOD Civil'),
     ('OPERADOR DE RETRO', 'MOD Civil'),
     ('OPERADOR DE RETROESCAVADEIRA', 'MOD Civil'),
-    ('OPERADOR ESCAVADEIRA', 'MOD a classificar'),
-    ('OPERADOR DE ESCAVADEIRA', 'MOD a classificar')
+    ('OPERADOR ESCAVADEIRA', 'MOD Civil'),
+    ('OPERADOR DE ESCAVADEIRA', 'MOD Civil')
 )
 SELECT * FROM matriz ORDER BY categoria;
 
