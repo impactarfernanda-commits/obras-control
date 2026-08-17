@@ -23,7 +23,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -136,8 +135,9 @@ import {
   semanaInicialDaCompetencia,
 } from "@/lib/alocacoes-visualizacao";
 import {
-  filtrarAlocacoesSelecionadas,
+  agruparPendenciasClassificacaoAjudante,
   filtrarPendenciasClassificacaoAjudante,
+  type GrupoPendenciasClassificacao,
 } from "@/lib/pendencias-classificacao-ajudante";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
@@ -256,6 +256,12 @@ function monthLabel(y: number, m: number) {
   });
 }
 
+function competenciaLabel(competencia: string) {
+  const [ano, mes] = competencia.split("-").map(Number);
+  const rotulo = monthLabel(ano, mes - 1);
+  return rotulo.charAt(0).toUpperCase() + rotulo.slice(1);
+}
+
 type AlocRow = {
   id: string;
   data: string;
@@ -308,9 +314,10 @@ function AlocacoesPage() {
   const [editEspecialidadeAjudante, setEditEspecialidadeAjudante] =
     useState<EspecialidadeAjudante | null>(null);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
-  const [pendenciasSelecionadas, setPendenciasSelecionadas] = useState<Set<string>>(new Set());
-  const [confirmarClassificacao, setConfirmarClassificacao] =
-    useState<EspecialidadeAjudante | null>(null);
+  const [confirmarClassificacao, setConfirmarClassificacao] = useState<{
+    grupo: GrupoPendenciasClassificacao<AlocRow>;
+    especialidade: EspecialidadeAjudante;
+  } | null>(null);
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -584,6 +591,10 @@ function AlocacoesPage() {
     () => filtrarPendenciasClassificacaoAjudante(alocacoes ?? [], categoriasHistoricas),
     [alocacoes, categoriasHistoricas],
   );
+  const gruposPendentesClassificacao = useMemo(
+    () => agruparPendenciasClassificacaoAjudante(pendenciasClassificacao),
+    [pendenciasClassificacao],
+  );
   const podeClassificarAlocacao = useCallback(
     (alocacao: AlocRow) => {
       const registro = horasMap.get(
@@ -597,23 +608,6 @@ function AlocacoesPage() {
     },
     [canEditAllocationHoursByRole, classificacaoBloqueada, horasMap, user?.id],
   );
-  const pendenciasSelecionaveis = useMemo(
-    () => pendenciasClassificacao.filter(podeClassificarAlocacao),
-    [pendenciasClassificacao, podeClassificarAlocacao],
-  );
-  const pendenciasSelecionadasValidas = useMemo(
-    () => filtrarAlocacoesSelecionadas(pendenciasSelecionaveis, pendenciasSelecionadas),
-    [pendenciasSelecionadas, pendenciasSelecionaveis],
-  );
-
-  useEffect(() => {
-    const idsDisponiveis = new Set(pendenciasSelecionaveis.map(({ id }) => id));
-    setPendenciasSelecionadas((atuais) => {
-      const validas = new Set(Array.from(atuais).filter((id) => idsDisponiveis.has(id)));
-      return validas.size === atuais.size ? atuais : validas;
-    });
-  }, [pendenciasSelecionaveis]);
-
   // Cada funcionario aparece uma vez por obra, ainda que tenha alocacoes em varias datas.
   const porObra = useMemo(() => {
     const out = new Map<
@@ -755,7 +749,7 @@ function AlocacoesPage() {
         competenciaUsaSegmentacaoMod(calcularCompetencia(v.data).competencia) &&
         !v.especialidade_ajudante
       )
-        throw new Error("Informe se o ajudante atuarÃ¡ em Civil ou Montagem.");
+        throw new Error("Informe se o ajudante atuará em Civil ou Montagem.");
       if (registroEhAusenciaPlanejada(v)) {
         const { error } = await supabase.rpc("obras_salvar_ausencia_planejada_periodo", {
           p_funcionario_id: v.funcionario_id,
@@ -870,16 +864,28 @@ function AlocacoesPage() {
     mutationFn: async ({
       ids,
       especialidade,
+      funcionarioId,
+      obraId,
+      competencia,
     }: {
       ids: string[];
       especialidade: EspecialidadeAjudante;
+      funcionarioId: string;
+      obraId: string;
+      competencia: string;
     }) => {
-      const selecionadas = pendenciasClassificacao.filter((alocacao) => ids.includes(alocacao.id));
+      const selecionadas = pendenciasClassificacao.filter(
+        (alocacao) =>
+          ids.includes(alocacao.id) &&
+          alocacao.funcionario_id === funcionarioId &&
+          alocacao.obra_id === obraId &&
+          calcularCompetencia(alocacao.data).competencia === competencia,
+      );
       if (
         selecionadas.length !== ids.length ||
         selecionadas.some((a) => !podeClassificarAlocacao(a))
       )
-        throw new Error("Uma ou mais alocaÃ§Ãµes selecionadas nÃ£o podem mais ser classificadas.");
+        throw new Error("Uma ou mais alocações do grupo não podem mais ser classificadas.");
 
       for (const data of new Set(selecionadas.map(({ data }) => data)))
         await garantirCompetenciaAberta(supabase, data);
@@ -891,23 +897,18 @@ function AlocacoesPage() {
         .is("especialidade_ajudante", null)
         .select("id");
       if (error) throw new Error(mensagemErroCompetenciaFechada(error) ?? error.message);
-      if ((data?.length ?? 0) !== ids.length)
-        throw new Error(
-          "Algumas alocaÃ§Ãµes nÃ£o foram atualizadas. Recarregue e tente novamente.",
-        );
-      return { quantidade: ids.length, especialidade };
+      return { quantidade: data?.length ?? 0, especialidade };
     },
     onSuccess: ({ quantidade, especialidade }) => {
       toast.success(
-        `${quantidade} ${quantidade === 1 ? "alocaÃ§Ã£o classificada" : "alocaÃ§Ãµes classificadas"} como ${especialidade === "civil" ? "Civil" : "Montagem"}.`,
+        `${quantidade} ${quantidade === 1 ? "alocação classificada" : "alocações classificadas"} como ${especialidade === "civil" ? "Civil" : "Montagem"}.`,
       );
-      setPendenciasSelecionadas(new Set());
       setConfirmarClassificacao(null);
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
     },
     onError: (e: ErrorLike) => {
       setConfirmarClassificacao(null);
-      toast.error(e.message ?? "Erro ao classificar alocaÃ§Ãµes");
+      toast.error(e.message ?? "Erro ao classificar alocações");
     },
   });
 
@@ -1203,7 +1204,7 @@ function AlocacoesPage() {
                         name="especialidade_ajudante"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>AtuaÃ§Ã£o do ajudante *</FormLabel>
+                            <FormLabel>Atuação do ajudante *</FormLabel>
                             <Select
                               value={field.value ?? ""}
                               onValueChange={(value: EspecialidadeAjudante) =>
@@ -1505,7 +1506,7 @@ function AlocacoesPage() {
                   infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.categoria,
                 ) && (
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">AtuaÃ§Ã£o do ajudante *</label>
+                    <label className="text-sm font-medium">Atuação do ajudante *</label>
                     <Select
                       value={editEspecialidadeAjudante ?? ""}
                       onValueChange={(value: EspecialidadeAjudante) =>
@@ -1522,7 +1523,7 @@ function AlocacoesPage() {
                     </Select>
                     {!editEspecialidadeAjudante && (
                       <p className="text-sm text-destructive">
-                        Informe se o ajudante atuarÃ¡ em Civil ou Montagem.
+                        Informe se o ajudante atuará em Civil ou Montagem.
                       </p>
                     )}
                   </div>
@@ -1772,157 +1773,80 @@ function AlocacoesPage() {
           <CardContent className="space-y-4 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="font-semibold">Pendentes de classificaÃ§Ã£o</h2>
+                <h2 className="font-semibold">Pendentes de classificação</h2>
                 <p className="text-sm text-muted-foreground">
-                  {pendenciasClassificacao.length}{" "}
-                  {pendenciasClassificacao.length === 1
-                    ? "alocaÃ§Ã£o de ajudante pendente"
-                    : "alocaÃ§Ãµes de ajudantes pendentes"}
+                  {pendenciasClassificacao.length} alocações pendentes ·{" "}
+                  {gruposPendentesClassificacao.length} grupos para classificar
                 </p>
               </div>
               {competenciaSelecionadaFechada && pendenciasClassificacao.length > 0 && (
-                <Badge variant="outline">CompetÃªncia fechada â€” somente leitura</Badge>
+                <Badge variant="outline">Competência fechada — somente leitura</Badge>
               )}
               {fechamentoSelecionadoQuery.isError && pendenciasClassificacao.length > 0 && (
-                <Badge variant="outline">Fechamento indisponÃ­vel â€” somente leitura</Badge>
+                <Badge variant="outline">Fechamento indisponível — somente leitura</Badge>
               )}
             </div>
 
             {pendenciasClassificacao.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Nenhuma alocaÃ§Ã£o exige classificaÃ§Ã£o nesta competÃªncia.
+                Nenhuma alocação exige classificação nesta competência.
               </p>
             ) : (
-              <>
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-10">
-                          <Checkbox
-                            aria-label="Selecionar todas as pendÃªncias editÃ¡veis"
-                            checked={
-                              pendenciasSelecionaveis.length > 0 &&
-                              pendenciasSelecionadasValidas.length ===
-                                pendenciasSelecionaveis.length
-                            }
-                            disabled={pendenciasSelecionaveis.length === 0}
-                            onCheckedChange={(checked) =>
-                              setPendenciasSelecionadas(
-                                checked
-                                  ? new Set(pendenciasSelecionaveis.map(({ id }) => id))
-                                  : new Set(),
-                              )
-                            }
-                          />
-                        </TableHead>
-                        <TableHead>Data</TableHead>
-                        <TableHead>FuncionÃ¡rio</TableHead>
-                        <TableHead>Centro de custo</TableHead>
-                        <TableHead>Categoria</TableHead>
-                        <TableHead>Especialidade atual</TableHead>
-                        <TableHead className="text-right">AtuaÃ§Ã£o do ajudante</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pendenciasClassificacao.map((alocacao) => {
-                        const editavel = podeClassificarAlocacao(alocacao);
-                        return (
-                          <TableRow key={alocacao.id}>
-                            <TableCell>
-                              <Checkbox
-                                aria-label={`Selecionar alocaÃ§Ã£o de ${alocacao.data}`}
-                                checked={pendenciasSelecionadas.has(alocacao.id)}
+              <div className="grid gap-3 lg:grid-cols-2">
+                {gruposPendentesClassificacao.map((grupo) => {
+                  const editavel = grupo.alocacoes.every(podeClassificarAlocacao);
+                  const funcionario = infoHistoricoById.get(grupo.funcionario_id);
+                  const obra = grupo.alocacoes[0]?.obras?.nome ?? "—";
+                  return (
+                    <div key={grupo.chave} className="space-y-3 rounded-md border p-4">
+                      <div>
+                        <p className="font-semibold">{funcionario?.nome ?? "—"}</p>
+                        <p className="text-sm text-muted-foreground">{obra}</p>
+                      </div>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                        <div>
+                          <dt className="text-muted-foreground">Competência</dt>
+                          <dd>{competenciaLabel(grupo.competencia)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Período pendente</dt>
+                          <dd>
+                            {new Date(`${grupo.dataInicio}T00:00:00`).toLocaleDateString("pt-BR")} a{" "}
+                            {new Date(`${grupo.dataFim}T00:00:00`).toLocaleDateString("pt-BR")}
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-sm font-medium">
+                          {grupo.quantidade}{" "}
+                          {grupo.quantidade === 1 ? "alocação pendente" : "alocações pendentes"}
+                        </span>
+                        {classificacaoBloqueada ? (
+                          <Badge variant="outline">
+                            {competenciaSelecionadaFechada
+                              ? "Competência fechada"
+                              : "Fechamento indisponível"}
+                          </Badge>
+                        ) : (
+                          <div className="flex gap-2">
+                            {(["civil", "montagem"] as const).map((especialidade) => (
+                              <Button
+                                key={especialidade}
+                                size="sm"
+                                variant="outline"
                                 disabled={!editavel || classificarPendenciasMutation.isPending}
-                                onCheckedChange={(checked) =>
-                                  setPendenciasSelecionadas((atuais) => {
-                                    const proximas = new Set(atuais);
-                                    if (checked) proximas.add(alocacao.id);
-                                    else proximas.delete(alocacao.id);
-                                    return proximas;
-                                  })
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {new Date(`${alocacao.data}T00:00:00`).toLocaleDateString("pt-BR")}
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {infoHistoricoById.get(alocacao.funcionario_id)?.nome ?? "â€”"}
-                            </TableCell>
-                            <TableCell>{alocacao.obras?.nome ?? "â€”"}</TableCell>
-                            <TableCell>
-                              {infoHistoricoById.get(alocacao.funcionario_id)?.categoria ??
-                                "AJUDANTE"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline">A classificar</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={!editavel || classificarPendenciasMutation.isPending}
-                                  onClick={() =>
-                                    classificarPendenciasMutation.mutate({
-                                      ids: [alocacao.id],
-                                      especialidade: "civil",
-                                    })
-                                  }
-                                >
-                                  Civil
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={!editavel || classificarPendenciasMutation.isPending}
-                                  onClick={() =>
-                                    classificarPendenciasMutation.mutate({
-                                      ids: [alocacao.id],
-                                      especialidade: "montagem",
-                                    })
-                                  }
-                                >
-                                  Montagem
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-medium">
-                    Selecionados: {pendenciasSelecionadasValidas.length}
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={
-                        pendenciasSelecionadasValidas.length === 0 ||
-                        classificarPendenciasMutation.isPending
-                      }
-                      onClick={() => setConfirmarClassificacao("civil")}
-                    >
-                      Classificar como Civil
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={
-                        pendenciasSelecionadasValidas.length === 0 ||
-                        classificarPendenciasMutation.isPending
-                      }
-                      onClick={() => setConfirmarClassificacao("montagem")}
-                    >
-                      Classificar como Montagem
-                    </Button>
-                  </div>
-                </div>
-              </>
+                                onClick={() => setConfirmarClassificacao({ grupo, especialidade })}
+                              >
+                                {especialidade === "civil" ? "Civil" : "Montagem"}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1936,11 +1860,14 @@ function AlocacoesPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar classificaÃ§Ã£o</AlertDialogTitle>
+            <AlertDialogTitle>Confirmar classificação</AlertDialogTitle>
             <AlertDialogDescription>
-              Classificar {pendenciasSelecionadasValidas.length}{" "}
-              {pendenciasSelecionadasValidas.length === 1 ? "alocaÃ§Ã£o" : "alocaÃ§Ãµes"} de
-              ajudantes como {confirmarClassificacao === "civil" ? "Civil" : "Montagem"}?
+              Classificar {confirmarClassificacao?.grupo.quantidade ?? 0} alocações de{" "}
+              {confirmarClassificacao
+                ? (infoHistoricoById.get(confirmarClassificacao.grupo.funcionario_id)?.nome ?? "—")
+                : "—"}{" "}
+              na obra {confirmarClassificacao?.grupo.alocacoes[0]?.obras?.nome ?? "—"} como{" "}
+              {confirmarClassificacao?.especialidade === "civil" ? "Civil" : "Montagem"}?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1948,17 +1875,16 @@ function AlocacoesPage() {
               Cancelar
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={
-                !confirmarClassificacao ||
-                pendenciasSelecionadasValidas.length === 0 ||
-                classificarPendenciasMutation.isPending
-              }
+              disabled={!confirmarClassificacao || classificarPendenciasMutation.isPending}
               onClick={(event) => {
                 event.preventDefault();
                 if (!confirmarClassificacao) return;
                 classificarPendenciasMutation.mutate({
-                  ids: pendenciasSelecionadasValidas.map(({ id }) => id),
-                  especialidade: confirmarClassificacao,
+                  ids: confirmarClassificacao.grupo.alocacoes.map(({ id }) => id),
+                  funcionarioId: confirmarClassificacao.grupo.funcionario_id,
+                  obraId: confirmarClassificacao.grupo.obra_id,
+                  competencia: confirmarClassificacao.grupo.competencia,
+                  especialidade: confirmarClassificacao.especialidade,
                 });
               }}
             >

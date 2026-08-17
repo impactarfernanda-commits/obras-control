@@ -256,7 +256,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       return;
     }
     if (periodoExigeEspecialidade && !especialidadeAjudante) {
-      toast.error("Informe se o ajudante atuarÃ¡ em Civil ou Montagem.");
+      toast.error("Informe se o ajudante atuará em Civil ou Montagem.");
       return;
     }
     if (dias.length === 0) {
@@ -529,7 +529,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
             </div>
             {periodoExigeEspecialidade && (
               <div className="space-y-1.5">
-                <Label>AtuaÃ§Ã£o do ajudante *</Label>
+                <Label>Atuação do ajudante *</Label>
                 <Select
                   value={especialidadeAjudante ?? ""}
                   onValueChange={(value: EspecialidadeAjudante) => setEspecialidadeAjudante(value)}
