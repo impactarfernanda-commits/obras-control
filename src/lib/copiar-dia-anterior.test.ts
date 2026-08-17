@@ -21,10 +21,19 @@ test("encontra o último dia anterior e segunda pode usar sexta", () => {
 });
 test("origem é consultada somente na mesma obra", () =>
   assert.match(componente, /eq\("obra_id", obraId\).*lt\("data", destino\)/s));
-test("confirmação faz uma chamada RPC em lote e invalida queries", () => {
-  assert.equal((componente.match(/p_aplicar: true/g) ?? []).length, 1);
+test("confirmação grava especialidades e horas em lote e invalida queries", () => {
+  assert.equal((componente.match(/p_aplicar: false/g) ?? []).length, 1);
+  assert.doesNotMatch(componente, /p_aplicar: true/);
+  assert.match(componente, /especialidade_ajudante:/);
+  assert.match(componente, /\.upsert\(/);
+  assert.match(componente, /\.from\("registros_horas"\)[\s\S]*\.insert\(linhasRegistro\)/);
   assert.match(componente, /invalidateQueries\(\{ queryKey: \["alocacoes-mes"\]/);
   assert.match(componente, /invalidateQueries\(\{ queryKey: \["registros-mes"\]/);
+});
+test("copia revalida destino em lote e bloqueia clique duplicado", () => {
+  assert.match(componente, /confirmacaoEmAndamento\.current/);
+  assert.match(componente, /\.in\("funcionario_id", ids\)/);
+  assert.match(componente, /ignoreDuplicates: true/);
 });
 test("RPC é invoker, transacional e não amplia execução", () => {
   assert.match(migration, /SECURITY INVOKER/);

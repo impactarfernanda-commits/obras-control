@@ -42,10 +42,12 @@ test("RPC corrigida não lê diretamente public.funcionarios", () => {
   assert.doesNotMatch(migration, /GRANT SELECT[\s\S]*ON public\.funcionarios/);
 });
 
-test("preview e aplicação permanecem no mesmo contrato", () => {
+test("preview preserva contrato e aplicação transporta a especialidade no cliente", () => {
   assert.match(migration, /IF p_aplicar THEN/);
   assert.match(copiar, /p_aplicar: false/);
-  assert.match(copiar, /p_aplicar: true/);
+  assert.doesNotMatch(copiar, /p_aplicar: true/);
+  assert.match(copiar, /resolverEspecialidadeAjudante/);
+  assert.match(copiar, /especialidade_ajudante:/);
 });
 
 test("grants da RPC permanecem mínimos", () => {
