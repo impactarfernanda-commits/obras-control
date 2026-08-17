@@ -5,55 +5,47 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
 import {
+  consumePortalLaunchMarker,
   isHandoffCode,
-  isPortalBootstrap,
-  OBRAS_ERROR_MESSAGE,
-  OBRAS_READY_MESSAGE,
-  portalBootstrapMessage,
+  PORTAL_LAUNCH_WINDOW_NAME,
   PORTAL_ORIGIN,
+  portalLoginUrl,
   safeReturnPath,
 } from "@/lib/sso";
 
 export const Route = createFileRoute("/sso/callback")({
   ssr: false,
   head: () => ({
-    meta: [
-      { title: "Entrando no Obras Control" },
-      { name: "robots", content: "noindex,nofollow,noarchive" },
-    ],
+    meta: [{ title: "Obras Control" }, { name: "robots", content: "noindex,nofollow,noarchive" }],
   }),
   component: SsoCallback,
 });
+
 function SsoCallback() {
   const [failed, setFailed] = useState(false);
+  const launchedFromPortal = window.name === PORTAL_LAUNCH_WINDOW_NAME;
   useEffect(() => {
     let active = true;
+    const fail = () => {
+      if (!active) return;
+      if (consumePortalLaunchMarker(window)) {
+        window.location.replace(portalLoginUrl("/alocacoes", true));
+        return;
+      }
+      setFailed(true);
+    };
     void (async () => {
-      const url = new URL(window.location.href),
-        code = url.searchParams.get("code");
-      const background = isPortalBootstrap(url, window.parent !== window);
-      const notifyPortal = (
-        type: typeof OBRAS_READY_MESSAGE | typeof OBRAS_ERROR_MESSAGE,
-        returnPath?: string,
-      ) => {
-        if (background)
-          window.parent.postMessage(
-            portalBootstrapMessage(type, returnPath),
-            new URL(PORTAL_ORIGIN).origin,
-          );
-      };
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+      window.history.replaceState({}, document.title, url.pathname);
       if (!isHandoffCode(code)) {
-        notifyPortal(OBRAS_ERROR_MESSAGE);
-        if (active) setFailed(true);
+        fail();
         return;
       }
       try {
         const { data, error } = await supabase.functions.invoke("obras-sso-exchange", {
           body: { code },
         });
-        url.searchParams.delete("code");
-        url.searchParams.delete("portal_bootstrap");
-        window.history.replaceState({}, document.title, url.pathname);
         if (error || typeof data?.token_hash !== "string") throw new Error("EXCHANGE_FAILED");
         const { data: old } = await supabase.auth.getSession();
         if (old.session) await supabase.auth.signOut({ scope: "local" });
@@ -74,21 +66,24 @@ function SsoCallback() {
         ]);
         if (userResult.error || !userResult.data.user || rolesResult.error || profileResult.error)
           throw new Error("BOOTSTRAP_FAILED");
-        if (background) {
-          notifyPortal(OBRAS_READY_MESSAGE, returnPath);
-          return;
-        }
+        consumePortalLaunchMarker(window);
         window.location.replace(returnPath);
       } catch {
-        notifyPortal(OBRAS_ERROR_MESSAGE);
-        if (active) setFailed(true);
+        fail();
       }
     })();
     return () => {
       active = false;
     };
   }, []);
-  return (
+  return launchedFromPortal ? (
+    <div
+      className="flex min-h-screen items-center justify-center bg-background"
+      aria-label="Abrindo Obras Control"
+    >
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  ) : (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6 text-center">
         <TanksBRLogo size="login" />
@@ -100,10 +95,7 @@ function SsoCallback() {
             <Button onClick={() => window.location.assign(PORTAL_ORIGIN)}>Voltar ao Portal</Button>
           </>
         ) : (
-          <>
-            <Loader2 className="mx-auto h-8 w-8 animate-spin" />
-            <h1 className="text-xl font-semibold">Entrando no Obras Control…</h1>
-          </>
+          <Loader2 className="mx-auto h-8 w-8 animate-spin" />
         )}
       </div>
     </div>
