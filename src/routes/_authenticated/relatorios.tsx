@@ -45,6 +45,7 @@ import { calcularCusto, diasUteisNoIntervalo } from "@/lib/custos-core";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import {
   calcularCustoHorasExtras,
+  classificarHorasPorData,
   formatarHorasDecimais,
   type CustoHoraExtra,
 } from "@/lib/horas-extras";
@@ -247,7 +248,14 @@ function RelatoriosPage() {
           custo,
           (registrosPorFunc.get(funcionario.id) ?? []).map((registro) => ({
             data: registro.data,
-            horasExtras: registro.horas_extras,
+            horasExtras: (() => {
+              const apuracao = classificarHorasPorData({
+                data: registro.data,
+                horasNormais: registro.horas_normais,
+                horasExtras: registro.horas_extras,
+              });
+              return apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
+            })(),
           })),
         ),
       );
@@ -449,14 +457,22 @@ function RelatoriosPage() {
           const alocacao = alocacaoMap.get(
             `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
           );
+          const apuracao = classificarHorasPorData({
+            data: registro.data,
+            horasNormais: registro.horas_normais,
+            horasExtras: registro.horas_extras,
+          });
+          const horasExtrasApuradas =
+            apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
           return {
             ...registro,
+            apuracao,
             obraNome: obraMap.get(registro.obra_id) ?? "—",
             horaEntrada: alocacao?.hora_entrada?.slice(0, 5) ?? "—",
             horaSaida: alocacao?.hora_saida?.slice(0, 5) ?? "—",
             custoHoraExtra: custoDetalhe
               ? calcularCustoHorasExtras(custoDetalhe, [
-                  { data: registro.data, horasExtras: registro.horas_extras },
+                  { data: registro.data, horasExtras: horasExtrasApuradas },
                 ]).custoTotal
               : 0,
           };
@@ -467,9 +483,18 @@ function RelatoriosPage() {
     (acc, registro) => ({
       dias:
         acc.dias +
-        (Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0) > 0 ? 1 : 0),
-      normais: acc.normais + Number(registro.horas_normais || 0),
-      total: acc.total + Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0),
+        (registro.apuracao.horasNormaisApuradas +
+          registro.apuracao.horasExtra50Apuradas +
+          registro.apuracao.horasExtra100Apuradas >
+        0
+          ? 1
+          : 0),
+      normais: acc.normais + registro.apuracao.horasNormaisApuradas,
+      total:
+        acc.total +
+        registro.apuracao.horasNormaisApuradas +
+        registro.apuracao.horasExtra50Apuradas +
+        registro.apuracao.horasExtra100Apuradas,
     }),
     { dias: 0, normais: 0, total: 0 },
   );
@@ -1218,7 +1243,6 @@ function RelatoriosPage() {
                       </TableRow>
                     ) : (
                       registrosDetalhe.map((registro) => {
-                        const domingo = new Date(`${registro.data}T00:00:00`).getDay() === 0;
                         return (
                           <TableRow
                             key={`${registro.funcionario_id}|${registro.obra_id}|${registro.data}`}
@@ -1249,17 +1273,17 @@ function RelatoriosPage() {
                             </TableCell>
                             <TableCell className="text-right">
                               {registro.tipo_registro === "horas"
-                                ? formatarHorasDecimais(registro.horas_normais)
+                                ? formatarHorasDecimais(registro.apuracao.horasNormaisApuradas)
                                 : "—"}
                             </TableCell>
                             <TableCell className="text-right">
                               {registro.tipo_registro === "horas"
-                                ? formatarHorasDecimais(domingo ? 0 : registro.horas_extras)
+                                ? formatarHorasDecimais(registro.apuracao.horasExtra50Apuradas)
                                 : "—"}
                             </TableCell>
                             <TableCell className="text-right">
                               {registro.tipo_registro === "horas"
-                                ? formatarHorasDecimais(domingo ? registro.horas_extras : 0)
+                                ? formatarHorasDecimais(registro.apuracao.horasExtra100Apuradas)
                                 : "—"}
                             </TableCell>
                             <TableCell className="text-right">

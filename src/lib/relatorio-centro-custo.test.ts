@@ -6,6 +6,7 @@ import {
   type AlocacaoRelatorio,
   type RegistroRelatorio,
 } from "./relatorio-centro-custo.ts";
+import { calcularCustoHorasExtras } from "./horas-extras.ts";
 
 const custo = {
   salario: 2200,
@@ -317,9 +318,38 @@ test("HE 50%, HE 100% e ausência de HE são classificadas no centro", () => {
       registro("f1", "o1", "2026-07-27", 9, 0),
     ],
   ).centros[0];
-  assert.equal(centro.linhas[0].horas50, 1);
-  assert.equal(centro.linhas[0].horas100, 2);
+  assert.equal(centro.linhas[0].horasNormais, 9);
+  assert.equal(centro.linhas[0].horas50, 10);
+  assert.equal(centro.linhas[0].horas100, 11);
   assert.ok(centro.custoHE > 0);
+});
+
+test("fim de semana reclassifica horas sem custo base duplicado e fecha o centro", () => {
+  const centro = consolidar(
+    [
+      alocacao("f1", "o1", "2026-08-08", "montagem"),
+      alocacao("f1", "o1", "2026-08-09", "montagem"),
+    ],
+    [registro("f1", "o1", "2026-08-08", 8, 2), registro("f1", "o1", "2026-08-09", 8, 2)],
+  ).centros[0];
+  const linha = centro.linhas[0];
+
+  assert.equal(linha.dias, 2);
+  assert.equal(linha.horasNormais, 0);
+  assert.equal(linha.horas50, 10);
+  assert.equal(linha.horas100, 10);
+  assert.equal(linha.custoBase, 0);
+  const custoHEEsperado = calcularCustoHorasExtras(custo, [
+    { data: "2026-08-08", horasExtras: 10 },
+    { data: "2026-08-09", horasExtras: 10 },
+  ]).custoTotal;
+  assert.ok(Math.abs(linha.custoHE - custoHEEsperado) < 1e-10);
+  assert.equal(linha.total, linha.custoBase + linha.custoHE);
+  assert.equal(centro.custoHE, linha.custoHE);
+  assert.equal(
+    centro.total,
+    centro.linhas.reduce((total, item) => total + item.total, 0),
+  );
 });
 
 test("tipo ausente é inferido e marcado discretamente", () => {

@@ -11,6 +11,12 @@ export type RegistroHoraExtra = {
   horasExtras: number | null | undefined;
 };
 
+export type ClassificacaoHoras = {
+  horasNormaisApuradas: number;
+  horasExtra50Apuradas: number;
+  horasExtra100Apuradas: number;
+};
+
 export type CustoHoraExtra = {
   horas50: number;
   horas100: number;
@@ -40,6 +46,38 @@ export const CUSTO_HORA_EXTRA_ZERO: CustoHoraExtra = {
 function diaDaSemana(dataISO: string) {
   const [ano, mes, dia] = dataISO.split("-").map(Number);
   return new Date(ano, (mes ?? 1) - 1, dia ?? 1).getDay();
+}
+
+export function classificarHorasPorData(input: {
+  data: string;
+  horasNormais: number | null | undefined;
+  horasExtras: number | null | undefined;
+  feriado?: boolean;
+}): ClassificacaoHoras {
+  const horasNormais = Math.max(0, Number(input.horasNormais || 0));
+  const horasExtras = Math.max(0, Number(input.horasExtras || 0));
+  const total = horasNormais + horasExtras;
+  const diaSemana = diaDaSemana(input.data);
+
+  if (input.feriado || diaSemana === 0) {
+    return {
+      horasNormaisApuradas: 0,
+      horasExtra50Apuradas: 0,
+      horasExtra100Apuradas: total,
+    };
+  }
+  if (diaSemana === 6) {
+    return {
+      horasNormaisApuradas: 0,
+      horasExtra50Apuradas: total,
+      horasExtra100Apuradas: 0,
+    };
+  }
+  return {
+    horasNormaisApuradas: horasNormais,
+    horasExtra50Apuradas: horasExtras,
+    horasExtra100Apuradas: 0,
+  };
 }
 
 /**
