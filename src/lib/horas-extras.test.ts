@@ -3,9 +3,63 @@ import test from "node:test";
 
 import {
   calcularCustoHorasExtras,
+  classificarHorasPorData,
   formatarHorasDecimais,
   podeVisualizarDetalhamentoFinanceiro,
 } from "./horas-extras.ts";
+
+test("classifica dias uteis, fim de semana e feriado sem alterar o total", () => {
+  const casos = [
+    ["segunda", { data: "2026-08-03", horasNormais: 9, horasExtras: 0 }, [9, 0, 0]],
+    ["sexta", { data: "2026-08-07", horasNormais: 8, horasExtras: 0 }, [8, 0, 0]],
+    ["sabado", { data: "2026-08-08", horasNormais: 8, horasExtras: 0 }, [0, 8, 0]],
+    ["domingo", { data: "2026-08-09", horasNormais: 8, horasExtras: 0 }, [0, 0, 8]],
+    [
+      "feriado na quarta",
+      { data: "2026-08-05", horasNormais: 8, horasExtras: 0, feriado: true },
+      [0, 0, 8],
+    ],
+    [
+      "feriado no sabado",
+      { data: "2026-08-08", horasNormais: 8, horasExtras: 0, feriado: true },
+      [0, 0, 8],
+    ],
+  ] as const;
+
+  for (const [nome, entrada, esperado] of casos) {
+    const apurado = classificarHorasPorData(entrada);
+    assert.deepEqual(
+      [apurado.horasNormaisApuradas, apurado.horasExtra50Apuradas, apurado.horasExtra100Apuradas],
+      esperado,
+      nome,
+    );
+    assert.equal(
+      Number(entrada.horasNormais) + Number(entrada.horasExtras),
+      apurado.horasNormaisApuradas + apurado.horasExtra50Apuradas + apurado.horasExtra100Apuradas,
+      nome,
+    );
+  }
+});
+
+test("natureza do fim de semana e feriado prevalece sobre buckets mistos", () => {
+  assert.deepEqual(
+    classificarHorasPorData({ data: "2026-08-08", horasNormais: 8, horasExtras: 2 }),
+    { horasNormaisApuradas: 0, horasExtra50Apuradas: 10, horasExtra100Apuradas: 0 },
+  );
+  assert.deepEqual(
+    classificarHorasPorData({ data: "2026-08-09", horasNormais: 8, horasExtras: 2 }),
+    { horasNormaisApuradas: 0, horasExtra50Apuradas: 0, horasExtra100Apuradas: 10 },
+  );
+  assert.deepEqual(
+    classificarHorasPorData({
+      data: "2026-08-05",
+      horasNormais: 8,
+      horasExtras: 2,
+      feriado: true,
+    }),
+    { horasNormaisApuradas: 0, horasExtra50Apuradas: 0, horasExtra100Apuradas: 10 },
+  );
+});
 
 const custoBase = {
   salario: 2200,
@@ -14,6 +68,48 @@ const custoBase = {
   provAvisoPrevio: 250.8,
   provFerias: 334.4,
 };
+
+test("engine de HE inclui a hora-base completa e permite zerar o custo base do fim de semana", () => {
+  const custoHoraCem = {
+    salario: 22_000,
+    encargos: 0,
+    prov13: 0,
+    provAvisoPrevio: 0,
+    provFerias: 0,
+  };
+  const sabado = classificarHorasPorData({
+    data: "2026-08-08",
+    horasNormais: 8,
+    horasExtras: 0,
+  });
+  const domingo = classificarHorasPorData({
+    data: "2026-08-09",
+    horasNormais: 8,
+    horasExtras: 0,
+  });
+  const custoSabado = calcularCustoHorasExtras(custoHoraCem, [
+    { data: "2026-08-08", horasExtras: sabado.horasExtra50Apuradas },
+  ]);
+  const custoDomingo = calcularCustoHorasExtras(custoHoraCem, [
+    { data: "2026-08-09", horasExtras: domingo.horasExtra100Apuradas },
+  ]);
+
+  assert.equal(custoHoraCem.salario / 220, 100);
+  assert.equal(sabado.horasNormaisApuradas, 0);
+  assert.equal(custoSabado.remuneracao50, 8 * 100 * 1.5);
+  assert.equal(0 + custoSabado.custoTotal, 1_200);
+  assert.equal(domingo.horasNormaisApuradas, 0);
+  assert.equal(custoDomingo.remuneracao100, 8 * 100 * 2);
+  assert.equal(0 + custoDomingo.custoTotal, 1_600);
+  assert.equal(
+    8,
+    sabado.horasNormaisApuradas + sabado.horasExtra50Apuradas + sabado.horasExtra100Apuradas,
+  );
+  assert.equal(
+    8,
+    domingo.horasNormaisApuradas + domingo.horasExtra50Apuradas + domingo.horasExtra100Apuradas,
+  );
+});
 
 test("salário de R$ 2.200 produz valor-hora de R$ 10 e HE 50% de R$ 30", () => {
   const custo = calcularCustoHorasExtras(custoBase, [{ data: "2026-07-27", horasExtras: 2 }]);

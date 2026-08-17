@@ -1,5 +1,5 @@
 import type { CustoBreakdown } from "./custos-core";
-import { calcularCustoHorasExtras, isHoraExtra100 } from "./horas-extras.ts";
+import { calcularCustoHorasExtras, classificarHorasPorData } from "./horas-extras.ts";
 import {
   categoriaEhAjudante,
   classificarTipoMod,
@@ -89,6 +89,7 @@ type Input = {
   }) => number;
   horasNormaisPadrao: (dataISO: string) => number;
   segmentarMod?: boolean;
+  feriados?: ReadonlySet<string>;
 };
 
 function chave(funcionarioId: string, obraId: string, data: string) {
@@ -181,14 +182,25 @@ export function consolidarCustosCentros(input: Input) {
       );
     }
 
+    const horasRegistradas = registro?.horas_normais ?? input.horasNormaisPadrao(alocacao.data);
+    const apuracao = classificarHorasPorData({
+      data: alocacao.data,
+      horasNormais: falta ? 0 : horasRegistradas,
+      horasExtras: falta ? 0 : registro?.horas_extras,
+      feriado: input.feriados?.has(alocacao.data),
+    });
     const custoBase = input.calcularCustoBase({
       custoMensal: custo.total,
       diasUteis: input.diasUteis,
       dataISO: alocacao.data,
-      horasNormais: registro?.horas_normais ?? null,
+      horasNormais: apuracao.horasNormaisApuradas,
       ausencia: falta || (registro?.ausencia ?? false),
     });
-    if (custoBase <= 0) continue;
+    const totalHorasApuradas =
+      apuracao.horasNormaisApuradas +
+      apuracao.horasExtra50Apuradas +
+      apuracao.horasExtra100Apuradas;
+    if (custoBase <= 0 && totalHorasApuradas <= 0) continue;
 
     const tipo = input.resolverTipo(alocacao, funcionario);
     const tipoMod =
@@ -205,15 +217,20 @@ export function consolidarCustosCentros(input: Input) {
     }
     const linha = obterLinha(alocacao.obra_id, funcionario, tipo, tipoMod, !alocacao.tipo_mao_obra);
     linha.datas.add(alocacao.data);
-    linha.horasNormais += falta
-      ? 0
-      : (registro?.horas_normais ?? (input.horasNormaisPadrao(alocacao.data) || 9));
+    linha.horasNormais += apuracao.horasNormaisApuradas;
     linha.custoBase += custoBase;
   }
 
   for (const registro of input.registros) {
     if (registro.tipo_registro != null && registro.tipo_registro !== "horas") continue;
-    if (Number(registro.horas_extras || 0) <= 0) continue;
+    const apuracao = classificarHorasPorData({
+      data: registro.data,
+      horasNormais: registro.horas_normais,
+      horasExtras: registro.horas_extras,
+      feriado: input.feriados?.has(registro.data),
+    });
+    const horasExtrasApuradas = apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
+    if (horasExtrasApuradas <= 0) continue;
     const funcionario = funcMap.get(registro.funcionario_id);
     const custo = input.custos.get(registro.funcionario_id);
     if (!funcionario || !custo) continue;
@@ -231,12 +248,13 @@ export function consolidarCustosCentros(input: Input) {
       tipoMod,
       !alocacao?.tipo_mao_obra,
     );
-    const horas = Number(registro.horas_extras || 0);
-    if (isHoraExtra100(registro.data)) linha.horas100 += horas;
-    else linha.horas50 += horas;
-    linha.custoHE += calcularCustoHorasExtras(custo, [
-      { data: registro.data, horasExtras: horas },
-    ]).custoTotal;
+    linha.horas50 += apuracao.horasExtra50Apuradas;
+    linha.horas100 += apuracao.horasExtra100Apuradas;
+    linha.custoHE += calcularCustoHorasExtras(
+      custo,
+      [{ data: registro.data, horasExtras: horasExtrasApuradas }],
+      input.feriados,
+    ).custoTotal;
   }
 
   const linhasPorCentro = new Map<string, LinhaComposicaoCentro[]>();
