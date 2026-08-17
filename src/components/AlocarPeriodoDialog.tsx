@@ -25,6 +25,11 @@ import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { validarDataLancamento } from "@/lib/data-lancamento";
 import {
+  categoriaEhAjudante,
+  competenciaUsaSegmentacaoMod,
+  type EspecialidadeAjudante,
+} from "@/lib/especialidade-ajudante";
+import {
   enumerarDiasCorridos,
   mensagemErroRegistro,
   registroEhAusenciaPlanejada,
@@ -108,6 +113,9 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [dataInicio, setDataInicio] = useState<string>(today);
   const [dataFim, setDataFim] = useState<string>(today);
   const [tipoRegistro, setTipoRegistro] = useState<TipoRegistro>("horas");
+  const [especialidadeAjudante, setEspecialidadeAjudante] = useState<EspecialidadeAjudante | null>(
+    null,
+  );
   const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: tipoRegistro });
   const [step, setStep] = useState<"form" | "conflitos">("form");
   const [conflitosAloc, setConflitosAloc] = useState<Set<string>>(new Set());
@@ -155,6 +163,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     () => funcionariosElegiveis.find((f) => f.id === funcionarioId) ?? null,
     [funcionariosElegiveis, funcionarioId],
   );
+  const funcionarioEhAjudante = categoriaEhAjudante(funcSelecionado?.categoria_mo);
 
   const dias = useMemo(() => {
     const all = ausenciaPlanejada
@@ -163,6 +172,12 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     const limite = funcSelecionado?.data_desligamento ?? null;
     return limite ? all.filter((d) => d <= limite) : all;
   }, [ausenciaPlanejada, dataInicio, dataFim, funcSelecionado]);
+  const periodoExigeEspecialidade =
+    funcionarioEhAjudante &&
+    dias.some((data) => competenciaUsaSegmentacaoMod(calcularCompetencia(data).competencia));
+  useEffect(() => {
+    if (!periodoExigeEspecialidade) setEspecialidadeAjudante(null);
+  }, [periodoExigeEspecialidade]);
   const diasExcluidosPorDesligamento = useMemo(() => {
     if (!funcSelecionado?.data_desligamento) return 0;
     const diasIntervalo = ausenciaPlanejada
@@ -194,6 +209,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setDataFim(today);
       setModo("pular");
       setTipoRegistro("horas");
+      setEspecialidadeAjudante(null);
     }
   }
 
@@ -237,6 +253,10 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     }
     if (!funcionarioId) {
       toast.error("Selecione um funcionário");
+      return;
+    }
+    if (periodoExigeEspecialidade && !especialidadeAjudante) {
+      toast.error("Informe se o ajudante atuarÃ¡ em Civil ou Montagem.");
       return;
     }
     if (dias.length === 0) {
@@ -352,6 +372,10 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         obra_id: obraId,
         data: d,
         created_by: user?.id ?? null,
+        especialidade_ajudante:
+          funcionarioEhAjudante && competenciaUsaSegmentacaoMod(calcularCompetencia(d).competencia)
+            ? especialidadeAjudante
+            : null,
       }));
       const { error: alocErr } = await supabase.from("alocacoes").upsert(alocRows, {
         onConflict: "funcionario_id,obra_id,data",
@@ -503,6 +527,23 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 </SelectContent>
               </Select>
             </div>
+            {periodoExigeEspecialidade && (
+              <div className="space-y-1.5">
+                <Label>AtuaÃ§Ã£o do ajudante *</Label>
+                <Select
+                  value={especialidadeAjudante ?? ""}
+                  onValueChange={(value: EspecialidadeAjudante) => setEspecialidadeAjudante(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="civil">Civil</SelectItem>
+                    <SelectItem value="montagem">Montagem</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Tipo de registro</Label>
               <Select

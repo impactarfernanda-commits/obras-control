@@ -7,6 +7,7 @@ export type CostCenterWorkbookInput = {
   competencia: string;
   periodoInicial: string;
   periodoFinal: string;
+  segmentarMod: boolean;
 };
 
 const FORMATO_MOEDA = "R$ #,##0.00";
@@ -50,7 +51,7 @@ export function costCenterXlsxFilename(input: CostCenterWorkbookInput) {
 }
 
 export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
-  const { centro, competencia, periodoInicial, periodoFinal } = input;
+  const { centro, competencia, periodoInicial, periodoFinal, segmentarMod } = input;
   const periodo = `${new Date(`${periodoInicial}T00:00:00`).toLocaleDateString("pt-BR")} a ${new Date(`${periodoFinal}T00:00:00`).toLocaleDateString("pt-BR")}`;
   const workbook = XLSX.utils.book_new();
 
@@ -60,15 +61,22 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     ["Competência", competencia],
     ["Período", periodo],
     ["Custo total", centro.total],
-    ["MOD", centro.mod],
+    ...(segmentarMod
+      ? ([
+          ["MOD Civil", centro.modCivil],
+          ["MOD Montagem", centro.modMontagem],
+        ] as Array<[string, number]>)
+      : ([["MOD", centro.mod]] as Array<[string, number]>)),
+    ...(segmentarMod && centro.modAClassificar > 0
+      ? ([["MOD a classificar", centro.modAClassificar]] as Array<[string, number]>)
+      : []),
     ["MOI", centro.moi],
     ["Funcionários", centro.funcs],
     ["Dias alocados — soma da equipe", centro.dias],
     ["Custo das horas extras", centro.custoHE],
   ]);
   resumo["!cols"] = [{ wch: 34 }, { wch: 35 }];
-  aplicarFormato(resumo, { inicio: 4, fim: 6 }, [1], FORMATO_MOEDA);
-  aplicarFormato(resumo, { inicio: 9, fim: 9 }, [1], FORMATO_MOEDA);
+  aplicarFormato(resumo, { inicio: 4, fim: 8 }, [1], FORMATO_MOEDA);
   XLSX.utils.book_append_sheet(workbook, resumo, "Resumo");
 
   const cabecalho = [
@@ -79,6 +87,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     "Funcionário",
     "Função",
     "Tipo",
+    ...(segmentarMod ? ["Tipo MOD"] : []),
     "Dias",
     "Horas normais",
     "HE 50%",
@@ -95,6 +104,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     linha.funcionarioNome,
     linha.funcao,
     linha.tipo,
+    ...(segmentarMod ? [linha.tipoMod ?? ""] : []),
     linha.dias,
     linha.horasNormais,
     linha.horas50,
@@ -109,6 +119,8 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
   const linhaTotal = linhas.length + 2;
   const total = (coluna: string) =>
     linhas.length ? { f: `SUM(${coluna}${primeiraLinha}:${coluna}${ultimaLinha})` } : 0;
+  const primeiraColunaNumerica = segmentarMod ? "I" : "H";
+  const ultimaColuna = segmentarMod ? "O" : "N";
   XLSX.utils.sheet_add_aoa(
     detalhe,
     [
@@ -120,13 +132,10 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
         "",
         "",
         "",
-        total("H"),
-        total("I"),
-        total("J"),
-        total("K"),
-        total("L"),
-        total("M"),
-        total("N"),
+        ...(segmentarMod ? [""] : []),
+        ...Array.from({ length: 7 }, (_, indice) =>
+          total(String.fromCharCode(primeiraColunaNumerica.charCodeAt(0) + indice)),
+        ),
       ],
     ],
     { origin: `A${linhaTotal}` },
@@ -139,6 +148,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     { wch: 28 },
     { wch: 24 },
     { wch: 10 },
+    ...(segmentarMod ? [{ wch: 16 }] : []),
     { wch: 10 },
     { wch: 15 },
     { wch: 10 },
@@ -147,9 +157,14 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     { wch: 16 },
     { wch: 16 },
   ];
-  detalhe["!autofilter"] = { ref: `A1:N${Math.max(1, ultimaLinha)}` };
+  detalhe["!autofilter"] = { ref: `A1:${ultimaColuna}${Math.max(1, ultimaLinha)}` };
   aplicarFormato(detalhe, { inicio: 1, fim: linhas.length }, [2, 3], FORMATO_DATA);
-  aplicarFormato(detalhe, { inicio: 1, fim: linhas.length + 1 }, [11, 12, 13], FORMATO_MOEDA);
+  aplicarFormato(
+    detalhe,
+    { inicio: 1, fim: linhas.length + 1 },
+    segmentarMod ? [12, 13, 14] : [11, 12, 13],
+    FORMATO_MOEDA,
+  );
   XLSX.utils.book_append_sheet(workbook, detalhe, "Detalhamento");
   return workbook;
 }

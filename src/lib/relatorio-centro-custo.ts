@@ -1,5 +1,10 @@
 import type { CustoBreakdown } from "./custos-core";
 import { calcularCustoHorasExtras, isHoraExtra100 } from "./horas-extras.ts";
+import {
+  classificarTipoMod,
+  type EspecialidadeAjudante,
+  type TipoModRelatorio,
+} from "./especialidade-ajudante.ts";
 
 export type TipoRelatorio = "MOD" | "MOI";
 
@@ -8,6 +13,7 @@ export type AlocacaoRelatorio = {
   obra_id: string;
   data: string;
   tipo_mao_obra: "montagem" | "civil" | "indireta" | null;
+  especialidade_ajudante?: EspecialidadeAjudante | null;
 };
 
 export type RegistroRelatorio = {
@@ -32,6 +38,7 @@ export type LinhaComposicaoCentro = {
   funcionarioNome: string;
   funcao: string;
   tipo: TipoRelatorio;
+  tipoMod?: TipoModRelatorio | null;
   tipoInferido: boolean;
   dias: number;
   horasNormais: number;
@@ -46,6 +53,9 @@ export type CentroConsolidado = {
   id: string;
   nome: string;
   mod: number;
+  modCivil: number;
+  modMontagem: number;
+  modAClassificar: number;
   moi: number;
   total: number;
   funcs: number;
@@ -77,14 +87,20 @@ type Input = {
     ausencia: boolean | null;
   }) => number;
   horasNormaisPadrao: (dataISO: string) => number;
+  segmentarMod?: boolean;
 };
 
 function chave(funcionarioId: string, obraId: string, data: string) {
   return `${funcionarioId}|${obraId}|${data}`;
 }
 
-function chaveLinha(obraId: string, funcionarioId: string, tipo: TipoRelatorio) {
-  return `${obraId}|${funcionarioId}|${tipo}`;
+function chaveLinha(
+  obraId: string,
+  funcionarioId: string,
+  tipo: TipoRelatorio,
+  tipoMod: TipoModRelatorio | null,
+) {
+  return `${obraId}|${funcionarioId}|${tipo}|${tipoMod ?? ""}`;
 }
 
 export function consolidarCustosCentros(input: Input) {
@@ -108,14 +124,16 @@ export function consolidarCustosCentros(input: Input) {
     obraId: string,
     funcionario: FuncionarioRelatorio,
     tipo: TipoRelatorio,
+    tipoMod: TipoModRelatorio | null,
     tipoInferido: boolean,
   ) {
-    const id = chaveLinha(obraId, funcionario.id, tipo);
+    const id = chaveLinha(obraId, funcionario.id, tipo, tipoMod);
     const atual = linhas.get(id) ?? {
       funcionarioId: funcionario.id,
       funcionarioNome: funcionario.nome,
       funcao: funcionario.categoria_mo,
       tipo,
+      tipoMod,
       tipoInferido: false,
       datas: new Set<string>(),
       horasNormais: 0,
@@ -172,7 +190,19 @@ export function consolidarCustosCentros(input: Input) {
     if (custoBase <= 0) continue;
 
     const tipo = input.resolverTipo(alocacao, funcionario);
-    const linha = obterLinha(alocacao.obra_id, funcionario, tipo, !alocacao.tipo_mao_obra);
+    const tipoMod =
+      input.segmentarMod !== false && tipo === "MOD"
+        ? classificarTipoMod(funcionario.categoria_mo, alocacao.especialidade_ajudante)
+        : null;
+    if (tipoMod === "A classificar") {
+      if (funcionario.categoria_mo.trim().toUpperCase() === "AJUDANTE")
+        avisos.add("HÃ¡ alocaÃ§Ãµes de ajudantes sem classificaÃ§Ã£o entre Civil e Montagem.");
+      else
+        avisos.add(
+          "HÃ¡ categorias de mÃ£o de obra direta ainda sem classificaÃ§Ã£o entre Civil e Montagem.",
+        );
+    }
+    const linha = obterLinha(alocacao.obra_id, funcionario, tipo, tipoMod, !alocacao.tipo_mao_obra);
     linha.datas.add(alocacao.data);
     linha.horasNormais += falta
       ? 0
@@ -189,7 +219,17 @@ export function consolidarCustosCentros(input: Input) {
 
     const alocacao = alocIndex.get(chave(registro.funcionario_id, registro.obra_id, registro.data));
     const tipo = input.resolverTipo(alocacao, funcionario);
-    const linha = obterLinha(registro.obra_id, funcionario, tipo, !alocacao?.tipo_mao_obra);
+    const tipoMod =
+      input.segmentarMod !== false && tipo === "MOD"
+        ? classificarTipoMod(funcionario.categoria_mo, alocacao?.especialidade_ajudante)
+        : null;
+    const linha = obterLinha(
+      registro.obra_id,
+      funcionario,
+      tipo,
+      tipoMod,
+      !alocacao?.tipo_mao_obra,
+    );
     const horas = Number(registro.horas_extras || 0);
     if (isHoraExtra100(registro.data)) linha.horas100 += horas;
     else linha.horas50 += horas;
@@ -206,6 +246,7 @@ export function consolidarCustosCentros(input: Input) {
       funcionarioNome: linha.funcionarioNome,
       funcao: linha.funcao,
       tipo: linha.tipo,
+      tipoMod: linha.tipoMod,
       tipoInferido: linha.tipoInferido,
       dias: linha.datas.size,
       horasNormais: linha.horasNormais,
@@ -229,6 +270,15 @@ export function consolidarCustosCentros(input: Input) {
     const mod = composicao
       .filter((linha) => linha.tipo === "MOD")
       .reduce((total, linha) => total + linha.total, 0);
+    const modCivil = composicao
+      .filter((linha) => linha.tipo === "MOD" && linha.tipoMod === "Civil")
+      .reduce((total, linha) => total + linha.total, 0);
+    const modMontagem = composicao
+      .filter((linha) => linha.tipo === "MOD" && linha.tipoMod === "Montagem")
+      .reduce((total, linha) => total + linha.total, 0);
+    const modAClassificar = composicao
+      .filter((linha) => linha.tipo === "MOD" && linha.tipoMod === "A classificar")
+      .reduce((total, linha) => total + linha.total, 0);
     const moi = composicao
       .filter((linha) => linha.tipo === "MOI")
       .reduce((total, linha) => total + linha.total, 0);
@@ -236,6 +286,9 @@ export function consolidarCustosCentros(input: Input) {
       id: obraId,
       nome: input.obras.get(obraId) ?? "-",
       mod,
+      modCivil,
+      modMontagem,
+      modAClassificar,
       moi,
       total: mod + moi,
       funcs: new Set(composicao.map((linha) => linha.funcionarioId)).size,

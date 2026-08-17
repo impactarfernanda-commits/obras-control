@@ -9,6 +9,7 @@ import {
   type Beneficios,
 } from "@/lib/custos-core";
 import { tipoCategoria, type Categoria } from "@/lib/categorias-core";
+import { competenciaUsaSegmentacaoMod } from "@/lib/especialidade-ajudante";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import {
   consolidarCustosCentros,
@@ -31,6 +32,7 @@ export type RelatorioCentrosCustoDTO = {
   periodoFinal: string;
   centros: ReturnType<typeof consolidarCustosCentros>["centros"];
   avisos: string[];
+  segmentarMod: boolean;
 };
 
 const inputSchema = z.object({ competencia: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-01$/) });
@@ -55,6 +57,7 @@ export function montarRelatorioCentrosCusto(input: {
   registros: RegistroRelatorio[];
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
+  const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
   const funcionarios = input.funcionarios.filter(
     (f) => f.deleted_at == null && f.visivel_obras_control !== false,
   );
@@ -80,6 +83,7 @@ export function montarRelatorioCentrosCusto(input: {
     },
     calcularCustoBase: (args) => custoDoDia({ ...args, horasExtras: 0 }),
     horasNormaisPadrao: horasPadraoDoDia,
+    segmentarMod,
   });
   return {
     competencia: input.competencia,
@@ -90,6 +94,7 @@ export function montarRelatorioCentrosCusto(input: {
       linhas: centro.linhas.map((linha) => ({ ...linha })),
     })),
     avisos: [...resultado.avisos],
+    segmentarMod,
   };
 }
 
@@ -144,7 +149,7 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
         buscarTodasPaginas<AlocacaoRelatorio>((from, to) =>
           supabaseAdmin
             .from("alocacoes")
-            .select("id,funcionario_id,obra_id,data,tipo_mao_obra" as never)
+            .select("id,funcionario_id,obra_id,data,tipo_mao_obra,especialidade_ajudante" as never)
             .gte("data", periodo.start)
             .lte("data", periodo.end)
             .order("id", { ascending: true })

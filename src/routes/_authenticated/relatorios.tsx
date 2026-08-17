@@ -256,14 +256,22 @@ function RelatoriosPage() {
   }, [custoPorFunc, funcionariosRelatorio, registros]);
 
   const obrasComCusto = useMemo(() => relatorioCentros?.centros ?? [], [relatorioCentros]);
+  const segmentarMod = relatorioCentros?.segmentarMod ?? false;
   const avisosObras = useMemo(() => relatorioCentros?.avisos ?? [], [relatorioCentros]);
   const centroDetalhe = obrasComCusto.find((obra) => obra.id === centroDetalheId) ?? null;
 
   const totaisObra = useMemo(
     () =>
       obrasComCusto.reduce(
-        (acc, o) => ({ mod: acc.mod + o.mod, moi: acc.moi + o.moi, total: acc.total + o.total }),
-        { mod: 0, moi: 0, total: 0 },
+        (acc, o) => ({
+          mod: acc.mod + o.mod,
+          modCivil: acc.modCivil + o.modCivil,
+          modMontagem: acc.modMontagem + o.modMontagem,
+          modAClassificar: acc.modAClassificar + o.modAClassificar,
+          moi: acc.moi + o.moi,
+          total: acc.total + o.total,
+        }),
+        { mod: 0, modCivil: 0, modMontagem: 0, modAClassificar: 0, moi: 0, total: 0 },
       ),
     [obrasComCusto],
   );
@@ -488,6 +496,7 @@ function RelatoriosPage() {
         competencia: mesLabel,
         periodoInicial: start,
         periodoFinal: end,
+        segmentarMod,
       });
     } finally {
       setExportandoCentro(false);
@@ -584,106 +593,110 @@ function RelatoriosPage() {
                     <Skeleton className="h-10 w-full" />
                   </div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nome</TableHead>
-                        <TableHead>Categoria</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead className="text-right">Salário</TableHead>
-                        <TableHead className="text-right">Encargos</TableHead>
-                        <TableHead className="text-right">Prov. 13º</TableHead>
-                        <TableHead className="text-right">Prov. aviso</TableHead>
-                        <TableHead className="text-right">Prov. férias</TableHead>
-                        <TableHead className="text-right">Benefícios e seguro</TableHead>
-                        <TableHead className="text-right">Horas extras</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {ativos.length === 0 ? (
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[760px]">
+                      <TableHeader>
                         <TableRow>
-                          <TableCell
-                            colSpan={11}
-                            className="py-8 text-center text-muted-foreground"
-                          >
-                            Nenhum funcionário ativo.
+                          <TableHead>Nome</TableHead>
+                          <TableHead>Categoria</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead className="text-right">Salário</TableHead>
+                          <TableHead className="text-right">Encargos</TableHead>
+                          <TableHead className="text-right">Prov. 13º</TableHead>
+                          <TableHead className="text-right">Prov. aviso</TableHead>
+                          <TableHead className="text-right">Prov. férias</TableHead>
+                          <TableHead className="text-right">Benefícios e seguro</TableHead>
+                          <TableHead className="text-right">Horas extras</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ativos.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={11}
+                              className="py-8 text-center text-muted-foreground"
+                            >
+                              Nenhum funcionário ativo.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          ativos.map((f) => {
+                            const c = custoPorFunc.get(f.id);
+                            const tipo = tipoCategoria(f.categoria_mo, categorias);
+                            if (!c) return null;
+                            return (
+                              <TableRow key={f.id}>
+                                <TableCell className="font-medium">
+                                  <button
+                                    type="button"
+                                    className="flex cursor-pointer items-center gap-2 text-left hover:underline"
+                                    onClick={() => setFuncionarioDetalheId(f.id)}
+                                  >
+                                    <span>{f.nome}</span>
+                                    {!f.ativo && (
+                                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                        Inativo
+                                      </span>
+                                    )}
+                                  </button>
+                                </TableCell>
+                                <TableCell>{f.categoria_mo}</TableCell>
+                                <TableCell>
+                                  {tipo && <Badge variant="outline">{tipo}</Badge>}
+                                </TableCell>
+                                <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
+                                <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
+                                <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
+                                <TableCell className="text-right">
+                                  {fmtBRL(c.provAvisoPrevio)}
+                                </TableCell>
+                                <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
+                                <TableCell className="text-right">
+                                  <div>{fmtBRL(c.beneficios)}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Seguro: {fmtBRL(c.seguroVida)}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
+                                  {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
+                                    (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
+                                    0 && (
+                                    <div className="whitespace-nowrap text-xs text-muted-foreground">
+                                      {formatarHorasDecimais(
+                                        horasExtrasPorFunc.get(f.id)?.horas50 ?? 0,
+                                      )}{" "}
+                                      a 50% ·{" "}
+                                      {formatarHorasDecimais(
+                                        horasExtrasPorFunc.get(f.id)?.horas100 ?? 0,
+                                      )}{" "}
+                                      a 100%
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {fmtBRL(
+                                    c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0),
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                      <TableFooter>
+                        <TableRow>
+                          <TableCell colSpan={10} className="text-right font-medium">
+                            Total
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {fmtBRL(totalFolhaAtiva)}
                           </TableCell>
                         </TableRow>
-                      ) : (
-                        ativos.map((f) => {
-                          const c = custoPorFunc.get(f.id);
-                          const tipo = tipoCategoria(f.categoria_mo, categorias);
-                          if (!c) return null;
-                          return (
-                            <TableRow key={f.id}>
-                              <TableCell className="font-medium">
-                                <button
-                                  type="button"
-                                  className="flex cursor-pointer items-center gap-2 text-left hover:underline"
-                                  onClick={() => setFuncionarioDetalheId(f.id)}
-                                >
-                                  <span>{f.nome}</span>
-                                  {!f.ativo && (
-                                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-                                      Inativo
-                                    </span>
-                                  )}
-                                </button>
-                              </TableCell>
-                              <TableCell>{f.categoria_mo}</TableCell>
-                              <TableCell>
-                                {tipo && <Badge variant="outline">{tipo}</Badge>}
-                              </TableCell>
-                              <TableCell className="text-right">{fmtBRL(c.salario)}</TableCell>
-                              <TableCell className="text-right">{fmtBRL(c.encargos)}</TableCell>
-                              <TableCell className="text-right">{fmtBRL(c.prov13)}</TableCell>
-                              <TableCell className="text-right">
-                                {fmtBRL(c.provAvisoPrevio)}
-                              </TableCell>
-                              <TableCell className="text-right">{fmtBRL(c.provFerias)}</TableCell>
-                              <TableCell className="text-right">
-                                <div>{fmtBRL(c.beneficios)}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  Seguro: {fmtBRL(c.seguroVida)}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
-                                {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
-                                  (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
-                                  0 && (
-                                  <div className="whitespace-nowrap text-xs text-muted-foreground">
-                                    {formatarHorasDecimais(
-                                      horasExtrasPorFunc.get(f.id)?.horas50 ?? 0,
-                                    )}{" "}
-                                    a 50% ·{" "}
-                                    {formatarHorasDecimais(
-                                      horasExtrasPorFunc.get(f.id)?.horas100 ?? 0,
-                                    )}{" "}
-                                    a 100%
-                                  </div>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-semibold">
-                                {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0))}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                    <TableFooter>
-                      <TableRow>
-                        <TableCell colSpan={10} className="text-right font-medium">
-                          Total
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
-                          {fmtBRL(totalFolhaAtiva)}
-                        </TableCell>
-                      </TableRow>
-                    </TableFooter>
-                  </Table>
+                      </TableFooter>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -723,58 +736,103 @@ function RelatoriosPage() {
                       </AlertDescription>
                     </Alert>
                   )}
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Centro de custo</TableHead>
-                        <TableHead className="text-right">MOD</TableHead>
-                        <TableHead className="text-right">MOI</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {obrasComCusto.length === 0 ? (
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[760px]">
+                      <TableHeader>
                         <TableRow>
-                          <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                            Nenhuma alocação no mês.
-                          </TableCell>
+                          <TableHead>Centro de custo</TableHead>
+                          {segmentarMod ? (
+                            <>
+                              <TableHead className="text-right">MOD Civil</TableHead>
+                              <TableHead className="text-right">MOD Montagem</TableHead>
+                            </>
+                          ) : (
+                            <TableHead className="text-right">MOD</TableHead>
+                          )}
+                          {segmentarMod && totaisObra.modAClassificar > 0 && (
+                            <TableHead className="text-right">MOD a classificar</TableHead>
+                          )}
+                          <TableHead className="text-right">MOI</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
                         </TableRow>
-                      ) : (
-                        obrasComCusto.map((o) => (
-                          <TableRow key={o.id}>
-                            <TableCell className="font-medium">
-                              <button
-                                type="button"
-                                className="cursor-pointer text-left hover:underline"
-                                onClick={() => setCentroDetalheId(o.id)}
-                              >
-                                {o.nome}
-                              </button>
-                            </TableCell>
-                            <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
-                            <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
-                            <TableCell className="text-right font-semibold">
-                              {fmtBRL(o.total)}
+                      </TableHeader>
+                      <TableBody>
+                        {obrasComCusto.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={segmentarMod && totaisObra.modAClassificar > 0 ? 6 : 5}
+                              className="py-8 text-center text-muted-foreground"
+                            >
+                              Nenhuma alocação no mês.
                             </TableCell>
                           </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                    <TableFooter>
-                      <TableRow>
-                        <TableCell className="font-medium">Total geral</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {fmtBRL(totaisObra.mod)}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {fmtBRL(totaisObra.moi)}
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
-                          {fmtBRL(totaisObra.total)}
-                        </TableCell>
-                      </TableRow>
-                    </TableFooter>
-                  </Table>
+                        ) : (
+                          obrasComCusto.map((o) => (
+                            <TableRow key={o.id}>
+                              <TableCell className="font-medium">
+                                <button
+                                  type="button"
+                                  className="cursor-pointer text-left hover:underline"
+                                  onClick={() => setCentroDetalheId(o.id)}
+                                >
+                                  {o.nome}
+                                </button>
+                              </TableCell>
+                              {segmentarMod ? (
+                                <>
+                                  <TableCell className="text-right">{fmtBRL(o.modCivil)}</TableCell>
+                                  <TableCell className="text-right">
+                                    {fmtBRL(o.modMontagem)}
+                                  </TableCell>
+                                </>
+                              ) : (
+                                <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
+                              )}
+                              {segmentarMod && totaisObra.modAClassificar > 0 && (
+                                <TableCell className="text-right">
+                                  {fmtBRL(o.modAClassificar)}
+                                </TableCell>
+                              )}
+                              <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {fmtBRL(o.total)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                      <TableFooter>
+                        <TableRow>
+                          <TableCell className="font-medium">Total geral</TableCell>
+                          {segmentarMod ? (
+                            <>
+                              <TableCell className="text-right font-medium">
+                                {fmtBRL(totaisObra.modCivil)}
+                              </TableCell>
+                              <TableCell className="text-right font-medium">
+                                {fmtBRL(totaisObra.modMontagem)}
+                              </TableCell>
+                            </>
+                          ) : (
+                            <TableCell className="text-right font-medium">
+                              {fmtBRL(totaisObra.mod)}
+                            </TableCell>
+                          )}
+                          {segmentarMod && totaisObra.modAClassificar > 0 && (
+                            <TableCell className="text-right font-medium">
+                              {fmtBRL(totaisObra.modAClassificar)}
+                            </TableCell>
+                          )}
+                          <TableCell className="text-right font-medium">
+                            {fmtBRL(totaisObra.moi)}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {fmtBRL(totaisObra.total)}
+                          </TableCell>
+                        </TableRow>
+                      </TableFooter>
+                    </Table>
+                  </div>
                 </>
               )}
             </CardContent>
@@ -947,7 +1005,15 @@ function RelatoriosPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                 {[
                   ["Custo total", fmtBRL(centroDetalhe.total)],
-                  ["MOD", fmtBRL(centroDetalhe.mod)],
+                  ...(segmentarMod
+                    ? [
+                        ["MOD Civil", fmtBRL(centroDetalhe.modCivil)],
+                        ["MOD Montagem", fmtBRL(centroDetalhe.modMontagem)],
+                      ]
+                    : [["MOD", fmtBRL(centroDetalhe.mod)]]),
+                  ...(segmentarMod && centroDetalhe.modAClassificar > 0
+                    ? [["MOD a classificar", fmtBRL(centroDetalhe.modAClassificar)]]
+                    : []),
                   ["MOI", fmtBRL(centroDetalhe.moi)],
                   ["Funcionários", String(centroDetalhe.funcs)],
                   ["Dias alocados — soma da equipe", String(centroDetalhe.dias)],
@@ -967,6 +1033,7 @@ function RelatoriosPage() {
                       <TableHead>Funcionário</TableHead>
                       <TableHead>Função</TableHead>
                       <TableHead>Tipo</TableHead>
+                      {segmentarMod && <TableHead>Tipo MOD</TableHead>}
                       <TableHead className="text-right">Dias</TableHead>
                       <TableHead className="text-right">Horas normais</TableHead>
                       <TableHead className="text-right">HE 50%</TableHead>
@@ -979,14 +1046,19 @@ function RelatoriosPage() {
                   <TableBody>
                     {centroDetalhe.linhas.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                        <TableCell
+                          colSpan={segmentarMod ? 11 : 10}
+                          className="py-8 text-center text-muted-foreground"
+                        >
                           Nenhum funcionário ou custo encontrado para este centro de custo na
                           competência selecionada.
                         </TableCell>
                       </TableRow>
                     ) : (
                       centroDetalhe.linhas.map((linha) => (
-                        <TableRow key={`${linha.funcionarioId}|${linha.tipo}`}>
+                        <TableRow
+                          key={`${linha.funcionarioId}|${linha.tipo}|${linha.tipoMod ?? ""}`}
+                        >
                           <TableCell className="font-medium">
                             {podeVerFolha ? (
                               <button
@@ -1013,6 +1085,7 @@ function RelatoriosPage() {
                               {linha.tipoInferido ? "*" : ""}
                             </span>
                           </TableCell>
+                          {segmentarMod && <TableCell>{linha.tipoMod ?? "-"}</TableCell>}
                           <TableCell className="text-right">{linha.dias}</TableCell>
                           <TableCell className="text-right">
                             {formatarHorasDecimais(linha.horasNormais)}

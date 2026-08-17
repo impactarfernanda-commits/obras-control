@@ -10,10 +10,14 @@ import {
 } from "./relatorio-centro-custo-xlsx.ts";
 
 const input: CostCenterWorkbookInput = {
+  segmentarMod: true,
   centro: {
     id: "o1",
     nome: "230 - IGUÁ ETE SUL",
     mod: 200.25,
+    modCivil: 0,
+    modMontagem: 200.25,
+    modAClassificar: 0,
     moi: 77.5,
     total: 277.75,
     funcs: 1,
@@ -25,6 +29,7 @@ const input: CostCenterWorkbookInput = {
         funcionarioNome: "Ana",
         funcao: "Montadora",
         tipo: "MOD",
+        tipoMod: "Montagem",
         tipoInferido: false,
         dias: 2,
         horasNormais: 17.5,
@@ -66,15 +71,18 @@ test("resumo preserva centro, competência e período 25→24", () => {
 
 test("KPIs financeiros e quantitativos do modal permanecem numéricos", () => {
   const { resumo } = sheets();
-  for (const index of [4, 5, 6, 7, 8, 9]) assert.equal(typeof resumo[index][1], "number");
-  assert.deepEqual([resumo[4][1], resumo[5][1], resumo[6][1]], [277.75, 200.25, 77.5]);
+  for (const index of [4, 5, 6, 7, 8, 9, 10]) assert.equal(typeof resumo[index][1], "number");
+  assert.deepEqual(
+    [resumo[4][1], resumo[5][1], resumo[6][1], resumo[7][1]],
+    [277.75, 0, 200.25, 77.5],
+  );
 });
 
 test("detalhamento preserva funcionário, função, tipo e números fornecidos pelo modal", () => {
   const linha = sheets().detalhe[1];
-  assert.deepEqual(linha.slice(4, 7), ["Ana", "Montadora", "MOD"]);
-  assert.deepEqual(linha.slice(7, 14), [2, 17.5, 1.5, 0, 192.75, 7.5, 200.25]);
-  for (const valor of linha.slice(7, 14)) assert.equal(typeof valor, "number");
+  assert.deepEqual(linha.slice(4, 8), ["Ana", "Montadora", "MOD", "Montagem"]);
+  assert.deepEqual(linha.slice(8, 15), [2, 17.5, 1.5, 0, 192.75, 7.5, 200.25]);
+  for (const valor of linha.slice(8, 15)) assert.equal(typeof valor, "number");
 });
 
 test("centro sem HE exporta zero numérico", () => {
@@ -84,9 +92,9 @@ test("centro sem HE exporta zero numérico", () => {
     linhas: [{ ...input.centro.linhas[0], horas50: 0, custoHE: 0 }],
   };
   const { resumo, detalhe } = sheets({ centro });
-  assert.equal(resumo[9][1], 0);
-  assert.equal(detalhe[1][9], 0);
-  assert.equal(detalhe[1][12], 0);
+  assert.equal(resumo[10][1], 0);
+  assert.equal(detalhe[1][10], 0);
+  assert.equal(detalhe[1][13], 0);
 });
 
 test("quantidade variável preserva ordem e alocação parcial sem recalcular custos", () => {
@@ -103,12 +111,23 @@ test("quantidade variável preserva ordem e alocação parcial sem recalcular cu
   const detalhe = sheets({ centro }).detalhe;
   assert.equal(detalhe[1][4], "Ana");
   assert.equal(detalhe[2][4], "Bia");
-  assert.equal(detalhe[2][11], 31.23);
+  assert.equal(detalhe[2][12], 31.23);
   assert.equal(detalhe.length, 4);
 });
 
 test("linha TOTAL usa fórmulas com quantidade dinâmica", () => {
   const workbook = sheets().workbook;
+  assert.equal(workbook.Sheets.Detalhamento.O3.f, "SUM(O2:O2)");
+  assert.equal(workbook.Sheets.Detalhamento.I3.f, "SUM(I2:I2)");
+});
+
+test("histórico exporta o leiaute antigo MOD, MOI e Total sem Tipo MOD", () => {
+  const { resumo, detalhe, workbook } = sheets({ segmentarMod: false });
+  assert.deepEqual(
+    resumo.slice(4, 7).map((linha) => linha[0]),
+    ["Custo total", "MOD", "MOI"],
+  );
+  assert.equal(detalhe[0].includes("Tipo MOD"), false);
   assert.equal(workbook.Sheets.Detalhamento.N3.f, "SUM(N2:N2)");
   assert.equal(workbook.Sheets.Detalhamento.H3.f, "SUM(H2:H2)");
 });
@@ -123,5 +142,5 @@ test("nome do arquivo remove caracteres inválidos e permanece legível", () => 
 
 test("exportação é transformação pura dos dados recebidos", () => {
   assert.equal(buildCostCenterWorkbook.length, 1);
-  assert.equal(input.centro.linhas[0].total, sheets().detalhe[1][13]);
+  assert.equal(input.centro.linhas[0].total, sheets().detalhe[1][14]);
 });
