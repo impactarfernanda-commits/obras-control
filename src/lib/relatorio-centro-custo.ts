@@ -1,6 +1,7 @@
 import type { CustoBreakdown } from "./custos-core";
 import { calcularCustoHorasExtras, isHoraExtra100 } from "./horas-extras.ts";
 import {
+  categoriaEhAjudante,
   classificarTipoMod,
   type EspecialidadeAjudante,
   type TipoModRelatorio,
@@ -195,7 +196,7 @@ export function consolidarCustosCentros(input: Input) {
         ? classificarTipoMod(funcionario.categoria_mo, alocacao.especialidade_ajudante)
         : null;
     if (tipoMod === "A classificar") {
-      if (funcionario.categoria_mo.trim().toUpperCase() === "AJUDANTE")
+      if (categoriaEhAjudante(funcionario.categoria_mo))
         avisos.add("Há alocações de ajudantes sem classificação entre Civil e Montagem.");
       else
         avisos.add(
