@@ -4,7 +4,15 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
-import { isHandoffCode, PORTAL_ORIGIN, safeReturnPath } from "@/lib/sso";
+import {
+  isHandoffCode,
+  isPortalBootstrap,
+  OBRAS_ERROR_MESSAGE,
+  OBRAS_READY_MESSAGE,
+  portalBootstrapMessage,
+  PORTAL_ORIGIN,
+  safeReturnPath,
+} from "@/lib/sso";
 
 export const Route = createFileRoute("/sso/callback")({
   ssr: false,
@@ -23,7 +31,19 @@ function SsoCallback() {
     void (async () => {
       const url = new URL(window.location.href),
         code = url.searchParams.get("code");
+      const background = isPortalBootstrap(url, window.parent !== window);
+      const notifyPortal = (
+        type: typeof OBRAS_READY_MESSAGE | typeof OBRAS_ERROR_MESSAGE,
+        returnPath?: string,
+      ) => {
+        if (background)
+          window.parent.postMessage(
+            portalBootstrapMessage(type, returnPath),
+            new URL(PORTAL_ORIGIN).origin,
+          );
+      };
       if (!isHandoffCode(code)) {
+        notifyPortal(OBRAS_ERROR_MESSAGE);
         if (active) setFailed(true);
         return;
       }
@@ -32,6 +52,7 @@ function SsoCallback() {
           body: { code },
         });
         url.searchParams.delete("code");
+        url.searchParams.delete("portal_bootstrap");
         window.history.replaceState({}, document.title, url.pathname);
         if (error || typeof data?.token_hash !== "string") throw new Error("EXCHANGE_FAILED");
         const { data: old } = await supabase.auth.getSession();
@@ -41,8 +62,25 @@ function SsoCallback() {
           type: "magiclink",
         });
         if (verifyError || !verified.session) throw new Error("VERIFY_FAILED");
-        window.location.replace(safeReturnPath(data.return_path));
+        const returnPath = safeReturnPath(data.return_path);
+        const [userResult, rolesResult, profileResult] = await Promise.all([
+          supabase.auth.getUser(),
+          supabase.from("user_roles").select("role").eq("user_id", verified.session.user.id),
+          supabase
+            .from("users_profiles")
+            .select("full_name")
+            .eq("id", verified.session.user.id)
+            .maybeSingle(),
+        ]);
+        if (userResult.error || !userResult.data.user || rolesResult.error || profileResult.error)
+          throw new Error("BOOTSTRAP_FAILED");
+        if (background) {
+          notifyPortal(OBRAS_READY_MESSAGE, returnPath);
+          return;
+        }
+        window.location.replace(returnPath);
       } catch {
+        notifyPortal(OBRAS_ERROR_MESSAGE);
         if (active) setFailed(true);
       }
     })();

@@ -23,3 +23,17 @@ export function portalLoginUrl(path: string) {
 export function isHandoffCode(code: string | null): code is string {
   return typeof code === "string" && /^[A-Za-z0-9_-]{43}$/u.test(code);
 }
+
+export const OBRAS_READY_MESSAGE = "obras-control-ready";
+export const OBRAS_ERROR_MESSAGE = "obras-control-error";
+
+export function isPortalBootstrap(url: URL, embedded: boolean) {
+  return embedded && url.searchParams.get("portal_bootstrap") === "1";
+}
+
+export function portalBootstrapMessage(
+  type: typeof OBRAS_READY_MESSAGE | typeof OBRAS_ERROR_MESSAGE,
+  returnPath?: string,
+) {
+  return returnPath ? { type, return_path: safeReturnPath(returnPath) } : { type };
+}

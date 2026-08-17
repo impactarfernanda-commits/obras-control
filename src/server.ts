@@ -37,12 +37,24 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   });
 }
 
+function applySsoFramePolicy(request: Request, response: Response) {
+  if (new URL(request.url).pathname !== "/sso/callback") return response;
+  const headers = new Headers(response.headers);
+  headers.set("content-security-policy", "frame-ancestors 'self' https://portal-tks-br.vercel.app");
+  headers.delete("x-frame-options");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return applySsoFramePolicy(request, await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return new Response(renderErrorPage(), {

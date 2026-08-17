@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isHandoffCode, portalLoginUrl, safeReturnPath } from "./sso.ts";
+import {
+  isHandoffCode,
+  isPortalBootstrap,
+  OBRAS_ERROR_MESSAGE,
+  OBRAS_READY_MESSAGE,
+  portalBootstrapMessage,
+  portalLoginUrl,
+  safeReturnPath,
+} from "./sso.ts";
 const callback = readFileSync(new URL("../routes/sso.callback.tsx", import.meta.url), "utf8");
 const auth = readFileSync(new URL("../routes/auth.tsx", import.meta.url), "utf8");
 test("return_path aceita apenas rotas internas permitidas", () => {
@@ -49,4 +57,36 @@ test("callback limpa URL, troca sessão antiga e verifica OTP", () => {
 });
 test("produção não oferece login ou cadastro local", () => {
   assert.match(auth, /component: import\.meta\.env\.PROD \? ProductionAuthRedirect : AuthPage/);
+});
+test("bootstrap em iframe e explicito; acesso direto preserva fallback", () => {
+  assert.equal(
+    isPortalBootstrap(new URL("https://obras.test/sso/callback?portal_bootstrap=1"), true),
+    true,
+  );
+  assert.equal(
+    isPortalBootstrap(new URL("https://obras.test/sso/callback?portal_bootstrap=1"), false),
+    false,
+  );
+  assert.match(callback, /Entrando no Obras Control/);
+});
+test("ready ocorre apenas depois de sessao, usuario e perfil resolvidos", () => {
+  const verify = callback.indexOf("verifyOtp");
+  const user = callback.indexOf("supabase.auth.getUser()");
+  const ready = callback.indexOf("notifyPortal(OBRAS_READY_MESSAGE");
+  assert.ok(verify >= 0 && user > verify && ready > user);
+  assert.match(callback, /Promise\.all/);
+});
+test("mensagem ao Portal tem payload minimo, origin exato e nenhum token", () => {
+  assert.deepEqual(portalBootstrapMessage(OBRAS_READY_MESSAGE, "/obras"), {
+    type: OBRAS_READY_MESSAGE,
+    return_path: "/obras",
+  });
+  assert.deepEqual(portalBootstrapMessage(OBRAS_ERROR_MESSAGE), { type: OBRAS_ERROR_MESSAGE });
+  const messaging = callback.match(/postMessage\([\s\S]*?\);/)?.[0] ?? "";
+  assert.match(messaging, /new URL\(PORTAL_ORIGIN\)\.origin/);
+  assert.doesNotMatch(messaging, /access_token|refresh_token|token_hash/);
+});
+test("erro de bootstrap sinaliza falha sem loop de redirect", () => {
+  assert.match(callback, /notifyPortal\(OBRAS_ERROR_MESSAGE\)/);
+  assert.equal((callback.match(/window\.location\.replace/g) ?? []).length, 1);
 });

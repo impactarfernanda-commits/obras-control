@@ -110,10 +110,7 @@ test("raiz e Dashboard redirecionam para Alocações sem remover sua implementa�
 test("Alocações e o retorno padrão do SSO continuam preservados", () => {
   assert.match(sourceAlocacoes, /createFileRoute\("\/_authenticated\/alocacoes"\)/);
   assert.match(sourceSsoCallback, /safeReturnPath/);
-  assert.match(
-    sourceSsoCallback,
-    /window\.location\.replace\(safeReturnPath\(data\.return_path\)\)/,
-  );
+  assert.match(sourceSsoCallback, /const returnPath = safeReturnPath\(data\.return_path\)/);
 });
 
 test("nenhum label da sidebar fica vazio", () => {
