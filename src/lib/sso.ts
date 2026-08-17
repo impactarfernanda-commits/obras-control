@@ -19,6 +19,10 @@ export function safeReturnPath(path: string | null | undefined) {
 }
 export const PORTAL_LAUNCH_WINDOW_NAME = "obras-control-bootstrap";
 
+export function portalLogoutUrl() {
+  return `${PORTAL_ORIGIN}/logout`;
+}
+
 export function consumePortalLaunchMarker(target: Pick<Window, "name">) {
   const launched = target.name === PORTAL_LAUNCH_WINDOW_NAME;
   if (launched) target.name = "";

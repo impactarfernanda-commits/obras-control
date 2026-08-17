@@ -10,7 +10,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { highestRole, type Role } from "@/lib/access-control";
-import { PORTAL_ORIGIN } from "@/lib/sso";
+import { portalLogoutUrl } from "@/lib/sso";
 
 interface AuthContextValue {
   user: User | null;
@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileAttempt, setProfileAttempt] = useState(0);
   const [authAttempt, setAuthAttempt] = useState(0);
   const userVersion = useRef(0);
+  const signingOut = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -137,8 +138,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isDirector: role === "diretor",
     isManagerOrAbove: role === "diretor" || role === "gerente",
     signOut: async () => {
-      await supabase.auth.signOut();
-      window.location.assign(PORTAL_ORIGIN);
+      if (signingOut.current) return;
+      signingOut.current = true;
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } finally {
+        userVersion.current += 1;
+        setSession(null);
+        setUser(null);
+        setRole(null);
+        setFullName("");
+        setAuthStatus("unauthenticated");
+        setProfileStatus("idle");
+        setLoading(false);
+        window.location.replace(portalLogoutUrl());
+      }
     },
   };
 
