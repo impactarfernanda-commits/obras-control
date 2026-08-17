@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarRange, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ import {
   competenciaUsaSegmentacaoMod,
   type EspecialidadeAjudante,
 } from "@/lib/especialidade-ajudante";
+import { sugerirEspecialidadePeriodo } from "@/lib/resolver-especialidade-ajudante";
 import {
   enumerarDiasCorridos,
   mensagemErroRegistro,
@@ -126,6 +127,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [modo, setModo] = useState<"pular" | "sobrescrever">("pular");
   const [verificando, setVerificando] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const contextoSugestaoAplicado = useRef("");
 
   const { data: funcionarios } = useQuery({
     queryKey: ["funcionarios-alocar-periodo-base-segura"],
@@ -175,9 +177,66 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const periodoExigeEspecialidade =
     funcionarioEhAjudante &&
     dias.some((data) => competenciaUsaSegmentacaoMod(calcularCompetencia(data).competencia));
+  const competenciasPeriodo = useMemo(
+    () => Array.from(new Set(dias.map((data) => calcularCompetencia(data).competencia))),
+    [dias],
+  );
+  const contextoSugestao = `${funcionarioId}|${obraId}|${competenciasPeriodo.join(",")}`;
+  const historicoEspecialidadeQuery = useQuery({
+    queryKey: ["especialidade-ajudante-periodo", funcionarioId, obraId, competenciasPeriodo],
+    enabled: open && periodoExigeEspecialidade && competenciasPeriodo.length > 0,
+    queryFn: async () => {
+      const periodos = competenciasPeriodo.map((competencia) =>
+        calcularCompetencia(`${competencia}-01`),
+      );
+      const dataInicioHistorico = periodos.map(({ data_inicio }) => data_inicio).sort()[0];
+      const dataFimHistorico = periodos
+        .map(({ data_fim }) => data_fim)
+        .sort()
+        .at(-1)!;
+      const { data, error } = await supabase
+        .from("alocacoes")
+        .select("funcionario_id, obra_id, data, especialidade_ajudante")
+        .eq("funcionario_id", funcionarioId)
+        .eq("obra_id", obraId)
+        .gte("data", dataInicioHistorico)
+        .lte("data", dataFimHistorico)
+        .not("especialidade_ajudante", "is", null);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const sugestaoEspecialidade = useMemo(
+    () =>
+      sugerirEspecialidadePeriodo({
+        funcionarioId,
+        obraId,
+        competencias: competenciasPeriodo,
+        historico: historicoEspecialidadeQuery.data ?? [],
+      }),
+    [competenciasPeriodo, funcionarioId, historicoEspecialidadeQuery.data, obraId],
+  );
   useEffect(() => {
-    if (!periodoExigeEspecialidade) setEspecialidadeAjudante(null);
-  }, [periodoExigeEspecialidade]);
+    contextoSugestaoAplicado.current = "";
+    setEspecialidadeAjudante(null);
+  }, [contextoSugestao]);
+  useEffect(() => {
+    if (
+      !periodoExigeEspecialidade ||
+      historicoEspecialidadeQuery.data === undefined ||
+      contextoSugestaoAplicado.current === contextoSugestao
+    )
+      return;
+    contextoSugestaoAplicado.current = contextoSugestao;
+    setEspecialidadeAjudante(
+      sugestaoEspecialidade.estado === "resolvida" ? sugestaoEspecialidade.especialidade : null,
+    );
+  }, [
+    contextoSugestao,
+    historicoEspecialidadeQuery.data,
+    periodoExigeEspecialidade,
+    sugestaoEspecialidade,
+  ]);
   const diasExcluidosPorDesligamento = useMemo(() => {
     if (!funcSelecionado?.data_desligamento) return 0;
     const diasIntervalo = ausenciaPlanejada
@@ -542,6 +601,12 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                     <SelectItem value="montagem">Montagem</SelectItem>
                   </SelectContent>
                 </Select>
+                {sugestaoEspecialidade.estado === "conflitante" && (
+                  <p className="text-xs text-muted-foreground">
+                    Há atuações diferentes nas competências do período. Sua escolha será aplicada a
+                    todas as novas alocações.
+                  </p>
+                )}
               </div>
             )}
             <div className="space-y-1.5">

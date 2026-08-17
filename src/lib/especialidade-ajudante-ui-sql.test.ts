@@ -147,5 +147,29 @@ test("formularios ocultam e limpam a especialidade para nao-AJUDANTE", () => {
     tela,
     /if \(!funcionarioSelecionadoExigeEspecialidade\) form\.setValue\("especialidade_ajudante", null\)/,
   );
-  assert.match(periodo, /if \(!periodoExigeEspecialidade\) setEspecialidadeAjudante\(null\)/);
+  assert.match(
+    periodo,
+    /contextoSugestaoAplicado\.current = "";[\s\S]*setEspecialidadeAjudante\(null\)/,
+  );
+});
+
+test("alocar periodo consulta alocacoes persistidas e permite escolha manual prevalecer", () => {
+  assert.match(periodo, /queryKey: \["especialidade-ajudante-periodo"/);
+  assert.match(periodo, /\.from\("alocacoes"\)[\s\S]*especialidade_ajudante/);
+  assert.match(periodo, /sugerirEspecialidadePeriodo/);
+  assert.match(
+    periodo,
+    /onValueChange=\{\(value: EspecialidadeAjudante\) => setEspecialidadeAjudante\(value\)\}/,
+  );
+});
+
+test("copiar dia e alocar periodo reutilizam diretamente a classificacao persistida", () => {
+  const copiar = readFileSync("src/components/CopiarDiaAnteriorDialog.tsx", "utf8");
+  for (const fonte of [copiar, periodo]) {
+    assert.match(fonte, /\.from\("alocacoes"\)/);
+    assert.match(fonte, /especialidade_ajudante/);
+    assert.doesNotMatch(fonte, /localStorage|sessionStorage/);
+  }
+  assert.match(copiar, /especialidadeOrigem: alocacaoOrigem\?\.especialidade_ajudante/);
+  assert.match(periodo, /queryKey: \["especialidade-ajudante-periodo"/);
 });
