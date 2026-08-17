@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  consumePortalLaunchMarker,
   isHandoffCode,
   isPortalBootstrap,
   OBRAS_ERROR_MESSAGE,
   OBRAS_READY_MESSAGE,
   portalBootstrapMessage,
   portalLoginUrl,
+  PORTAL_ORIGIN,
   safeReturnPath,
 } from "./sso.ts";
 const callback = readFileSync(new URL("../routes/sso.callback.tsx", import.meta.url), "utf8");
@@ -38,7 +40,10 @@ test("rotas sem sessao e logout levam ao Portal sem parametro de autoabertura", 
     "utf8",
   );
   const authProvider = readFileSync(new URL("../hooks/use-auth.tsx", import.meta.url), "utf8");
-  assert.match(guard, /window\.location\.replace\(portalLoginUrl\(pathname\)\)/);
+  assert.match(
+    guard,
+    /window\.location\.replace\(portalLoginUrl\(pathname, consumePortalLaunchMarker\(window\)\)\)/,
+  );
   assert.match(authProvider, /window\.location\.assign\(PORTAL_ORIGIN\)/);
   assert.doesNotMatch(authProvider, /app=obras-control/);
 });
@@ -89,4 +94,23 @@ test("mensagem ao Portal tem payload minimo, origin exato e nenhum token", () =>
 test("erro de bootstrap sinaliza falha sem loop de redirect", () => {
   assert.match(callback, /notifyPortal\(OBRAS_ERROR_MESSAGE\)/);
   assert.equal((callback.match(/window\.location\.replace/g) ?? []).length, 1);
+});
+test("origin corporativo configurado governa postMessage e retorno ao Portal", () => {
+  assert.equal(new URL(PORTAL_ORIGIN).origin, PORTAL_ORIGIN);
+  assert.match(callback, /new URL\(PORTAL_ORIGIN\)\.origin/);
+  assert.doesNotMatch(callback, /postMessage\([^)]*,\s*["']\*["']/);
+});
+test("retorno top-level sem sessao sinaliza falha uma vez e nao reinicia SSO", () => {
+  const target = { name: "obras-control-bootstrap" };
+  assert.equal(consumePortalLaunchMarker(target), true);
+  assert.equal(target.name, "");
+  assert.equal(consumePortalLaunchMarker(target), false);
+  const url = new URL(portalLoginUrl("/alocacoes", true));
+  assert.equal(url.searchParams.get("obras_auth_failed"), "1");
+  const guard = readFileSync(
+    new URL("../routes/_authenticated/route.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(guard, /consumePortalLaunchMarker\(window\)/);
+  assert.doesNotMatch(guard, /startObrasSso|portal_bootstrap/);
 });

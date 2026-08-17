@@ -6,7 +6,7 @@ import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
-import { portalLoginUrl } from "@/lib/sso";
+import { consumePortalLaunchMarker, portalLoginUrl } from "@/lib/sso";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -25,9 +25,10 @@ function Shell() {
   const { loading, authStatus, profileStatus, retryProfile, signOut } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   if (authStatus === "unauthenticated") {
-    window.location.replace(portalLoginUrl(pathname));
+    window.location.replace(portalLoginUrl(pathname, consumePortalLaunchMarker(window)));
     return null;
   }
+  if (authStatus === "authenticated") consumePortalLaunchMarker(window);
   return (
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-background">

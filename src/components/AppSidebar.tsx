@@ -28,6 +28,7 @@ import { canGerenciarUsuarios } from "@/lib/permissoes-especiais";
 import { Button } from "@/components/ui/button";
 import { APP_NAVIGATION_ITEMS } from "@/lib/navigation";
 import type { Role } from "@/lib/access-control";
+import { PORTAL_ORIGIN } from "@/lib/sso";
 
 type Item = {
   title: string;
@@ -49,8 +50,6 @@ const icons = {
 } satisfies Record<(typeof APP_NAVIGATION_ITEMS)[number]["url"], Item["icon"]>;
 
 const items: Item[] = APP_NAVIGATION_ITEMS.map((item) => ({ ...item, icon: icons[item.url] }));
-
-const portalTanksUrl = import.meta.env.VITE_PORTAL_TANKS_URL || "https://portal-tks-br.vercel.app/";
 
 export function AppSidebar() {
   const { state } = useSidebar();
@@ -105,7 +104,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Portal Tanks BR">
-              <a href={portalTanksUrl} className="flex items-center gap-3">
+              <a href={PORTAL_ORIGIN} className="flex items-center gap-3">
                 <House className="h-4 w-4 shrink-0" />
                 {!collapsed && <span>Portal Tanks BR</span>}
               </a>

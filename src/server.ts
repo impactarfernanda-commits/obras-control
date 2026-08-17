@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { configuredPortalOrigin } from "./lib/origin-config";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -37,10 +38,14 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   });
 }
 
-function applySsoFramePolicy(request: Request, response: Response) {
+export function applySsoFramePolicy(
+  request: Request,
+  response: Response,
+  env?: Record<string, unknown>,
+) {
   if (new URL(request.url).pathname !== "/sso/callback") return response;
   const headers = new Headers(response.headers);
-  headers.set("content-security-policy", "frame-ancestors 'self' https://portal-tks-br.vercel.app");
+  headers.set("content-security-policy", `frame-ancestors 'self' ${configuredPortalOrigin(env)}`);
   headers.delete("x-frame-options");
   return new Response(response.body, {
     status: response.status,
@@ -54,7 +59,11 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return applySsoFramePolicy(request, await normalizeCatastrophicSsrResponse(response));
+      return applySsoFramePolicy(
+        request,
+        await normalizeCatastrophicSsrResponse(response),
+        env as Record<string, unknown>,
+      );
     } catch (error) {
       console.error(error);
       return new Response(renderErrorPage(), {
