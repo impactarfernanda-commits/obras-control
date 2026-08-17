@@ -55,7 +55,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { user, role, fullName, isDirector, isManagerOrAbove, signOut } = useAuth();
+  const { user, role, fullName, isDirector, isManagerOrAbove, isLoggingOut, signOut } = useAuth();
 
   const level = isDirector ? 3 : isManagerOrAbove ? 2 : 1;
   const canManageUsers = canGerenciarUsuarios(user?.email);
@@ -123,6 +123,7 @@ export function AppSidebar() {
           variant="ghost"
           size="sm"
           onClick={signOut}
+          disabled={isLoggingOut}
           className="justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <LogOut className="h-4 w-4" />

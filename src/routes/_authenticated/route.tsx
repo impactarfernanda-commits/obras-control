@@ -22,9 +22,9 @@ function AuthenticatedLayout() {
 }
 
 function Shell() {
-  const { loading, authStatus, profileStatus, retryProfile, signOut } = useAuth();
+  const { loading, authStatus, profileStatus, retryProfile, isLoggingOut, signOut } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  if (authStatus === "unauthenticated") {
+  if (authStatus === "unauthenticated" && !isLoggingOut) {
     window.location.replace(portalLoginUrl(pathname, consumePortalLaunchMarker(window)));
     return null;
   }
@@ -53,7 +53,7 @@ function Shell() {
                 </p>
                 <div className="mt-4 flex justify-center gap-2">
                   <Button onClick={retryProfile}>Tentar novamente</Button>
-                  <Button variant="outline" onClick={signOut}>
+                  <Button variant="outline" onClick={signOut} disabled={isLoggingOut}>
                     Sair
                   </Button>
                 </div>

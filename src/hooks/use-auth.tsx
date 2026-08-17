@@ -23,6 +23,7 @@ interface AuthContextValue {
   retryProfile: () => void;
   isDirector: boolean;
   isManagerOrAbove: boolean;
+  isLoggingOut: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -38,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileStatus, setProfileStatus] = useState<AuthContextValue["profileStatus"]>("idle");
   const [profileAttempt, setProfileAttempt] = useState(0);
   const [authAttempt, setAuthAttempt] = useState(0);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const userVersion = useRef(0);
   const signingOut = useRef(false);
 
@@ -137,9 +139,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retryProfile,
     isDirector: role === "diretor",
     isManagerOrAbove: role === "diretor" || role === "gerente",
+    isLoggingOut,
     signOut: async () => {
       if (signingOut.current) return;
       signingOut.current = true;
+      setIsLoggingOut(true);
       try {
         await supabase.auth.signOut({ scope: "local" });
       } finally {
