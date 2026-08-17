@@ -120,7 +120,7 @@ test("centro com MOD e MOI soma os dois tipos no total geral", () => {
   );
 });
 
-test("segmenta o cenÃ¡rio controlado sem alterar o total financeiro", () => {
+test("segmenta o cenário controlado sem alterar o total financeiro", () => {
   const lista = [
     { id: "pedreiro", nome: "Pedreiro", categoria_mo: "PEDREIRO", valor: 1000 },
     { id: "montador", nome: "Montador", categoria_mo: "MONTADOR I", valor: 2000 },

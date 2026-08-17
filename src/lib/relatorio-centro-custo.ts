@@ -196,10 +196,10 @@ export function consolidarCustosCentros(input: Input) {
         : null;
     if (tipoMod === "A classificar") {
       if (funcionario.categoria_mo.trim().toUpperCase() === "AJUDANTE")
-        avisos.add("HÃ¡ alocaÃ§Ãµes de ajudantes sem classificaÃ§Ã£o entre Civil e Montagem.");
+        avisos.add("Há alocações de ajudantes sem classificação entre Civil e Montagem.");
       else
         avisos.add(
-          "HÃ¡ categorias de mÃ£o de obra direta ainda sem classificaÃ§Ã£o entre Civil e Montagem.",
+          "Há categorias de mão de obra direta ainda sem classificação entre Civil e Montagem.",
         );
     }
     const linha = obterLinha(alocacao.obra_id, funcionario, tipo, tipoMod, !alocacao.tipo_mao_obra);

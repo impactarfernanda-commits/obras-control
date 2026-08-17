@@ -113,15 +113,16 @@ test("competencia fechada usa tabela temporaria sem reabrir estado real", () => 
   assert.match(dryRun, /DATE '2026-07-24'[\s\S]*DATE '2026-07-25'/);
 });
 
-test("tela classifica individualmente e em lote somente pendencias selecionadas", () => {
-  assert.match(tela, /Pendentes de classifica/);
+test("tela agrupa pendencias e classifica somente os ids explicitos do grupo", () => {
+  assert.match(tela, /Pendentes de classificação/);
   assert.match(tela, /filtrarPendenciasClassificacaoAjudante/);
-  assert.match(tela, /Selecionados:/);
-  assert.match(tela, /Classificar como Civil/);
-  assert.match(tela, /Classificar como Montagem/);
+  assert.match(tela, /agruparPendenciasClassificacaoAjudante/);
+  assert.match(tela, /grupos para classificar/);
+  assert.match(tela, /grupo\.alocacoes\.map\(\(\{ id \}\) => id\)/);
   assert.match(tela, /\.update\(\{ especialidade_ajudante: especialidade \}\)/);
   assert.match(tela, /\.in\("id", ids\)/);
   assert.match(tela, /\.is\("especialidade_ajudante", null\)/);
+  assert.match(tela, /data\?\.length \?\? 0/);
 });
 
 test("classificacao preserva permissoes e bloqueio de competencia", () => {
@@ -129,4 +130,18 @@ test("classificacao preserva permissoes e bloqueio de competencia", () => {
   assert.match(tela, /alocacao\.created_by === user\?\.id/);
   assert.match(tela, /garantirCompetenciaAberta\(supabase, data\)/);
   assert.match(tela, /competenciaSelecionadaFechada/);
+});
+
+test("formulario por periodo pede especialidade uma vez e replica em todas as linhas", () => {
+  assert.equal(periodo.match(/<Label>Atuação do ajudante \*<\/Label>/g)?.length, 1);
+  assert.match(periodo, /const alocRows = diasAlvo\.map/);
+  assert.match(periodo, /especialidade_ajudante:[\s\S]*\? especialidadeAjudante[\s\S]*: null/);
+});
+
+test("formularios ocultam e limpam a especialidade para nao-AJUDANTE", () => {
+  assert.match(
+    tela,
+    /if \(!funcionarioSelecionadoExigeEspecialidade\) form\.setValue\("especialidade_ajudante", null\)/,
+  );
+  assert.match(periodo, /if \(!periodoExigeEspecialidade\) setEspecialidadeAjudante\(null\)/);
 });
