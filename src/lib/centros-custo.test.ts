@@ -7,6 +7,8 @@ import {
   normalizarCodigoCentroCusto,
   normalizarDescricaoCentroCusto,
   podeCriarCentroCusto,
+  prepararCodigoExibicaoCentroCusto,
+  validarCodigoExibicaoCentroCusto,
 } from "./centros-custo.ts";
 
 const tela = readFileSync("src/routes/_authenticated/obras.tsx", "utf8");
@@ -23,10 +25,25 @@ const restricoesExistentes = readFileSync(
   "utf8",
 );
 
-test("normaliza codigo e descricao antes do cadastro", () => {
+test("preserva codigo de exibicao e normaliza somente para comparacao", () => {
+  for (const codigo of ["237.5", "04.0003.01", "AB-01", "AB 01", "AB/01"]) {
+    assert.equal(prepararCodigoExibicaoCentroCusto(`  ${codigo}  `), codigo);
+    assert.equal(
+      `${prepararCodigoExibicaoCentroCusto(codigo)} - DESCRIÇÃO`,
+      `${codigo} - DESCRIÇÃO`,
+    );
+  }
   for (const codigo of ["AB-01", "AB 01", "AB/01", "ab01"])
     assert.equal(normalizarCodigoCentroCusto(codigo), "AB01");
   assert.equal(normalizarDescricaoCentroCusto("  Estação   Norte  "), "Estação Norte");
+});
+
+test("rejeita delimitador, quebra de linha e caracteres de controle no codigo", () => {
+  assert.equal(validarCodigoExibicaoCentroCusto("AB - 01"), false);
+  assert.equal(validarCodigoExibicaoCentroCusto("AB\n01"), false);
+  assert.equal(validarCodigoExibicaoCentroCusto("AB\u000001"), false);
+  assert.equal(validarCodigoExibicaoCentroCusto("---"), false);
+  assert.equal(validarCodigoExibicaoCentroCusto("AB-01"), true);
 });
 
 test("duplicidade recebe mensagem clara", () => {
@@ -72,8 +89,19 @@ test("RPC usa nome como fonte unica, bloqueia duplicidade e retorna somente UUID
   assert.match(migrationRpc, /FROM public\.obras AS obra/);
   assert.match(migrationRpc, /\[\^A-Z0-9\]/);
   assert.match(migrationRpc, /RAISE EXCEPTION 'Centro de custo ja cadastrado'/);
-  assert.match(migrationRpc, /v_codigo \|\| ' - ' \|\| v_descricao/);
+  assert.match(migrationRpc, /v_codigo_exibicao \|\| ' - ' \|\| v_descricao/);
+  assert.doesNotMatch(migrationRpc, /v_codigo_normalizado \|\| ' - '/);
+  assert.match(migrationRpc, /hashtextextended\(v_codigo_normalizado, 0\)/);
+  assert.match(migrationRpc, /\) = v_codigo_normalizado/);
+  assert.match(migrationRpc, /position\(' - ' IN v_codigo_exibicao\)/);
+  assert.match(migrationRpc, /p_codigo, ''\) ~ '\[\[:cntrl:\]\]'/);
   assert.doesNotMatch(migrationRpc, /ADD COLUMN|UPDATE public\.obras|CREATE (?:UNIQUE )?INDEX/);
+});
+
+test("frontend envia o codigo de exibicao preservado para a RPC", () => {
+  assert.match(tela, /const codigo = prepararCodigoExibicaoCentroCusto\(values\.codigo\)/);
+  assert.match(tela, /p_codigo: codigo/);
+  assert.doesNotMatch(tela, /const codigo = normalizarCodigoCentroCusto\(values\.codigo\)/);
 });
 
 test("migrations preservam restricoes de update e delete", () => {

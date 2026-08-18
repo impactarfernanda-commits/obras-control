@@ -13,9 +13,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { calcularCompetencia, formatarPeriodoCompetencia } from "@/lib/competencias";
 import {
   mensagemErroCriacaoCentroCusto,
-  normalizarCodigoCentroCusto,
   normalizarDescricaoCentroCusto,
   podeCriarCentroCusto,
+  prepararCodigoExibicaoCentroCusto,
+  validarCodigoExibicaoCentroCusto,
 } from "@/lib/centros-custo";
 import {
   AlertDialog,
@@ -85,7 +86,7 @@ const createSchema = z.object({
     .trim()
     .min(1, "Informe o código")
     .max(30, "Máximo 30 caracteres")
-    .refine((codigo) => normalizarCodigoCentroCusto(codigo).length > 0, "Código inválido"),
+    .refine(validarCodigoExibicaoCentroCusto, "Código inválido"),
   descricao: z.string().trim().min(1, "Informe a descrição").max(120, "Máximo 120 caracteres"),
 });
 type CreateFormVals = z.infer<typeof createSchema>;
@@ -203,7 +204,7 @@ function ObrasPage() {
 
   const createMutation = useMutation({
     mutationFn: async (values: CreateFormVals) => {
-      const codigo = normalizarCodigoCentroCusto(values.codigo);
+      const codigo = prepararCodigoExibicaoCentroCusto(values.codigo);
       const descricao = normalizarDescricaoCentroCusto(values.descricao);
       const { error } = await supabase.rpc("obras_criar_centro_custo", {
         p_codigo: codigo,

@@ -12,8 +12,14 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $function$
 DECLARE
-  v_codigo text := pg_catalog.regexp_replace(
+  v_codigo_exibicao text := pg_catalog.regexp_replace(
     pg_catalog.upper(pg_catalog.btrim(COALESCE(p_codigo, ''))),
+    ' {2,}',
+    ' ',
+    'g'
+  );
+  v_codigo_normalizado text := pg_catalog.regexp_replace(
+    v_codigo_exibicao,
     '[^A-Z0-9]',
     '',
     'g'
@@ -31,7 +37,12 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  IF v_codigo = '' OR pg_catalog.length(v_codigo) > 30 THEN
+  IF v_codigo_exibicao = ''
+    OR pg_catalog.length(v_codigo_exibicao) > 30
+    OR v_codigo_normalizado = ''
+    OR pg_catalog.position(' - ' IN v_codigo_exibicao) > 0
+    OR COALESCE(p_codigo, '') ~ '[[:cntrl:]]'
+  THEN
     RAISE EXCEPTION 'Codigo do centro de custo obrigatorio ou invalido'
       USING ERRCODE = '22023';
   END IF;
@@ -41,7 +52,9 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_codigo, 0));
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_codigo_normalizado, 0)
+  );
 
   IF EXISTS (
     SELECT 1
@@ -61,7 +74,7 @@ BEGIN
       '[^A-Z0-9]',
       '',
       'g'
-    ) = v_codigo
+    ) = v_codigo_normalizado
   ) THEN
     RAISE EXCEPTION 'Centro de custo ja cadastrado'
       USING ERRCODE = '23505';
@@ -74,7 +87,7 @@ BEGIN
     visivel_obras_control
   )
   VALUES (
-    v_codigo || ' - ' || v_descricao,
+    v_codigo_exibicao || ' - ' || v_descricao,
     'Em andamento',
     NULL,
     true
