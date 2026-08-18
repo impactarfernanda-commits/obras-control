@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
+  FileSpreadsheet,
   Pencil,
   Trash2,
   Undo2,
@@ -31,7 +32,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -662,6 +662,47 @@ function AlocacoesPage() {
   }, [startISO, endISO]);
 
   const today = dataLocalHoje();
+
+  async function exportarEfetivoDiario(obra: { nome: string }, data: string, items: CalendarRow[]) {
+    try {
+      const { exportEfetivoDiarioXlsx } = await import("@/lib/efetivo-diario-xlsx");
+      exportEfetivoDiarioXlsx({
+        data,
+        obra: obra.nome,
+        linhas: items.map((a) => {
+          const h = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+          const composicao = h
+            ? comporHorasParaVisualizacao({
+                data: a.data,
+                horasNormais: h.hn,
+                horasExtras: h.he,
+              })
+            : null;
+          const situacao = !h
+            ? "Alocado — sem apontamento"
+            : h.tipoRegistro === "falta"
+              ? `${rotuloTipoRegistro(h.tipoRegistro)} — ${rotuloFalta(h.faltaTipo)}`
+              : rotuloTipoRegistro(h.tipoRegistro);
+
+          return {
+            funcionario: infoHistoricoById.get(a.funcionario_id)?.nome ?? "—",
+            funcao: infoHistoricoById.get(a.funcionario_id)?.categoria ?? "Sem função",
+            especialidadeAjudante: a.especialidade_ajudante,
+            situacao,
+            horasNormais: composicao?.horasNormaisApuradas ?? 0,
+            horasExtra50: composicao?.horasExtra50Apuradas ?? 0,
+            horasExtra100: composicao?.horasExtra100Apuradas ?? 0,
+            totalHoras: composicao?.total ?? 0,
+            observacoes: h?.observacoes,
+          };
+        }),
+      });
+      toast.success("Efetivo diário exportado");
+    } catch {
+      toast.error("Não foi possível exportar o efetivo diário");
+    }
+  }
+
   const defaultFormValues: FormVals = {
     funcionario_id: "",
     obra_id: "",
@@ -1873,8 +1914,8 @@ function AlocacoesPage() {
                                     );
                                   }
                                   return (
-                                    <Popover key={d}>
-                                      <PopoverTrigger asChild>
+                                    <Dialog key={d}>
+                                      <DialogTrigger asChild>
                                         <button
                                           type="button"
                                           className={`${base} ${tone}${todayRing}`}
@@ -1882,16 +1923,23 @@ function AlocacoesPage() {
                                           <span className="font-medium">{dayNum}</span>
                                           <span className="text-[10px] text-primary">{count}</span>
                                         </button>
-                                      </PopoverTrigger>
-                                      <PopoverContent className="w-72 p-3" align="center">
-                                        <div className="mb-2 text-xs font-medium">
-                                          {new Date(d + "T00:00:00").toLocaleDateString("pt-BR", {
-                                            weekday: "long",
-                                            day: "2-digit",
-                                            month: "long",
-                                          })}
-                                        </div>
-                                        <ul className="space-y-2">
+                                      </DialogTrigger>
+                                      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+                                        <DialogHeader>
+                                          <DialogTitle>
+                                            Efetivo de{" "}
+                                            {new Date(d + "T00:00:00").toLocaleDateString("pt-BR", {
+                                              weekday: "long",
+                                              day: "2-digit",
+                                              month: "long",
+                                            })}
+                                          </DialogTitle>
+                                          <DialogDescription>
+                                            {obra.nome} · {count}{" "}
+                                            {count === 1 ? "registro" : "registros"}
+                                          </DialogDescription>
+                                        </DialogHeader>
+                                        <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-2">
                                           {items.map((a) => {
                                             const h = horasMap.get(
                                               `${a.funcionario_id}|${a.obra_id}|${a.data}`,
@@ -2051,8 +2099,20 @@ function AlocacoesPage() {
                                             );
                                           })}
                                         </ul>
-                                      </PopoverContent>
-                                    </Popover>
+                                        <DialogFooter className="border-t pt-4">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() =>
+                                              void exportarEfetivoDiario(obra, d, items)
+                                            }
+                                          >
+                                            <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                            Exportar efetivo
+                                          </Button>
+                                        </DialogFooter>
+                                      </DialogContent>
+                                    </Dialog>
                                   );
                                 })}
                               </>
