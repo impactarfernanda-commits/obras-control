@@ -117,23 +117,13 @@ test("competencia fechada usa tabela temporaria sem reabrir estado real", () => 
   assert.match(dryRun, /DATE '2026-07-24'[\s\S]*DATE '2026-07-25'/);
 });
 
-test("tela agrupa pendencias e classifica somente os ids explicitos do grupo", () => {
-  assert.match(tela, /Pendentes de classificação/);
-  assert.match(tela, /filtrarPendenciasClassificacaoAjudante/);
-  assert.match(tela, /agruparPendenciasClassificacaoAjudante/);
-  assert.match(tela, /grupos para classificar/);
-  assert.match(tela, /grupo\.alocacoes\.map\(\(\{ id \}\) => id\)/);
-  assert.match(tela, /\.update\(\{ especialidade_ajudante: especialidade \}\)/);
-  assert.match(tela, /\.in\("id", ids\)/);
-  assert.match(tela, /\.is\("especialidade_ajudante", null\)/);
-  assert.match(tela, /data\?\.length \?\? 0/);
-});
-
-test("classificacao preserva permissoes e bloqueio de competencia", () => {
-  assert.match(tela, /canEditAllocationHoursByRole/);
-  assert.match(tela, /alocacao\.created_by === user\?\.id/);
-  assert.match(tela, /garantirCompetenciaAberta\(supabase, data\)/);
-  assert.match(tela, /competenciaSelecionadaFechada/);
+test("tela nao exibe quadro operacional de pendencias legadas", () => {
+  assert.doesNotMatch(tela, /Pendentes de classificação/);
+  assert.doesNotMatch(tela, /Nenhuma alocação exige classificação/);
+  assert.doesNotMatch(tela, /grupos para classificar/);
+  assert.doesNotMatch(tela, /filtrarPendenciasClassificacaoAjudante/);
+  assert.doesNotMatch(tela, /agruparPendenciasClassificacaoAjudante/);
+  assert.doesNotMatch(tela, /classificarPendenciasMutation/);
 });
 
 test("formulario por periodo pede especialidade uma vez e replica em todas as linhas", () => {
