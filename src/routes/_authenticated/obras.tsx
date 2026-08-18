@@ -12,6 +12,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { calcularCompetencia, formatarPeriodoCompetencia } from "@/lib/competencias";
 import {
+  mensagemErroCriacaoCentroCusto,
+  normalizarCodigoCentroCusto,
+  normalizarDescricaoCentroCusto,
+  podeCriarCentroCusto,
+} from "@/lib/centros-custo";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -73,6 +79,17 @@ const schema = z.object({
 });
 type FormVals = z.infer<typeof schema>;
 
+const createSchema = z.object({
+  codigo: z
+    .string()
+    .trim()
+    .min(1, "Informe o código")
+    .max(30, "Máximo 30 caracteres")
+    .refine((codigo) => normalizarCodigoCentroCusto(codigo).length > 0, "Código inválido"),
+  descricao: z.string().trim().min(1, "Informe a descrição").max(120, "Máximo 120 caracteres"),
+});
+type CreateFormVals = z.infer<typeof createSchema>;
+
 const PAGE_SIZE = 10;
 
 function statusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
@@ -112,8 +129,9 @@ function dataLocalISO(date: Date) {
 }
 
 function ObrasPage() {
-  const { isManagerOrAbove } = useAuth();
+  const { user, isManagerOrAbove } = useAuth();
   const queryClient = useQueryClient();
+  const [createOpen, setCreateOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Obra | null>(null);
   const [selectedObra, setSelectedObra] = useState<Obra | null>(null);
@@ -140,10 +158,14 @@ function ObrasPage() {
     defaultValues: { nome: "", data_inicio: "", status: "Em andamento" },
   });
 
+  const createForm = useForm<CreateFormVals>({
+    resolver: zodResolver(createSchema),
+    defaultValues: { codigo: "", descricao: "" },
+  });
+
   function openCreate() {
-    setEditing(null);
-    form.reset({ nome: "", data_inicio: "", status: "Em andamento" });
-    setFormOpen(true);
+    createForm.reset({ codigo: "", descricao: "" });
+    setCreateOpen(true);
   }
 
   function openEdit(obra: Obra) {
@@ -165,19 +187,40 @@ function ObrasPage() {
         status: values.status,
         data_inicio: values.data_inicio || null,
       };
-      const result = editing
-        ? await supabase.from("obras").update(payload).eq("id", editing.id)
-        : await supabase.from("obras").insert(payload);
+      if (!editing) throw new Error("Centro de custo não selecionado para edição.");
+      const result = await supabase.from("obras").update(payload).eq("id", editing.id);
       if (result.error) throw result.error;
     },
     onSuccess: () => {
-      toast.success(editing ? "Centro de custo atualizado" : "Centro de custo cadastrado");
+      toast.success("Centro de custo atualizado");
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
       setFormOpen(false);
       setEditing(null);
     },
     onError: (error: Error) => toast.error(error.message || "Erro ao salvar"),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (values: CreateFormVals) => {
+      const codigo = normalizarCodigoCentroCusto(values.codigo);
+      const descricao = normalizarDescricaoCentroCusto(values.descricao);
+      const { error } = await supabase.rpc("obras_criar_centro_custo", {
+        p_codigo: codigo,
+        p_descricao: descricao,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Centro de custo cadastrado");
+      queryClient.invalidateQueries({ queryKey: ["obras"] });
+      queryClient.invalidateQueries({ queryKey: ["obras-min"] });
+      queryClient.invalidateQueries({ queryKey: ["obras-planejamento"] });
+      setCreateOpen(false);
+      createForm.reset();
+    },
+    onError: (error: { code?: string | null; message?: string | null }) =>
+      toast.error(mensagemErroCriacaoCentroCusto(error)),
   });
 
   const deleteMutation = useMutation({
@@ -257,7 +300,7 @@ function ObrasPage() {
         title="Centros de custo"
         description="Centros de custo e alocação de equipes."
         actions={
-          isManagerOrAbove ? (
+          podeCriarCentroCusto(Boolean(user)) ? (
             <Button onClick={openCreate}>
               <Plus className="mr-2 h-4 w-4" />
               Novo centro de custo
@@ -265,6 +308,58 @@ function ObrasPage() {
           ) : undefined
         }
       />
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cadastrar centro de custo</DialogTitle>
+            <DialogDescription>
+              Informe o código e a descrição do centro de custo.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...createForm}>
+            <form
+              onSubmit={createForm.handleSubmit((values) => createMutation.mutate(values))}
+              className="space-y-4"
+            >
+              <FormField
+                control={createForm.control}
+                name="codigo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Código</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Ex.: 230" autoComplete="off" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={createForm.control}
+                name="descricao"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descrição</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Ex.: ETE Sul" autoComplete="off" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={createMutation.isPending}>
+                  {createMutation.isPending ? "Salvando..." : "Salvar"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={formOpen}
@@ -275,9 +370,7 @@ function ObrasPage() {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? "Editar centro de custo" : "Cadastrar centro de custo"}
-            </DialogTitle>
+            <DialogTitle>Editar centro de custo</DialogTitle>
             <DialogDescription>Informe os dados principais do centro de custo.</DialogDescription>
           </DialogHeader>
           <Form {...form}>

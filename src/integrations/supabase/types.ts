@@ -579,6 +579,10 @@ export type Database = {
       };
     };
     Functions: {
+      obras_criar_centro_custo: {
+        Args: { p_codigo: string; p_descricao: string };
+        Returns: string;
+      };
       obras_salvar_ausencia_planejada_periodo: {
         Args: {
           p_data_fim: string;
