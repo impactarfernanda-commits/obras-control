@@ -223,6 +223,28 @@ test("operadores de escavadeira migram de a classificar para Civil sem alterar o
   }
 });
 
+test("Mestre de Obra singular entra em MOD Civil sem alterar o total desde agosto de 2026", () => {
+  const mestres = [
+    { id: "m1", nome: "Mestre I", categoria_mo: "MESTRE DE OBRA I" },
+    { id: "m2", nome: "Mestre II", categoria_mo: "MESTRE DE OBRA II" },
+  ];
+  const alocacoes = mestres.map((item) => alocacao(item.id, "o1", "2026-08-03", "civil"));
+  const registros = mestres.map((item) => registro(item.id, "o1", "2026-08-03"));
+  const agosto = consolidar(alocacoes, registros, mestres).centros[0];
+  const totalAntesDaSegmentacao = agosto.total;
+
+  assert.equal(agosto.modAClassificar, 0);
+  assert.equal(agosto.modCivil, totalAntesDaSegmentacao);
+  assert.equal(agosto.total, totalAntesDaSegmentacao);
+  assert.ok(agosto.linhas.every((linha) => linha.tipoMod === "Civil"));
+
+  const historico = consolidar(alocacoes, registros, mestres, false).centros[0];
+  assert.equal(historico.modCivil, 0);
+  assert.equal(historico.modAClassificar, 0);
+  assert.equal(historico.total, totalAntesDaSegmentacao);
+  assert.ok(historico.linhas.every((linha) => linha.tipoMod === null));
+});
+
 test("avisos distinguem AJUDANTE pendente de categoria MOD desconhecida", () => {
   const data = "2026-08-04";
   const ajudante = [{ id: "aj", nome: "Ajudante", categoria_mo: "AJUDANTE" }];

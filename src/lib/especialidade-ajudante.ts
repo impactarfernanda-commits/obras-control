@@ -12,7 +12,8 @@ export function normalizarCategoriaMo(categoria: string | null | undefined) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .replace(/\s+/g, " ")
-    .toUpperCase();
+    .toUpperCase()
+    .replace(/^MESTRE DE OBRA(?=$| I$| II$)/, "MESTRE DE OBRAS");
 }
 
 export function categoriaEhAjudante(categoria: string | null | undefined) {
