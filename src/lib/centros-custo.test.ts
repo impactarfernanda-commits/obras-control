@@ -93,7 +93,8 @@ test("RPC usa nome como fonte unica, bloqueia duplicidade e retorna somente UUID
   assert.doesNotMatch(migrationRpc, /v_codigo_normalizado \|\| ' - '/);
   assert.match(migrationRpc, /hashtextextended\(v_codigo_normalizado, 0\)/);
   assert.match(migrationRpc, /\) = v_codigo_normalizado/);
-  assert.match(migrationRpc, /position\(' - ' IN v_codigo_exibicao\)/);
+  assert.match(migrationRpc, /pg_catalog\.strpos\(v_codigo_exibicao, ' - '\) > 0/);
+  assert.doesNotMatch(migrationRpc, /pg_catalog\.position\s*\(/i);
   assert.match(migrationRpc, /p_codigo, ''\) ~ '\[\[:cntrl:\]\]'/);
   assert.doesNotMatch(migrationRpc, /ADD COLUMN|UPDATE public\.obras|CREATE (?:UNIQUE )?INDEX/);
 });

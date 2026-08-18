@@ -40,7 +40,7 @@ BEGIN
   IF v_codigo_exibicao = ''
     OR pg_catalog.length(v_codigo_exibicao) > 30
     OR v_codigo_normalizado = ''
-    OR pg_catalog.position(' - ' IN v_codigo_exibicao) > 0
+    OR pg_catalog.strpos(v_codigo_exibicao, ' - ') > 0
     OR COALESCE(p_codigo, '') ~ '[[:cntrl:]]'
   THEN
     RAISE EXCEPTION 'Codigo do centro de custo obrigatorio ou invalido'
