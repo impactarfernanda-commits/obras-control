@@ -40,6 +40,21 @@ test("classifica a matriz civil, montagem e pendencias sem fallback silencioso",
   assert.equal(classificarTipoMod("CATEGORIA MOD FUTURA", null), "A classificar");
 });
 
+test("normaliza todas as variacoes de Mestre de Obra como MOD Civil", () => {
+  for (const categoria of [
+    "MESTRE DE OBRA",
+    "MESTRE DE OBRA I",
+    "MESTRE DE OBRA II",
+    "MESTRE DE OBRAS",
+    "MESTRE DE OBRAS I",
+    "MESTRE DE OBRAS II",
+    "mestre de obra i",
+    "  méstre   de   óbra ii  ",
+  ]) {
+    assert.equal(classificarTipoMod(categoria, null), "Civil", categoria);
+  }
+});
+
 test("todas as categorias MOD conhecidas possuem destino salvo AJUDANTE dependente da alocacao", () => {
   for (const categoria of CATEGORIAS_MOD_CIVIL_CONHECIDAS)
     assert.equal(classificarTipoMod(categoria, null), "Civil", categoria);
