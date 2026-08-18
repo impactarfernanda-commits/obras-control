@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -58,16 +58,6 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Table,
   TableBody,
   TableCell,
@@ -92,7 +82,6 @@ import {
   type MensagemAlocacaoConflito,
 } from "@/lib/alocacoes-conflitos";
 import {
-  buscarCompetenciasFechadasPorDatas,
   calcularCompetencia,
   formatarPeriodoCompetencia,
   garantirCompetenciaAberta,
@@ -134,11 +123,6 @@ import {
   ordenarFuncionariosPorTipoENome,
   semanaInicialDaCompetencia,
 } from "@/lib/alocacoes-visualizacao";
-import {
-  agruparPendenciasClassificacaoAjudante,
-  filtrarPendenciasClassificacaoAjudante,
-  type GrupoPendenciasClassificacao,
-} from "@/lib/pendencias-classificacao-ajudante";
 
 export const Route = createFileRoute("/_authenticated/alocacoes")({
   component: AlocacoesPage,
@@ -314,10 +298,6 @@ function AlocacoesPage() {
   const [editEspecialidadeAjudante, setEditEspecialidadeAjudante] =
     useState<EspecialidadeAjudante | null>(null);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
-  const [confirmarClassificacao, setConfirmarClassificacao] = useState<{
-    grupo: GrupoPendenciasClassificacao<AlocRow>;
-    especialidade: EspecialidadeAjudante;
-  } | null>(null);
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -417,14 +397,6 @@ function AlocacoesPage() {
     },
   });
   const alocacoes = alocacoesQuery.data;
-  const fechamentoSelecionadoQuery = useQuery({
-    queryKey: ["competencia-fechada-alocacoes", competenciaPeriodo.competencia],
-    queryFn: () => buscarCompetenciasFechadasPorDatas(supabase, [startISO]),
-  });
-  const competenciaSelecionadaFechada = (fechamentoSelecionadoQuery.data?.length ?? 0) > 0;
-  const classificacaoBloqueada =
-    competenciaSelecionadaFechada || fechamentoSelecionadoQuery.isError;
-
   const registrosQuery = useQuery({
     queryKey: ["registros-mes", mesKey, obraFiltro],
     enabled: true,
@@ -583,31 +555,6 @@ function AlocacoesPage() {
     return m;
   }, [registros]);
 
-  const categoriasHistoricas = useMemo(
-    () => new Map(Array.from(infoHistoricoById, ([id, info]) => [id, info.categoria] as const)),
-    [infoHistoricoById],
-  );
-  const pendenciasClassificacao = useMemo(
-    () => filtrarPendenciasClassificacaoAjudante(alocacoes ?? [], categoriasHistoricas),
-    [alocacoes, categoriasHistoricas],
-  );
-  const gruposPendentesClassificacao = useMemo(
-    () => agruparPendenciasClassificacaoAjudante(pendenciasClassificacao),
-    [pendenciasClassificacao],
-  );
-  const podeClassificarAlocacao = useCallback(
-    (alocacao: AlocRow) => {
-      const registro = horasMap.get(
-        `${alocacao.funcionario_id}|${alocacao.obra_id}|${alocacao.data}`,
-      );
-      return (
-        !classificacaoBloqueada &&
-        (canEditAllocationHoursByRole ||
-          (alocacao.created_by === user?.id && (!registro || registro.createdBy === user?.id)))
-      );
-    },
-    [canEditAllocationHoursByRole, classificacaoBloqueada, horasMap, user?.id],
-  );
   // Cada funcionario aparece uma vez por obra, ainda que tenha alocacoes em varias datas.
   const porObra = useMemo(() => {
     const out = new Map<
@@ -863,58 +810,6 @@ function AlocacoesPage() {
         return;
       }
       toast.error(mensagemErroRegistro(e));
-    },
-  });
-
-  const classificarPendenciasMutation = useMutation({
-    mutationFn: async ({
-      ids,
-      especialidade,
-      funcionarioId,
-      obraId,
-      competencia,
-    }: {
-      ids: string[];
-      especialidade: EspecialidadeAjudante;
-      funcionarioId: string;
-      obraId: string;
-      competencia: string;
-    }) => {
-      const selecionadas = pendenciasClassificacao.filter(
-        (alocacao) =>
-          ids.includes(alocacao.id) &&
-          alocacao.funcionario_id === funcionarioId &&
-          alocacao.obra_id === obraId &&
-          calcularCompetencia(alocacao.data).competencia === competencia,
-      );
-      if (
-        selecionadas.length !== ids.length ||
-        selecionadas.some((a) => !podeClassificarAlocacao(a))
-      )
-        throw new Error("Uma ou mais alocações do grupo não podem mais ser classificadas.");
-
-      for (const data of new Set(selecionadas.map(({ data }) => data)))
-        await garantirCompetenciaAberta(supabase, data);
-
-      const { data, error } = await supabase
-        .from("alocacoes")
-        .update({ especialidade_ajudante: especialidade })
-        .in("id", ids)
-        .is("especialidade_ajudante", null)
-        .select("id");
-      if (error) throw new Error(mensagemErroCompetenciaFechada(error) ?? error.message);
-      return { quantidade: data?.length ?? 0, especialidade };
-    },
-    onSuccess: ({ quantidade, especialidade }) => {
-      toast.success(
-        `${quantidade} ${quantidade === 1 ? "alocação classificada" : "alocações classificadas"} como ${especialidade === "civil" ? "Civil" : "Montagem"}.`,
-      );
-      setConfirmarClassificacao(null);
-      qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
-    },
-    onError: (e: ErrorLike) => {
-      setConfirmarClassificacao(null);
-      toast.error(e.message ?? "Erro ao classificar alocações");
     },
   });
 
@@ -1773,132 +1668,6 @@ function AlocacoesPage() {
           </AlertDescription>
         </Alert>
       )}
-
-      {!alocacoesQuery.isLoading && !alocacoesQuery.isError && (
-        <Card className="mb-4">
-          <CardContent className="space-y-4 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-semibold">Pendentes de classificação</h2>
-                <p className="text-sm text-muted-foreground">
-                  {pendenciasClassificacao.length} alocações pendentes ·{" "}
-                  {gruposPendentesClassificacao.length} grupos para classificar
-                </p>
-              </div>
-              {competenciaSelecionadaFechada && pendenciasClassificacao.length > 0 && (
-                <Badge variant="outline">Competência fechada — somente leitura</Badge>
-              )}
-              {fechamentoSelecionadoQuery.isError && pendenciasClassificacao.length > 0 && (
-                <Badge variant="outline">Fechamento indisponível — somente leitura</Badge>
-              )}
-            </div>
-
-            {pendenciasClassificacao.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nenhuma alocação exige classificação nesta competência.
-              </p>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {gruposPendentesClassificacao.map((grupo) => {
-                  const editavel = grupo.alocacoes.every(podeClassificarAlocacao);
-                  const funcionario = infoHistoricoById.get(grupo.funcionario_id);
-                  const obra = grupo.alocacoes[0]?.obras?.nome ?? "—";
-                  return (
-                    <div key={grupo.chave} className="space-y-3 rounded-md border p-4">
-                      <div>
-                        <p className="font-semibold">{funcionario?.nome ?? "—"}</p>
-                        <p className="text-sm text-muted-foreground">{obra}</p>
-                      </div>
-                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                        <div>
-                          <dt className="text-muted-foreground">Competência</dt>
-                          <dd>{competenciaLabel(grupo.competencia)}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Período pendente</dt>
-                          <dd>
-                            {new Date(`${grupo.dataInicio}T00:00:00`).toLocaleDateString("pt-BR")} a{" "}
-                            {new Date(`${grupo.dataFim}T00:00:00`).toLocaleDateString("pt-BR")}
-                          </dd>
-                        </div>
-                      </dl>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <span className="text-sm font-medium">
-                          {grupo.quantidade}{" "}
-                          {grupo.quantidade === 1 ? "alocação pendente" : "alocações pendentes"}
-                        </span>
-                        {classificacaoBloqueada ? (
-                          <Badge variant="outline">
-                            {competenciaSelecionadaFechada
-                              ? "Competência fechada"
-                              : "Fechamento indisponível"}
-                          </Badge>
-                        ) : (
-                          <div className="flex gap-2">
-                            {(["civil", "montagem"] as const).map((especialidade) => (
-                              <Button
-                                key={especialidade}
-                                size="sm"
-                                variant="outline"
-                                disabled={!editavel || classificarPendenciasMutation.isPending}
-                                onClick={() => setConfirmarClassificacao({ grupo, especialidade })}
-                              >
-                                {especialidade === "civil" ? "Civil" : "Montagem"}
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <AlertDialog
-        open={confirmarClassificacao !== null}
-        onOpenChange={(aberto) => {
-          if (!aberto && !classificarPendenciasMutation.isPending) setConfirmarClassificacao(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar classificação</AlertDialogTitle>
-            <AlertDialogDescription>
-              Classificar {confirmarClassificacao?.grupo.quantidade ?? 0} alocações de{" "}
-              {confirmarClassificacao
-                ? (infoHistoricoById.get(confirmarClassificacao.grupo.funcionario_id)?.nome ?? "—")
-                : "—"}{" "}
-              na obra {confirmarClassificacao?.grupo.alocacoes[0]?.obras?.nome ?? "—"} como{" "}
-              {confirmarClassificacao?.especialidade === "civil" ? "Civil" : "Montagem"}?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={classificarPendenciasMutation.isPending}>
-              Cancelar
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!confirmarClassificacao || classificarPendenciasMutation.isPending}
-              onClick={(event) => {
-                event.preventDefault();
-                if (!confirmarClassificacao) return;
-                classificarPendenciasMutation.mutate({
-                  ids: confirmarClassificacao.grupo.alocacoes.map(({ id }) => id),
-                  funcionarioId: confirmarClassificacao.grupo.funcionario_id,
-                  obraId: confirmarClassificacao.grupo.obra_id,
-                  competencia: confirmarClassificacao.grupo.competencia,
-                  especialidade: confirmarClassificacao.especialidade,
-                });
-              }}
-            >
-              {classificarPendenciasMutation.isPending ? "Classificando..." : "Confirmar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {alocacoesQuery.isLoading ? (
         <div className="space-y-2">

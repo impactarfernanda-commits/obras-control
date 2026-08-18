@@ -43,14 +43,7 @@ test("fontes TypeScript nao contem sequencias tipicas de mojibake", () => {
 test("textos operacionais permanecem em portugues UTF-8", () => {
   const tela = readFileSync("src/routes/_authenticated/alocacoes.tsx", "utf8");
   const periodo = readFileSync("src/components/AlocarPeriodoDialog.tsx", "utf8");
-  for (const texto of [
-    "Atuação do ajudante",
-    "Pendentes de classificação",
-    "alocações",
-    "Funcionário",
-    "Competência",
-    "Período",
-  ]) {
+  for (const texto of ["Atuação do ajudante", "alocações", "Funcionário"]) {
     assert.ok(tela.includes(texto) || periodo.includes(texto), `texto ausente: ${texto}`);
   }
 
