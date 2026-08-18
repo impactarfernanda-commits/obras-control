@@ -39,12 +39,15 @@ const input: EfetivoDiarioWorkbookInput = {
 
 test("exporta todo o efetivo diário com situação e horas classificadas", () => {
   const workbook = buildEfetivoDiarioWorkbook(input);
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets["Efetivo do dia"], {
+  const sheet = workbook.Sheets["Efetivo do dia"];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     raw: true,
   });
 
   assert.equal(rows.length, 3);
+  assert.equal(XLSX.utils.format_cell(sheet.A2), "18/08/2026");
+  assert.equal(XLSX.utils.format_cell(sheet.A3), "18/08/2026");
   assert.deepEqual(rows[0], [
     "Data",
     "Centro de custo",

@@ -24,7 +24,8 @@ const FORMATO_DATA = "dd/mm/yyyy";
 const FORMATO_HORAS = "0.00";
 
 function dataExcel(dataISO: string) {
-  return new Date(`${dataISO}T00:00:00`);
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  return Date.UTC(ano, mes - 1, dia) / 86_400_000 + 25_569;
 }
 
 export function efetivoDiarioXlsxFilename(input: EfetivoDiarioWorkbookInput) {
