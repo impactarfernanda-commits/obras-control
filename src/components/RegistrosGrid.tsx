@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -316,7 +316,9 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
 
   // estado local editável
   const [cells, setCells] = useState<Record<CellKey, Registro>>({});
-  const [saving, setSaving] = useState<Record<CellKey, "idle" | "saving" | "saved" | "error">>({});
+  const [saving, setSaving] = useState<
+    Record<CellKey, "idle" | "dirty" | "saving" | "saved" | "error">
+  >({});
   const [gridFeedback, setGridFeedback] = useState<MensagemAlocacaoConflito | null>(null);
 
   useEffect(() => {
@@ -325,15 +327,13 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
       const next = { ...prev };
       for (const r of registrosRemote) {
         const key = ck(r.funcionario_id, r.obra_id, r.data);
-        if (saving[key] === "saving") continue;
+        if (saving[key] === "saving" || saving[key] === "dirty") continue;
         next[key] = r;
       }
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registrosRemote]);
-
-  const timersRef = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({});
 
   const saveCell = useCallback(
     async (key: CellKey, r: Registro) => {
@@ -490,15 +490,11 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
     [user?.id, qc, obraId, infoHistoricoById, especialidadePorAlocacao],
   );
 
-  const updateCell = useCallback(
-    (key: CellKey, patch: Partial<Registro>, base: Registro) => {
-      const next: Registro = { ...base, ...patch };
-      setCells((prev) => ({ ...prev, [key]: next }));
-      if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
-      timersRef.current[key] = setTimeout(() => saveCell(key, next), 700);
-    },
-    [saveCell],
-  );
+  const updateCell = useCallback((key: CellKey, patch: Partial<Registro>, base: Registro) => {
+    const next: Registro = { ...base, ...patch };
+    setCells((prev) => ({ ...prev, [key]: next }));
+    setSaving((statusAtual) => ({ ...statusAtual, [key]: "dirty" }));
+  }, []);
 
   const availableToAdd = useMemo(() => {
     const present = new Set(funcionarios.map((f) => f.id));
@@ -697,6 +693,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
                             especialidadePersistida={especialidadePersistida}
                             status={saving[key] ?? "idle"}
                             onChange={(patch) => updateCell(key, patch, registroComEspecialidade)}
+                            onSave={() => void saveCell(key, registroComEspecialidade)}
                           />
                         )}
                       </td>
@@ -723,13 +720,15 @@ function DayCell({
   especialidadePersistida,
   status,
   onChange,
+  onSave,
 }: {
   registro: Registro;
   alocado: boolean;
   categoria: string | null;
   especialidadePersistida: EspecialidadeAjudante | null | undefined;
-  status: "idle" | "saving" | "saved" | "error";
+  status: "idle" | "dirty" | "saving" | "saved" | "error";
   onChange: (patch: Partial<Registro>) => void;
+  onSave: () => void;
 }) {
   const composicao = comporHorasParaVisualizacao({
     data: registro.data,
@@ -994,14 +993,31 @@ function DayCell({
           />
         </div>
 
-        <div className="text-xs text-muted-foreground">
-          {status === "saving"
-            ? "Salvando..."
-            : status === "saved"
-              ? "Salvo"
-              : status === "error"
-                ? "Erro ao salvar"
-                : "Edições salvas automaticamente"}
+        <div className="space-y-2 border-t pt-3">
+          <Button
+            type="button"
+            className="w-full"
+            disabled={status !== "dirty" && status !== "error"}
+            onClick={onSave}
+          >
+            {status === "saving" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
+            {status === "saving" ? "Salvando..." : "Salvar alterações"}
+          </Button>
+          <div className="text-xs text-muted-foreground">
+            {status === "dirty"
+              ? "Alterações pendentes de confirmação"
+              : status === "saving"
+                ? "Salvando alterações..."
+                : status === "saved"
+                  ? "Alterações salvas"
+                  : status === "error"
+                    ? "Revise os dados e tente salvar novamente"
+                    : "Altere os campos e confirme para salvar"}
+          </div>
         </div>
       </PopoverContent>
     </Popover>
