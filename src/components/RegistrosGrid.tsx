@@ -31,7 +31,7 @@ import { buscarTodasPaginas } from "@/lib/paginacao";
 import { dataLancamentoFutura, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
-import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
+import { comporHorasParaVisualizacao, type TipoHoraVisual } from "@/lib/horas-visualizacao";
 import {
   AVISO_FALTA_INTEGRAL,
   CLASSIFICACOES_FALTA,
@@ -50,6 +50,12 @@ import {
   ordenarFuncionariosPorTipoENome,
 } from "@/lib/alocacoes-visualizacao";
 import type { Categoria } from "@/lib/categorias-core";
+import {
+  categoriaEhAjudante,
+  competenciaUsaSegmentacaoMod,
+  resolverEspecialidadeAjudanteGrade,
+  type EspecialidadeAjudante,
+} from "@/lib/especialidade-ajudante";
 
 // ---------- helpers ----------
 function isoDate(d: Date) {
@@ -79,23 +85,18 @@ type Registro = {
   observacoes: string | null;
   tipo_registro: TipoRegistro;
   falta_tipo: FaltaTipo | null;
+  /** Estado local da Grade; pertence à alocação, não ao registro de horas. */
+  especialidade_ajudante?: EspecialidadeAjudante | null;
+};
+
+type AlocacaoGrade = {
+  funcionario_id: string;
+  data: string;
+  especialidade_ajudante: EspecialidadeAjudante | null;
 };
 
 type CellKey = string;
 const ck = (f: string, o: string, d: string): CellKey => `${f}|${o}|${d}`;
-
-type CellStatus = "empty" | "ok" | "warn" | "error";
-function cellStatus(r: Registro | undefined): CellStatus {
-  if (!r) return "empty";
-  if (registroEhFalta(r) || registroEhAusenciaPlanejada(r)) return "warn";
-  const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
-  if (total <= 0) return "empty";
-  if (total > 16) return "error";
-  if (!payloadHorasPermitido(r.data, r.horas_normais, r.horas_extras)) return "error";
-  if (r.horas_extras > 2 && !r.justificativa_extras?.trim()) return "error";
-  if (r.horas_extras > 0) return "warn";
-  return "ok";
-}
 
 type Props = {
   obraId: string;
@@ -174,10 +175,10 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
     enabled: !!obraId,
     queryKey: ["aloc-week", obraId, firstDay, lastDay],
     queryFn: async () =>
-      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+      buscarTodasPaginas<AlocacaoGrade>((from, to) =>
         supabase
           .from("alocacoes")
-          .select("funcionario_id, data")
+          .select("funcionario_id, data, especialidade_ajudante")
           .eq("obra_id", obraId)
           .gte("data", firstDay)
           .lte("data", lastDay)
@@ -302,6 +303,17 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
     return s;
   }, [alocacoes]);
 
+  const especialidadePorAlocacao = useMemo(() => {
+    const especialidades = new Map<string, EspecialidadeAjudante | null>();
+    for (const alocacao of alocacoes ?? []) {
+      especialidades.set(
+        `${alocacao.funcionario_id}|${alocacao.data}`,
+        alocacao.especialidade_ajudante,
+      );
+    }
+    return especialidades;
+  }, [alocacoes]);
+
   // estado local editável
   const [cells, setCells] = useState<Record<CellKey, Registro>>({});
   const [saving, setSaving] = useState<Record<CellKey, "idle" | "saving" | "saved" | "error">>({});
@@ -344,6 +356,22 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
 
       // Ausência planejada vive somente em registros_horas; horas/falta continuam exigindo alocação.
       if (hasContent && !registroEhAusenciaPlanejada(r)) {
+        const categoria = infoHistoricoById.get(r.funcionario_id)?.categoria_mo;
+        const exigeEspecialidade =
+          categoriaEhAjudante(categoria) && competenciaUsaSegmentacaoMod(r.data);
+        const chaveAlocacao = `${r.funcionario_id}|${r.data}`;
+        const alocacaoExistente = especialidadePorAlocacao.has(chaveAlocacao);
+        const especialidadePersistida = especialidadePorAlocacao.get(chaveAlocacao);
+        const especialidadeAjudante = resolverEspecialidadeAjudanteGrade(
+          especialidadePersistida,
+          r.especialidade_ajudante,
+        );
+        if (exigeEspecialidade && !especialidadeAjudante) {
+          setSaving((s) => ({ ...s, [key]: "error" }));
+          toast.error("Informe se o ajudante atuará em Civil ou Montagem.");
+          return;
+        }
+
         try {
           await garantirCompetenciaAberta(supabase, r.data);
         } catch (e) {
@@ -352,34 +380,47 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
           return;
         }
 
-        const conflito = await buscarConflitoAlocacao({
-          supabase,
-          funcionarioId: r.funcionario_id,
-          obraId: r.obra_id,
-          data: r.data,
-        });
-        if (conflito) {
-          const mensagem = detalhesConflitoAlocacao(conflito);
-          setSaving((s) => ({ ...s, [key]: "error" }));
-          setGridFeedback(mensagem);
-          toast.error(mensagem.title, { description: mensagem.description, duration: 10000 });
-          return;
-        }
+        let alocErr: { message: string; code?: string | null } | null = null;
+        if (!alocacaoExistente) {
+          const conflito = await buscarConflitoAlocacao({
+            supabase,
+            funcionarioId: r.funcionario_id,
+            obraId: r.obra_id,
+            data: r.data,
+          });
+          if (conflito) {
+            const mensagem = detalhesConflitoAlocacao(conflito);
+            setSaving((s) => ({ ...s, [key]: "error" }));
+            setGridFeedback(mensagem);
+            toast.error(mensagem.title, { description: mensagem.description, duration: 10000 });
+            return;
+          }
 
-        const { error: alocErr } = await supabase.from("alocacoes").upsert(
-          [
+          const resultado = await supabase.from("alocacoes").upsert(
+            [
+              {
+                funcionario_id: r.funcionario_id,
+                obra_id: r.obra_id,
+                data: r.data,
+                created_by: user?.id ?? null,
+                especialidade_ajudante: exigeEspecialidade ? especialidadeAjudante : null,
+              },
+            ],
             {
-              funcionario_id: r.funcionario_id,
-              obra_id: r.obra_id,
-              data: r.data,
-              created_by: user?.id ?? null,
+              onConflict: "funcionario_id,obra_id,data",
+              ignoreDuplicates: true,
             },
-          ],
-          {
-            onConflict: "funcionario_id,obra_id,data",
-            ignoreDuplicates: true,
-          },
-        );
+          );
+          alocErr = resultado.error;
+        } else if (exigeEspecialidade && !especialidadePersistida) {
+          const resultado = await supabase
+            .from("alocacoes")
+            .update({ especialidade_ajudante: especialidadeAjudante })
+            .eq("funcionario_id", r.funcionario_id)
+            .eq("obra_id", r.obra_id)
+            .eq("data", r.data);
+          alocErr = resultado.error;
+        }
         if (alocErr) {
           const erroAmigavel = erroBancoAlocacao(alocErr);
           setSaving((s) => ({ ...s, [key]: "error" }));
@@ -431,7 +472,13 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
         toast.error(mensagemErroCompetenciaFechada(error) ?? mensagemErroRegistro(error));
         return;
       }
-      setCells((prev) => ({ ...prev, [key]: data as Registro }));
+      setCells((prev) => ({
+        ...prev,
+        [key]: {
+          ...(data as Registro),
+          especialidade_ajudante: r.especialidade_ajudante,
+        },
+      }));
       setSaving((s) => ({ ...s, [key]: "saved" }));
       qc.invalidateQueries({ queryKey: ["aloc-week", obraId] });
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
@@ -440,7 +487,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
         setSaving((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s));
       }, 1200);
     },
-    [user?.id, qc, obraId],
+    [user?.id, qc, obraId, infoHistoricoById, especialidadePorAlocacao],
   );
 
   const updateCell = useCallback(
@@ -543,9 +590,9 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
         )}
 
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <LegendDot className="bg-emerald-500" /> Normal
-          <LegendDot className="bg-amber-500" /> H. extras
-          <LegendDot className="bg-rose-500" /> Excesso
+          <LegendDot className="bg-emerald-500" /> Horas normais
+          <LegendDot className="bg-amber-500" /> HE 50%
+          <LegendDot className="bg-rose-500" /> HE 100%
         </div>
       </div>
 
@@ -621,6 +668,16 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
                       falta_tipo: null,
                     };
                     const isAlloc = allocSet.has(`${f.id}|${dateStr}`);
+                    const especialidadePersistida = especialidadePorAlocacao.get(
+                      `${f.id}|${dateStr}`,
+                    );
+                    const registroComEspecialidade: Registro = {
+                      ...base,
+                      especialidade_ajudante: resolverEspecialidadeAjudanteGrade(
+                        especialidadePersistida,
+                        base.especialidade_ajudante,
+                      ),
+                    };
                     const bloqueado =
                       !f.ativo && f.dataDesligamento != null && dateStr > f.dataDesligamento;
                     return (
@@ -634,10 +691,12 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
                           </div>
                         ) : (
                           <DayCell
-                            registro={base}
+                            registro={registroComEspecialidade}
                             alocado={isAlloc}
+                            categoria={f.categoria_mo}
+                            especialidadePersistida={especialidadePersistida}
                             status={saving[key] ?? "idle"}
-                            onChange={(patch) => updateCell(key, patch, base)}
+                            onChange={(patch) => updateCell(key, patch, registroComEspecialidade)}
                           />
                         )}
                       </td>
@@ -660,22 +719,30 @@ function LegendDot({ className }: { className?: string }) {
 function DayCell({
   registro,
   alocado,
+  categoria,
+  especialidadePersistida,
   status,
   onChange,
 }: {
   registro: Registro;
   alocado: boolean;
+  categoria: string | null;
+  especialidadePersistida: EspecialidadeAjudante | null | undefined;
   status: "idle" | "saving" | "saved" | "error";
   onChange: (patch: Partial<Registro>) => void;
 }) {
-  const s = cellStatus(registro);
-  const total = (Number(registro.horas_normais) || 0) + (Number(registro.horas_extras) || 0);
+  const composicao = comporHorasParaVisualizacao({
+    data: registro.data,
+    horasNormais: registro.horas_normais,
+    horasExtras: registro.horas_extras,
+  });
+  const total = composicao.total;
   const bg =
-    s === "ok"
+    composicao.destaque === "normal"
       ? "bg-emerald-500/10 border-emerald-500/40"
-      : s === "warn"
+      : composicao.destaque === "he50"
         ? "bg-amber-500/10 border-amber-500/40"
-        : s === "error"
+        : composicao.destaque === "he100"
           ? "bg-rose-500/10 border-rose-500/40"
           : "bg-card border-border";
 
@@ -688,6 +755,10 @@ function DayCell({
   const overflow = total > 16;
   const dataFuturaBloqueada =
     dataLancamentoFutura(registro.data) && !registroEhAusenciaPlanejada(registro);
+  const deveSolicitarEspecialidade =
+    categoriaEhAjudante(categoria) &&
+    competenciaUsaSegmentacaoMod(registro.data) &&
+    (!alocado || !especialidadePersistida);
 
   return (
     <Popover>
@@ -696,7 +767,7 @@ function DayCell({
           type="button"
           disabled={dataFuturaBloqueada}
           className={cn(
-            "relative flex h-[68px] w-full flex-col items-center justify-center rounded-md border px-1 text-xs transition hover:ring-2 hover:ring-ring/40",
+            "relative flex min-h-[76px] w-full flex-col items-center justify-center rounded-md border px-1 py-1 text-xs transition hover:ring-2 hover:ring-ring/40",
             bg,
           )}
           title={
@@ -719,16 +790,14 @@ function DayCell({
               </span>
             </>
           ) : total > 0 ? (
-            <>
-              <span className="text-base font-semibold leading-tight">
-                {formatDecimalHours(total)}h
+            composicao.linhas.map((linha) => (
+              <span
+                key={linha.tipo}
+                className={cn("text-[11px] font-semibold leading-4", corTextoHora(linha.tipo))}
+              >
+                {linha.texto}
               </span>
-              {registro.horas_extras > 0 && (
-                <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                  {formatExtraHours(registro.horas_extras)} ext
-                </span>
-              )}
-            </>
+            ))
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
@@ -749,6 +818,19 @@ function DayCell({
             month: "long",
           })}
         </div>
+
+        {registro.tipo_registro === "horas" && composicao.linhas.length > 0 && (
+          <div className="rounded-md border bg-muted/20 p-2">
+            <div className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">
+              Apuração para exibição
+            </div>
+            {composicao.linhas.map((linha) => (
+              <div key={linha.tipo} className={cn("text-xs font-medium", corTextoHora(linha.tipo))}>
+                {linha.texto}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Tipo de registro</label>
@@ -817,6 +899,33 @@ function DayCell({
           </Alert>
         ) : (
           <>
+            {deveSolicitarEspecialidade && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Classificação do ajudante *</label>
+                <Select
+                  value={registro.especialidade_ajudante ?? ""}
+                  onValueChange={(value: EspecialidadeAjudante) =>
+                    onChange({ especialidade_ajudante: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione Civil ou Montagem" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="civil">Civil</SelectItem>
+                    <SelectItem value="montagem">Montagem</SelectItem>
+                  </SelectContent>
+                </Select>
+                {!registro.especialidade_ajudante && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Necessária para esta alocação sem classificação.
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">
+              Valores brutos do lançamento
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Horas normais (máx 9)</label>
@@ -897,4 +1006,10 @@ function DayCell({
       </PopoverContent>
     </Popover>
   );
+}
+
+function corTextoHora(tipo: TipoHoraVisual) {
+  if (tipo === "he100") return "text-rose-700 dark:text-rose-400";
+  if (tipo === "he50") return "text-amber-700 dark:text-amber-400";
+  return "text-emerald-700 dark:text-emerald-400";
 }

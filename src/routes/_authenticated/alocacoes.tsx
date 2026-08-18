@@ -93,6 +93,7 @@ import {
   totalHorasTrabalhadas,
 } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours, roundHours } from "@/lib/formatacao-horas";
+import { comporHorasParaVisualizacao } from "@/lib/horas-visualizacao";
 import {
   AVISO_FALTA_INTEGRAL,
   buscarConflitoRegistroDiario,
@@ -564,7 +565,14 @@ function AlocacoesPage() {
         dias: Map<string, CalendarRow[]>;
         funcs: Map<
           string,
-          { nome: string; categoria: string; dias: Set<string>; hn: number; he: number }
+          {
+            nome: string;
+            categoria: string;
+            dias: Set<string>;
+            hn: number;
+            he50: number;
+            he100: number;
+          }
         >;
       }
     >();
@@ -583,14 +591,21 @@ function AlocacoesPage() {
           categoria: info?.categoria ?? "Sem função",
           dias: new Set(),
           hn: 0,
-          he: 0,
+          he50: 0,
+          he100: 0,
         });
       const fEntry = g.funcs.get(fId)!;
       fEntry.dias.add(a.data);
       const h = horasMap.get(`${fId}|${obraId}|${a.data}`);
       if (h) {
-        fEntry.hn += h.hn;
-        fEntry.he += h.he;
+        const composicao = comporHorasParaVisualizacao({
+          data: a.data,
+          horasNormais: h.hn,
+          horasExtras: h.he,
+        });
+        fEntry.hn += composicao.horasNormaisApuradas;
+        fEntry.he50 += composicao.horasExtra50Apuradas;
+        fEntry.he100 += composicao.horasExtra100Apuradas;
       }
     }
     for (const r of registros ?? []) {
@@ -623,14 +638,16 @@ function AlocacoesPage() {
           categoria: info?.categoria ?? "Sem função",
           dias: new Set(),
           hn: 0,
-          he: 0,
+          he50: 0,
+          he100: 0,
         });
       g.funcs.get(r.funcionario_id)!.dias.add(r.data);
     }
     for (const grupo of out.values()) {
       for (const funcionario of grupo.funcs.values()) {
         funcionario.hn = roundHours(funcionario.hn);
-        funcionario.he = roundHours(funcionario.he);
+        funcionario.he50 = roundHours(funcionario.he50);
+        funcionario.he100 = roundHours(funcionario.he100);
       }
     }
     return Array.from(out.entries())
@@ -1750,18 +1767,19 @@ function AlocacoesPage() {
                           Funcionários na competência
                         </div>
                         <div className="overflow-hidden rounded-md border bg-background">
-                          <div className="hidden grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid">
+                          <div className="hidden grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem_7rem] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid">
                             <div>Funcionário</div>
                             <div>Função</div>
                             <div>Dias</div>
                             <div>Horas normais</div>
-                            <div>Horas extras</div>
+                            <div>HE 50%</div>
+                            <div>HE 100%</div>
                           </div>
                           <ul className="divide-y">
                             {funcsArr.map((f) => (
                               <li
                                 key={f.id}
-                                className="grid grid-cols-3 items-center gap-x-3 gap-y-2 px-3 py-2.5 text-sm sm:grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem]"
+                                className="grid grid-cols-3 items-center gap-x-3 gap-y-2 px-3 py-2.5 text-sm sm:grid-cols-[minmax(12rem,2fr)_minmax(9rem,1.25fr)_5rem_7rem_7rem_7rem]"
                               >
                                 <div className="col-span-3 min-w-0 sm:col-span-1">
                                   <div className="truncate font-medium">{f.nome}</div>
@@ -1785,11 +1803,23 @@ function AlocacoesPage() {
                                 </div>
                                 <div>
                                   <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
-                                    Horas extras
+                                    HE 50%
                                   </div>
-                                  {f.he > 0 ? (
+                                  {f.he50 > 0 ? (
                                     <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                                      {formatExtraHours(f.he)}
+                                      {formatDecimalHours(f.he50)}h
+                                    </Badge>
+                                  ) : (
+                                    <span className="pl-2 text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="mb-1 text-[10px] text-muted-foreground sm:hidden">
+                                    HE 100%
+                                  </div>
+                                  {f.he100 > 0 ? (
+                                    <Badge className="bg-rose-500/15 text-rose-700 hover:bg-rose-500/15 dark:text-rose-400">
+                                      {formatDecimalHours(f.he100)}h
                                     </Badge>
                                   ) : (
                                     <span className="pl-2 text-muted-foreground">-</span>
@@ -1866,6 +1896,13 @@ function AlocacoesPage() {
                                             const h = horasMap.get(
                                               `${a.funcionario_id}|${a.obra_id}|${a.data}`,
                                             );
+                                            const composicaoHoras = h
+                                              ? comporHorasParaVisualizacao({
+                                                  data: a.data,
+                                                  horasNormais: h.hn,
+                                                  horasExtras: h.he,
+                                                })
+                                              : null;
                                             const podeEditar =
                                               canEditAllocationHoursByRole ||
                                               (a.created_by === user?.id &&
@@ -1940,19 +1977,21 @@ function AlocacoesPage() {
                                                           )}
                                                         </>
                                                       ) : (
-                                                        <>
+                                                        composicaoHoras?.linhas.map((linha) => (
                                                           <Badge
+                                                            key={linha.tipo}
                                                             variant="secondary"
-                                                            className="text-[10px]"
+                                                            className={
+                                                              linha.tipo === "he100"
+                                                                ? "bg-rose-500/15 text-rose-700 text-[10px] dark:text-rose-400"
+                                                                : linha.tipo === "he50"
+                                                                  ? "bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400"
+                                                                  : "bg-emerald-500/15 text-emerald-700 text-[10px] dark:text-emerald-400"
+                                                            }
                                                           >
-                                                            {formatDecimalHours(h.hn)}h
+                                                            {linha.texto}
                                                           </Badge>
-                                                          {h.he > 0 && (
-                                                            <Badge className="bg-amber-500/15 text-amber-700 text-[10px] dark:text-amber-400">
-                                                              {formatExtraHours(h.he)}
-                                                            </Badge>
-                                                          )}
-                                                        </>
+                                                        ))
                                                       )
                                                     ) : (
                                                       <Badge

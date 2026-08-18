@@ -20,6 +20,13 @@ export function categoriaEhAjudante(categoria: string | null | undefined) {
   return normalizarCategoriaMo(categoria) === "AJUDANTE";
 }
 
+export function resolverEspecialidadeAjudanteGrade(
+  persistida: EspecialidadeAjudante | null | undefined,
+  selecionada: EspecialidadeAjudante | null | undefined,
+) {
+  return persistida ?? selecionada ?? null;
+}
+
 export const CATEGORIAS_MOD_CIVIL_CONHECIDAS = [
   "PEDREIRO",
   "CARPINTEIRO",
