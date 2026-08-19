@@ -130,7 +130,7 @@ test("assistente pode abrir Alocações sem guard de role local", () => {
 test("modal e select de funcionários permanecem disponíveis", () => {
   assert.match(sourceAlocacoes, /Lançar dia trabalhado/);
   assert.match(sourceAlocacoes, /name="funcionario_id"/);
-  assert.match(sourceAlocacoes, /<SelectContent>/);
+  assert.match(sourceAlocacoes, /<FuncionarioSearchSelect/);
 });
 
 test("lista grande de funcionários é normalizada sem crash", () => {
@@ -185,7 +185,7 @@ test("erro mensal não desmonta o shell autenticado", () => {
 });
 
 test("seleção usa rótulo único e evita nós condicionais traduzíveis", () => {
-  assert.match(sourceAlocacoes, /rotuloFuncionarioAlocacao\(f\)/);
+  assert.match(sourceAlocacoes, /formatLabel=\{rotuloFuncionarioAlocacao\}/);
   assert.doesNotMatch(sourceAlocacoes, /f\.data_desligamento\s*\?\s*` — desligado/);
 });
 

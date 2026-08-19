@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
 import { dataLancamentoFutura, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
@@ -557,32 +558,14 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
         </div>
 
         {availableToAdd.length > 0 && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm">
-                + Adicionar funcionário
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-0" align="end">
-              <div className="max-h-72 overflow-y-auto p-1">
-                {availableToAdd.map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                    onClick={() =>
-                      setExtraIds((cur) => (cur.includes(f.id) ? cur : [...cur, f.id]))
-                    }
-                  >
-                    {f.nome}
-                    {!f.ativo ? (
-                      <span className="ml-2 text-[10px] text-muted-foreground">(inativo)</span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+          <FuncionarioSearchSelect
+            funcionarios={availableToAdd}
+            value=""
+            onValueChange={(id) => setExtraIds((cur) => (cur.includes(id) ? cur : [...cur, id]))}
+            placeholder="+ Adicionar funcionário"
+            formatLabel={(f) => `${f.nome}${!f.ativo ? " — inativo" : ""}`}
+            className="h-9 w-auto min-w-52"
+          />
         )}
 
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">

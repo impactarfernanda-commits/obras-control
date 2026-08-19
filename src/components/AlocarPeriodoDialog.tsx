@@ -4,6 +4,7 @@ import { CalendarRange, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
 import {
   buscarConflitosAlocacao,
   isAlocacaoConflitoError,
@@ -589,23 +590,20 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Funcionário</Label>
-              <Select value={funcionarioId} onValueChange={setFuncionarioId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {funcionariosElegiveis.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.nome} — {f.categoria_mo?.trim() || "Sem função"}
-                      {f.data_desligamento
-                        ? ` — desligado em ${new Date(
-                            f.data_desligamento + "T00:00:00",
-                          ).toLocaleDateString("pt-BR")}`
-                        : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FuncionarioSearchSelect
+                funcionarios={funcionariosElegiveis}
+                value={funcionarioId}
+                onValueChange={setFuncionarioId}
+                formatLabel={(f) =>
+                  `${f.nome} — ${f.categoria_mo?.trim() || "Sem função"}${
+                    f.data_desligamento
+                      ? ` — desligado em ${new Date(
+                          f.data_desligamento + "T00:00:00",
+                        ).toLocaleDateString("pt-BR")}`
+                      : ""
+                  }`
+                }
+              />
             </div>
             {periodoExigeEspecialidade && (
               <div className="space-y-1.5">

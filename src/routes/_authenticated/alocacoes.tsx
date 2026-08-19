@@ -71,6 +71,7 @@ import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { CopiarDiaAnteriorDialog } from "@/components/CopiarDiaAnteriorDialog";
+import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
 import {
@@ -1280,20 +1281,14 @@ function AlocacoesPage() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Funcionário</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Selecione" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {funcionariosSelecionaveis.map((f) => (
-                                <SelectItem key={f.id} value={f.id}>
-                                  {rotuloFuncionarioAlocacao(f)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <FormControl>
+                            <FuncionarioSearchSelect
+                              funcionarios={funcionariosSelecionaveis}
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              formatLabel={rotuloFuncionarioAlocacao}
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
