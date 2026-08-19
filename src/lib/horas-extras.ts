@@ -30,6 +30,11 @@ export type CustoHoraExtra = {
   custoTotal: number;
 };
 
+export type CustoJornadaDetalhada = CustoHoraExtra & {
+  horasNoturnasRemuneraveis: number;
+  adicionalNoturno: number;
+};
+
 export const CUSTO_HORA_EXTRA_ZERO: CustoHoraExtra = {
   horas50: 0,
   horas100: 0,
@@ -125,6 +130,64 @@ export function calcularCustoHorasExtras(
     provisaoAviso,
     provisaoFerias,
     custoTotal,
+  };
+}
+
+/**
+ * A HE noturna combina hora reduzida, adicional de 20% e multiplicador de HE.
+ * `adicionalNoturno` expõe a diferença noturna já contida nas parcelas combinadas,
+ * para apresentação sem somá-la novamente ao total.
+ */
+export function calcularCustoJornadaDetalhada(
+  custoBase: CustoMensalVariavel,
+  input: {
+    horas50: number;
+    horas100: number;
+    horasNoturnasNormaisRemuneraveis: number;
+    horasNoturnas50Remuneraveis: number;
+    horasNoturnas100Remuneraveis: number;
+    horasNoturnasSemHeRemuneraveis: number;
+  },
+): CustoJornadaDetalhada {
+  const salario = Number(custoBase.salario || 0);
+  const horas50 = Math.max(0, Number(input.horas50 || 0));
+  const horas100 = Math.max(0, Number(input.horas100 || 0));
+  const noturnasNormais = Math.max(0, Number(input.horasNoturnasNormaisRemuneraveis || 0));
+  const noturnas50 = Math.max(0, Number(input.horasNoturnas50Remuneraveis || 0));
+  const noturnas100 = Math.max(0, Number(input.horasNoturnas100Remuneraveis || 0));
+  const noturnasSemHe = Math.max(0, Number(input.horasNoturnasSemHeRemuneraveis || 0));
+  const horasNoturnasRemuneraveis = noturnasNormais + noturnas50 + noturnas100 + noturnasSemHe;
+  if (salario <= 0)
+    return { ...CUSTO_HORA_EXTRA_ZERO, horasNoturnasRemuneraveis, adicionalNoturno: 0 };
+  const valorHora = salario / 220;
+  const horasNoturnas50Reais = noturnas50 * (52.5 / 60);
+  const horasNoturnas100Reais = noturnas100 * (52.5 / 60);
+  const remuneracao50 =
+    Math.max(0, horas50 - horasNoturnas50Reais) * valorHora * 1.5 + noturnas50 * valorHora * 1.5;
+  const remuneracao100 =
+    Math.max(0, horas100 - horasNoturnas100Reais) * valorHora * 2 + noturnas100 * valorHora * 2;
+  const adicionalNoturnoNormal = (noturnasNormais + noturnasSemHe) * valorHora * 0.2;
+  const adicionalNoturno =
+    adicionalNoturnoNormal + noturnas50 * valorHora * 1.5 * 0.2 + noturnas100 * valorHora * 2 * 0.2;
+  const remuneracao = remuneracao50 + remuneracao100 + adicionalNoturno;
+  const proporcao = (valor: number) => remuneracao * (Number(valor || 0) / salario);
+  const encargos = proporcao(custoBase.encargos);
+  const provisao13 = proporcao(custoBase.prov13);
+  const provisaoAviso = proporcao(custoBase.provAvisoPrevio);
+  const provisaoFerias = proporcao(custoBase.provFerias);
+  return {
+    horas50,
+    horas100,
+    horasNoturnasRemuneraveis,
+    remuneracao50,
+    remuneracao100,
+    adicionalNoturno,
+    remuneracao,
+    encargos,
+    provisao13,
+    provisaoAviso,
+    provisaoFerias,
+    custoTotal: remuneracao + encargos + provisao13 + provisaoAviso + provisaoFerias,
   };
 }
 

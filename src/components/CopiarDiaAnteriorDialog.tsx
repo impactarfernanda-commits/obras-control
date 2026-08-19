@@ -4,11 +4,11 @@ import { Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
 import { formatarDataCopia, logErroCopiaDia, type ResumoCopiaDia } from "@/lib/copiar-dia-anterior";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularCompetencia } from "@/lib/competencias";
+import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import { categoriaEhAjudante, type EspecialidadeAjudante } from "@/lib/especialidade-ajudante";
 import {
   especialidadeNovaAlocacao,
@@ -52,7 +52,6 @@ export function CopiarDiaAnteriorDialog({
   obraId: string;
   obraNome: string;
 }) {
-  const { user } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const hoje = dataLocalHoje();
@@ -161,7 +160,14 @@ export function CopiarDiaAnteriorDialog({
       validarDataLancamento(previa.destino_data, "alocacao");
       const candidatos = previa.itens.filter(({ status }) => status === "adicionar");
       const ids = candidatos.map(({ funcionario_id }) => funcionario_id);
-      const [alocacoesDestino, registrosDestino, registrosOrigem] = await Promise.all([
+      const [
+        alocacoesDestino,
+        registrosDestino,
+        alocacoesOrigem,
+        registrosOrigem,
+        funcionarios,
+        feriadosResult,
+      ] = await Promise.all([
         supabase
           .from("alocacoes")
           .select("funcionario_id")
@@ -175,76 +181,116 @@ export function CopiarDiaAnteriorDialog({
           .eq("data", previa.destino_data)
           .in("funcionario_id", ids),
         supabase
+          .from("alocacoes")
+          .select("funcionario_id,hora_entrada,hora_saida,intervalo_padrao_minutos")
+          .eq("obra_id", obraId)
+          .eq("data", previa.origem_data)
+          .in("funcionario_id", ids),
+        supabase
           .from("registros_horas")
-          .select("funcionario_id, horas_normais")
+          .select("funcionario_id,horas_normais,horas_extras,justificativa_extras,observacoes")
           .eq("obra_id", obraId)
           .eq("data", previa.origem_data)
           .eq("tipo_registro", "horas")
           .in("funcionario_id", ids),
+        supabase.rpc("obras_control_funcionarios_safe"),
+        supabase
+          .from("feriados_obras_control" as never)
+          .select("data" as never)
+          .eq("ativo" as never, true),
       ]);
-      for (const resultado of [alocacoesDestino, registrosDestino, registrosOrigem])
+      for (const resultado of [
+        alocacoesDestino,
+        registrosDestino,
+        alocacoesOrigem,
+        registrosOrigem,
+        funcionarios,
+        feriadosResult,
+      ])
         if (resultado.error) throw resultado.error;
       const ocupados = new Set([
         ...(alocacoesDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
         ...(registrosDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
       ]);
       const alvos = candidatos.filter(({ funcionario_id }) => !ocupados.has(funcionario_id));
-      const idsInseridos = new Set<string>();
-      if (alvos.length > 0) {
-        const { data: inseridas, error: alocacaoErro } = await supabase
-          .from("alocacoes")
-          .upsert(
-            alvos.map((item) => ({
-              funcionario_id: item.funcionario_id,
-              obra_id: obraId,
-              data: previa.destino_data,
-              created_by: user?.id ?? null,
-              especialidade_ajudante: especialidadeNovaAlocacao({
-                ajudante: item.ajudante,
-                resolucao: item.resolucao,
-                escolha: escolhas[item.funcionario_id],
-              }),
-            })),
-            { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
-          )
-          .select("funcionario_id");
-        if (alocacaoErro) throw alocacaoErro;
-        for (const { funcionario_id } of inseridas ?? []) idsInseridos.add(funcionario_id);
-      }
-      const horasOrigem = new Map(
-        (registrosOrigem.data ?? []).map((registro) => [
-          registro.funcionario_id,
-          Number(registro.horas_normais),
-        ]),
+      const origemPorFuncionario = new Map(
+        (alocacoesOrigem.data ?? []).map((item) => [item.funcionario_id, item]),
       );
-      const linhasRegistro = alvos
-        .filter(({ funcionario_id }) => idsInseridos.has(funcionario_id))
-        .map((item) => ({
-          funcionario_id: item.funcionario_id,
-          obra_id: obraId,
+      const registroPorFuncionario = new Map(
+        (registrosOrigem.data ?? []).map((item) => [item.funcionario_id, item]),
+      );
+      const categoriaPorFuncionario = new Map(
+        (funcionarios.data as unknown as Array<{ id: string; categoria_mo: string | null }>).map(
+          (item) => [item.id, item.categoria_mo],
+        ),
+      );
+      const feriados = new Set(
+        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
+      );
+      const itens = alvos.map((item) => {
+        const origem = origemPorFuncionario.get(item.funcionario_id);
+        const registro = registroPorFuncionario.get(item.funcionario_id);
+        const horaEntrada = origem?.hora_entrada?.slice(0, 5) ?? "07:00";
+        const intervaloMinutos = origem?.intervalo_padrao_minutos ?? 60;
+        const totalLegado =
+          Number(registro?.horas_normais ?? 0) + Number(registro?.horas_extras ?? 0);
+        const minutosSaida =
+          (Number(horaEntrada.slice(0, 2)) * 60 +
+            Number(horaEntrada.slice(3, 5)) +
+            Math.round(totalLegado * 60) +
+            intervaloMinutos) %
+          1440;
+        const horaSaida =
+          origem?.hora_saida?.slice(0, 5) ??
+          `${String(Math.floor(minutosSaida / 60)).padStart(2, "0")}:${String(minutosSaida % 60).padStart(2, "0")}`;
+        const detalhe = calcularJornadaDetalhada({
           data: previa.destino_data,
-          horas_normais:
-            horasOrigem.get(item.funcionario_id) ??
-            (new Date(`${previa.destino_data}T00:00:00`).getDay() === 5 ? 8 : 9),
-          horas_extras: 0,
-          ausencia: false,
-          tipo_registro: "horas" as const,
-          falta_tipo: null,
-          created_by: user?.id ?? null,
-          updated_by: user?.id ?? null,
-        }));
-      if (linhasRegistro.length > 0) {
-        const { error: registroErro } = await supabase
-          .from("registros_horas")
-          .insert(linhasRegistro);
-        if (registroErro) throw registroErro;
+          horaEntrada,
+          horaSaida,
+          intervaloMinutos,
+          funcao: categoriaPorFuncionario.get(item.funcionario_id),
+          feriados,
+        });
+        if (!detalhe.valido) throw new Error(`${item.nome}: ${detalhe.erro}`);
+        if (detalhe.exigeJustificativa && !registro?.justificativa_extras?.trim())
+          throw new Error(`${item.nome}: a jornada copiada exige justificativa.`);
+        return {
+          funcionarioId: item.funcionario_id,
+          obraId,
+          data: previa.destino_data,
+          horaEntrada,
+          horaSaida,
+          intervaloMinutos,
+          horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
+          horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
+          justificativa: registro?.justificativa_extras ?? null,
+          observacoes: registro?.observacoes ?? null,
+          especialidadeAjudante: especialidadeNovaAlocacao({
+            ajudante: item.ajudante,
+            resolucao: item.resolucao,
+            escolha: escolhas[item.funcionario_id],
+          }),
+          detalhe,
+        };
+      });
+      let resultadoCopia = { processados: 0, preservados: 0 };
+      if (itens.length > 0) {
+        const { data, error } = await supabase.rpc(
+          "obras_copiar_jornadas_v2" as never,
+          { p_itens: itens } as never,
+        );
+        if (error) throw error;
+        resultadoCopia = data as unknown as { processados: number; preservados: number };
       }
-      const totalCopiados = idsInseridos.size;
+      const totalCopiados = Number(resultadoCopia.processados ?? 0);
       if (totalCopiados === 0)
         toast.info("Nenhum funcionário para copiar. A equipe do dia já está atualizada.");
       else
         toast.success(
-          `${totalCopiados} funcionários copiados de ${formatarDataCopia(previa.origem_data)} para ${formatarDataCopia(previa.destino_data)}.`,
+          `${totalCopiados} funcionários copiados de ${formatarDataCopia(previa.origem_data)} para ${formatarDataCopia(previa.destino_data)}.` +
+            (resultadoCopia.preservados > 0
+              ? ` ${resultadoCopia.preservados} já existentes foram preservados.`
+              : ""),
         );
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["alocacoes-mes"] }),

@@ -55,6 +55,7 @@ import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
 import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
+import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -85,6 +86,7 @@ type AlocRow = {
   hora_saida: string | null;
 };
 type RegRow = {
+  id: string;
   funcionario_id: string;
   obra_id: string;
   data: string;
@@ -176,7 +178,7 @@ function RelatoriosPage() {
         supabase
           .from("registros_horas")
           .select(
-            "funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo,observacoes",
+            "id,funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo,observacoes",
           )
           .gte("data", start)
           .lte("data", end)
@@ -187,6 +189,26 @@ function RelatoriosPage() {
       ),
     enabled: podeVerFolha,
   });
+
+  const { data: detalhes } = useQuery({
+    queryKey: ["registros-horas-detalhes-relatorio", start, end],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("registros_horas_detalhes" as never)
+        .select(
+          "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,jornada_excepcional" as never,
+        )
+        .gte("data_inicio" as never, start)
+        .lte("data_inicio" as never, end);
+      if (error) throw error;
+      return data as unknown as Array<DetalheJornadaVisual & { registro_horas_id: string }>;
+    },
+    enabled: podeVerFolha,
+  });
+  const detalhePorRegistro = useMemo(
+    () => new Map((detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe])),
+    [detalhes],
+  );
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
@@ -249,6 +271,8 @@ function RelatoriosPage() {
           (registrosPorFunc.get(funcionario.id) ?? []).map((registro) => ({
             data: registro.data,
             horasExtras: (() => {
+              const detalhe = detalhePorRegistro.get(registro.id);
+              if (detalhe) return (detalhe.minutos_he_50 + detalhe.minutos_he_100) / 60;
               const apuracao = classificarHorasPorData({
                 data: registro.data,
                 horasNormais: registro.horas_normais,
@@ -261,7 +285,7 @@ function RelatoriosPage() {
       );
     }
     return resultado;
-  }, [custoPorFunc, funcionariosRelatorio, registros]);
+  }, [custoPorFunc, detalhePorRegistro, funcionariosRelatorio, registros]);
 
   const obrasComCusto = useMemo(() => relatorioCentros?.centros ?? [], [relatorioCentros]);
   const segmentarMod = relatorioCentros?.segmentarMod ?? false;
@@ -405,6 +429,17 @@ function RelatoriosPage() {
     const rows = (registros ?? [])
       .filter((r) => tipoRegistroFilter === "all" || r.tipo_registro === tipoRegistroFilter)
       .map((r) => ({
+        ...(() => {
+          const detalhe = detalhePorRegistro.get(r.id);
+          return {
+            "HE 50%": detalhe ? detalhe.minutos_he_50 / 60 : 0,
+            "HE 100%": detalhe ? detalhe.minutos_he_100 / 60 : 0,
+            "Horas sem adicional de HE": detalhe ? detalhe.minutos_sem_adicional_he / 60 : 0,
+            "Horas noturnas reais": detalhe ? detalhe.minutos_noturnos_reais / 60 : 0,
+            "Horas noturnas remuneráveis": detalhe ? detalhe.minutos_noturnos_remuneraveis / 60 : 0,
+            "Jornada excepcional": detalhe?.jornada_excepcional ? "Sim" : "Não",
+          };
+        })(),
         Data: new Date(r.data + "T00:00:00").toLocaleDateString("pt-BR"),
         Funcionário: nomes.get(r.funcionario_id) ?? "—",
         "Centro de custo": centros.get(r.obra_id) ?? "—",
@@ -457,11 +492,18 @@ function RelatoriosPage() {
           const alocacao = alocacaoMap.get(
             `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
           );
-          const apuracao = classificarHorasPorData({
-            data: registro.data,
-            horasNormais: registro.horas_normais,
-            horasExtras: registro.horas_extras,
-          });
+          const detalhe = detalhePorRegistro.get(registro.id);
+          const apuracao = detalhe
+            ? {
+                horasNormaisApuradas: detalhe.minutos_normais / 60,
+                horasExtra50Apuradas: detalhe.minutos_he_50 / 60,
+                horasExtra100Apuradas: detalhe.minutos_he_100 / 60,
+              }
+            : classificarHorasPorData({
+                data: registro.data,
+                horasNormais: registro.horas_normais,
+                horasExtras: registro.horas_extras,
+              });
           const horasExtrasApuradas =
             apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
           return {

@@ -16,6 +16,7 @@ import {
   type AlocacaoRelatorio,
   type RegistroRelatorio,
 } from "@/lib/relatorio-centro-custo";
+import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 type FuncionarioInterno = {
@@ -55,6 +56,8 @@ export function montarRelatorioCentrosCusto(input: {
   obras: Array<{ id: string; nome: string }>;
   alocacoes: AlocacaoRelatorio[];
   registros: RegistroRelatorio[];
+  detalhes?: Array<DetalheJornadaVisual & { registro_horas_id: string }>;
+  feriados?: string[];
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
   const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
@@ -68,9 +71,16 @@ export function montarRelatorioCentrosCusto(input: {
       calcularCusto(f.salario, input.beneficios, seguros.get(f.categoria_mo) ?? 0),
     ]),
   );
+  const detalhePorRegistro = new Map(
+    (input.detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe]),
+  );
+  const registros = input.registros.map((registro) => ({
+    ...registro,
+    detalhe: registro.id ? (detalhePorRegistro.get(registro.id) ?? null) : null,
+  }));
   const resultado = consolidarCustosCentros({
     alocacoes: input.alocacoes,
-    registros: input.registros,
+    registros,
     funcionarios,
     custos,
     obras: new Map(input.obras.map((obra) => [obra.id, obra.nome])),
@@ -84,6 +94,7 @@ export function montarRelatorioCentrosCusto(input: {
     calcularCustoBase: (args) => custoDoDia({ ...args, horasExtras: 0 }),
     horasNormaisPadrao: horasPadraoDoDia,
     segmentarMod,
+    feriados: new Set(input.feriados ?? []),
   });
   return {
     competencia: input.competencia,
@@ -112,62 +123,84 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
     if (!roles.some((role) => role === "coordenador" || role === "gerente" || role === "diretor"))
       throw new Error("Forbidden: relatório indisponível para este perfil");
     const periodo = periodoFolha(data.competencia);
-    const [funcionarios, beneficiosRes, seguros, categorias, obras, alocacoes, registros] =
-      await Promise.all([
-        buscarTodasPaginas<FuncionarioInterno>((from, to) =>
-          supabaseAdmin
-            .from("funcionarios")
-            .select("id,nome,categoria_mo,salario,deleted_at,visivel_obras_control")
-            .order("id", { ascending: true })
-            .range(from, to),
-        ),
+    const [
+      funcionarios,
+      beneficiosRes,
+      seguros,
+      categorias,
+      obras,
+      alocacoes,
+      registros,
+      detalhesRes,
+      feriadosRes,
+    ] = await Promise.all([
+      buscarTodasPaginas<FuncionarioInterno>((from, to) =>
         supabaseAdmin
-          .from("beneficios_config")
-          .select("assistencia_medica,assistencia_odontologica,vale_alimentacao,multibeneficio")
-          .maybeSingle(),
-        buscarTodasPaginas<{ categoria: string; seguro_vida: number | null }>((from, to) =>
-          supabaseAdmin
-            .from("categoria_salarios")
-            .select("categoria,seguro_vida")
-            .order("categoria", { ascending: true })
-            .range(from, to),
-        ),
-        buscarTodasPaginas<Categoria>((from, to) =>
-          supabaseAdmin
-            .from("categorias")
-            .select("nome,tipo")
-            .order("nome", { ascending: true })
-            .range(from, to),
-        ),
-        buscarTodasPaginas<{ id: string; nome: string }>((from, to) =>
-          supabaseAdmin
-            .from("obras")
-            .select("id,nome")
-            .order("id", { ascending: true })
-            .range(from, to),
-        ),
-        buscarTodasPaginas<AlocacaoRelatorio>((from, to) =>
-          supabaseAdmin
-            .from("alocacoes")
-            .select("id,funcionario_id,obra_id,data,tipo_mao_obra,especialidade_ajudante" as never)
-            .gte("data", periodo.start)
-            .lte("data", periodo.end)
-            .order("id", { ascending: true })
-            .range(from, to),
-        ),
-        buscarTodasPaginas<RegistroRelatorio>((from, to) =>
-          supabaseAdmin
-            .from("registros_horas")
-            .select(
-              "id,funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo",
-            )
-            .gte("data", periodo.start)
-            .lte("data", periodo.end)
-            .order("id", { ascending: true })
-            .range(from, to),
-        ),
-      ]);
+          .from("funcionarios")
+          .select("id,nome,categoria_mo,salario,deleted_at,visivel_obras_control")
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      supabaseAdmin
+        .from("beneficios_config")
+        .select("assistencia_medica,assistencia_odontologica,vale_alimentacao,multibeneficio")
+        .maybeSingle(),
+      buscarTodasPaginas<{ categoria: string; seguro_vida: number | null }>((from, to) =>
+        supabaseAdmin
+          .from("categoria_salarios")
+          .select("categoria,seguro_vida")
+          .order("categoria", { ascending: true })
+          .range(from, to),
+      ),
+      buscarTodasPaginas<Categoria>((from, to) =>
+        supabaseAdmin
+          .from("categorias")
+          .select("nome,tipo")
+          .order("nome", { ascending: true })
+          .range(from, to),
+      ),
+      buscarTodasPaginas<{ id: string; nome: string }>((from, to) =>
+        supabaseAdmin
+          .from("obras")
+          .select("id,nome")
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      buscarTodasPaginas<AlocacaoRelatorio>((from, to) =>
+        supabaseAdmin
+          .from("alocacoes")
+          .select("id,funcionario_id,obra_id,data,tipo_mao_obra,especialidade_ajudante" as never)
+          .gte("data", periodo.start)
+          .lte("data", periodo.end)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      buscarTodasPaginas<RegistroRelatorio>((from, to) =>
+        supabaseAdmin
+          .from("registros_horas")
+          .select(
+            "id,funcionario_id,obra_id,data,horas_normais,horas_extras,ausencia,tipo_registro,falta_tipo",
+          )
+          .gte("data", periodo.start)
+          .lte("data", periodo.end)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      supabaseAdmin
+        .from("registros_horas_detalhes" as never)
+        .select(
+          "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,minutos_noturnos_normais_remuneraveis,minutos_noturnos_he_50_remuneraveis,minutos_noturnos_he_100_remuneraveis,minutos_noturnos_sem_adicional_he_remuneraveis,jornada_excepcional" as never,
+        )
+        .gte("data_inicio" as never, periodo.start)
+        .lte("data_inicio" as never, periodo.end),
+      supabaseAdmin
+        .from("feriados_obras_control" as never)
+        .select("data" as never)
+        .eq("ativo" as never, true),
+    ]);
     if (beneficiosRes.error) throw new Error(beneficiosRes.error.message);
+    if (detalhesRes.error) throw new Error(detalhesRes.error.message);
+    if (feriadosRes.error) throw new Error(feriadosRes.error.message);
     return montarRelatorioCentrosCusto({
       competencia: data.competencia,
       funcionarios,
@@ -177,5 +210,9 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
       obras,
       alocacoes,
       registros,
+      detalhes: detalhesRes.data as unknown as Array<
+        DetalheJornadaVisual & { registro_horas_id: string }
+      >,
+      feriados: (feriadosRes.data as unknown as Array<{ data: string }>).map((item) => item.data),
     });
   });

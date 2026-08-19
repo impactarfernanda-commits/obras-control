@@ -128,8 +128,9 @@ test("tela nao exibe quadro operacional de pendencias legadas", () => {
 
 test("formulario por periodo pede especialidade uma vez e replica em todas as linhas", () => {
   assert.equal(periodo.match(/<Label>Atuação do ajudante \*<\/Label>/g)?.length, 1);
-  assert.match(periodo, /const alocRows = diasAlvo\.map/);
-  assert.match(periodo, /especialidade_ajudante:[\s\S]*\? especialidadeAjudante[\s\S]*: null/);
+  assert.match(periodo, /const itens = diasAlvo\.map/);
+  assert.match(periodo, /especialidadeAjudante:[\s\S]*\? especialidadeAjudante[\s\S]*: null/);
+  assert.match(periodo, /obras_copiar_jornadas_v2/);
 });
 
 test("formularios ocultam e limpam a especialidade para nao-AJUDANTE", () => {

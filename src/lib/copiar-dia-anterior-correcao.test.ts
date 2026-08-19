@@ -47,7 +47,9 @@ test("preview preserva contrato e aplicação transporta a especialidade no clie
   assert.match(copiar, /p_aplicar: false/);
   assert.doesNotMatch(copiar, /p_aplicar: true/);
   assert.match(copiar, /resolverEspecialidadeAjudante/);
-  assert.match(copiar, /especialidade_ajudante:/);
+  assert.match(copiar, /especialidadeOrigem: alocacaoOrigem\?\.especialidade_ajudante/);
+  assert.match(copiar, /especialidadeAjudante: especialidadeNovaAlocacao/);
+  assert.match(copiar, /obras_copiar_jornadas_v2/);
 });
 
 test("grants da RPC permanecem mínimos", () => {

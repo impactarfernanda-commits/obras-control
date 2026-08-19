@@ -33,12 +33,15 @@ const resolver = (
     historico,
   });
 
-test("origem AJUDANTE Civil ou Montagem prevalece no destino", () => {
+test("cópia preserva AJUDANTE Civil como Civil", () => {
   assert.deepEqual(resolver([registro("montagem")], "civil"), {
     estado: "resolvida",
     especialidade: "civil",
     origem: "alocacao_origem",
   });
+});
+
+test("cópia preserva AJUDANTE Montagem como Montagem", () => {
   assert.equal(resolver([], "montagem").especialidade, "montagem");
 });
 

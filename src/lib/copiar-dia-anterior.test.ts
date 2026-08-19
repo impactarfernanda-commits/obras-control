@@ -21,19 +21,30 @@ test("encontra o último dia anterior e segunda pode usar sexta", () => {
 });
 test("origem é consultada somente na mesma obra", () =>
   assert.match(componente, /eq\("obra_id", obraId\).*lt\("data", destino\)/s));
-test("confirmação grava especialidades e horas em lote e invalida queries", () => {
+test("confirmação grava jornadas e especialidades pela RPC atômica e invalida queries", () => {
   assert.equal((componente.match(/p_aplicar: false/g) ?? []).length, 1);
   assert.doesNotMatch(componente, /p_aplicar: true/);
-  assert.match(componente, /especialidade_ajudante:/);
-  assert.match(componente, /\.upsert\(/);
-  assert.match(componente, /\.from\("registros_horas"\)[\s\S]*\.insert\(linhasRegistro\)/);
+  assert.match(componente, /especialidadeAjudante: especialidadeNovaAlocacao/);
+  assert.match(componente, /calcularJornadaDetalhada/);
+  assert.match(componente, /obras_copiar_jornadas_v2/);
+  assert.match(componente, /p_itens: itens/);
   assert.match(componente, /invalidateQueries\(\{ queryKey: \["alocacoes-mes"\]/);
   assert.match(componente, /invalidateQueries\(\{ queryKey: \["registros-mes"\]/);
 });
-test("copia revalida destino em lote e bloqueia clique duplicado", () => {
+test("copia revalida destino, delega concorrência à RPC e bloqueia clique duplicado", () => {
   assert.match(componente, /confirmacaoEmAndamento\.current/);
   assert.match(componente, /\.in\("funcionario_id", ids\)/);
-  assert.match(componente, /ignoreDuplicates: true/);
+  assert.match(componente, /const ocupados = new Set/);
+  assert.match(componente, /const alvos = candidatos\.filter/);
+  const v2 = readFileSync(
+    new URL(
+      "../../supabase/migrations/20260819120000_jornadas_virada_adicional_noturno.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(v2, /alocacoes_funcionario_data_unique|unique_violation/);
+  assert.match(v2, /v_preservados := v_preservados \+ 1/);
 });
 test("RPC é invoker, transacional e não amplia execução", () => {
   assert.match(migration, /SECURITY INVOKER/);

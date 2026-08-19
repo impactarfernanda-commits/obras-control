@@ -74,6 +74,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     ["Funcionários", centro.funcs],
     ["Dias alocados — soma da equipe", centro.dias],
     ["Custo das horas extras", centro.custoHE],
+    ["Custo do adicional noturno", centro.custoAdicionalNoturno],
   ]);
   resumo["!cols"] = [{ wch: 34 }, { wch: 35 }];
   aplicarFormato(resumo, { inicio: 4, fim: 8 }, [1], FORMATO_MOEDA);
@@ -92,8 +93,11 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     "Horas normais",
     "HE 50%",
     "HE 100%",
+    "Horas sem adicional de HE",
+    "Horas noturnas remuneráveis",
     "Custo base",
     "Custo HE",
+    "Custo adicional noturno",
     "Total",
   ];
   const linhas = centro.linhas.map((linha) => [
@@ -109,8 +113,11 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     linha.horasNormais,
     linha.horas50,
     linha.horas100,
+    linha.horasSemAdicionalHe,
+    linha.horasNoturnasRemuneraveis,
     linha.custoBase,
     linha.custoHE,
+    linha.custoAdicionalNoturno,
     linha.total,
   ]);
   const detalhe = XLSX.utils.aoa_to_sheet([cabecalho, ...linhas]);
@@ -120,7 +127,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
   const total = (coluna: string) =>
     linhas.length ? { f: `SUM(${coluna}${primeiraLinha}:${coluna}${ultimaLinha})` } : 0;
   const primeiraColunaNumerica = segmentarMod ? "I" : "H";
-  const ultimaColuna = segmentarMod ? "O" : "N";
+  const ultimaColuna = segmentarMod ? "R" : "Q";
   XLSX.utils.sheet_add_aoa(
     detalhe,
     [
@@ -133,7 +140,7 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
         "",
         "",
         ...(segmentarMod ? [""] : []),
-        ...Array.from({ length: 7 }, (_, indice) =>
+        ...Array.from({ length: 10 }, (_, indice) =>
           total(String.fromCharCode(primeiraColunaNumerica.charCodeAt(0) + indice)),
         ),
       ],
@@ -153,16 +160,19 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     { wch: 15 },
     { wch: 10 },
     { wch: 10 },
+    { wch: 22 },
+    { wch: 24 },
     { wch: 16 },
     { wch: 16 },
     { wch: 16 },
+    { wch: 20 },
   ];
   detalhe["!autofilter"] = { ref: `A1:${ultimaColuna}${Math.max(1, ultimaLinha)}` };
   aplicarFormato(detalhe, { inicio: 1, fim: linhas.length }, [2, 3], FORMATO_DATA);
   aplicarFormato(
     detalhe,
     { inicio: 1, fim: linhas.length + 1 },
-    segmentarMod ? [12, 13, 14] : [11, 12, 13],
+    segmentarMod ? [14, 15, 16, 17] : [13, 14, 15, 16],
     FORMATO_MOEDA,
   );
   XLSX.utils.book_append_sheet(workbook, detalhe, "Detalhamento");

@@ -1,5 +1,10 @@
 import type { CustoBreakdown } from "./custos-core";
-import { calcularCustoHorasExtras, classificarHorasPorData } from "./horas-extras.ts";
+import {
+  calcularCustoHorasExtras,
+  calcularCustoJornadaDetalhada,
+  classificarHorasPorData,
+} from "./horas-extras.ts";
+import type { DetalheJornadaVisual } from "./horas-visualizacao.ts";
 import {
   categoriaEhAjudante,
   classificarTipoMod,
@@ -18,6 +23,7 @@ export type AlocacaoRelatorio = {
 };
 
 export type RegistroRelatorio = {
+  id?: string;
   funcionario_id: string;
   obra_id: string;
   data: string;
@@ -26,6 +32,7 @@ export type RegistroRelatorio = {
   ausencia: boolean;
   tipo_registro?: "horas" | "falta" | "ferias" | "folga_campo";
   falta_tipo?: string | null;
+  detalhe?: DetalheJornadaVisual | null;
 };
 
 export type FuncionarioRelatorio = {
@@ -45,8 +52,11 @@ export type LinhaComposicaoCentro = {
   horasNormais: number;
   horas50: number;
   horas100: number;
+  horasSemAdicionalHe: number;
+  horasNoturnasRemuneraveis: number;
   custoBase: number;
   custoHE: number;
+  custoAdicionalNoturno: number;
   total: number;
 };
 
@@ -62,6 +72,7 @@ export type CentroConsolidado = {
   funcs: number;
   dias: number;
   custoHE: number;
+  custoAdicionalNoturno: number;
   linhas: LinhaComposicaoCentro[];
 };
 
@@ -141,8 +152,11 @@ export function consolidarCustosCentros(input: Input) {
       horasNormais: 0,
       horas50: 0,
       horas100: 0,
+      horasSemAdicionalHe: 0,
+      horasNoturnasRemuneraveis: 0,
       custoBase: 0,
       custoHE: 0,
+      custoAdicionalNoturno: 0,
     };
     atual.tipoInferido ||= tipoInferido;
     linhas.set(id, atual);
@@ -183,12 +197,18 @@ export function consolidarCustosCentros(input: Input) {
     }
 
     const horasRegistradas = registro?.horas_normais ?? input.horasNormaisPadrao(alocacao.data);
-    const apuracao = classificarHorasPorData({
-      data: alocacao.data,
-      horasNormais: falta ? 0 : horasRegistradas,
-      horasExtras: falta ? 0 : registro?.horas_extras,
-      feriado: input.feriados?.has(alocacao.data),
-    });
+    const apuracao = registro?.detalhe
+      ? {
+          horasNormaisApuradas: registro.detalhe.minutos_normais / 60,
+          horasExtra50Apuradas: registro.detalhe.minutos_he_50 / 60,
+          horasExtra100Apuradas: registro.detalhe.minutos_he_100 / 60,
+        }
+      : classificarHorasPorData({
+          data: alocacao.data,
+          horasNormais: falta ? 0 : horasRegistradas,
+          horasExtras: falta ? 0 : registro?.horas_extras,
+          feriado: input.feriados?.has(alocacao.data),
+        });
     const custoBase = input.calcularCustoBase({
       custoMensal: custo.total,
       diasUteis: input.diasUteis,
@@ -223,14 +243,22 @@ export function consolidarCustosCentros(input: Input) {
 
   for (const registro of input.registros) {
     if (registro.tipo_registro != null && registro.tipo_registro !== "horas") continue;
-    const apuracao = classificarHorasPorData({
-      data: registro.data,
-      horasNormais: registro.horas_normais,
-      horasExtras: registro.horas_extras,
-      feriado: input.feriados?.has(registro.data),
-    });
+    const apuracao = registro.detalhe
+      ? {
+          horasNormaisApuradas: registro.detalhe.minutos_normais / 60,
+          horasExtra50Apuradas: registro.detalhe.minutos_he_50 / 60,
+          horasExtra100Apuradas: registro.detalhe.minutos_he_100 / 60,
+        }
+      : classificarHorasPorData({
+          data: registro.data,
+          horasNormais: registro.horas_normais,
+          horasExtras: registro.horas_extras,
+          feriado: input.feriados?.has(registro.data),
+        });
     const horasExtrasApuradas = apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
-    if (horasExtrasApuradas <= 0) continue;
+    const horasNoturnasRemuneraveis =
+      Number(registro.detalhe?.minutos_noturnos_remuneraveis ?? 0) / 60;
+    if (horasExtrasApuradas <= 0 && horasNoturnasRemuneraveis <= 0) continue;
     const funcionario = funcMap.get(registro.funcionario_id);
     const custo = input.custos.get(registro.funcionario_id);
     if (!funcionario || !custo) continue;
@@ -250,11 +278,33 @@ export function consolidarCustosCentros(input: Input) {
     );
     linha.horas50 += apuracao.horasExtra50Apuradas;
     linha.horas100 += apuracao.horasExtra100Apuradas;
-    linha.custoHE += calcularCustoHorasExtras(
-      custo,
-      [{ data: registro.data, horasExtras: horasExtrasApuradas }],
-      input.feriados,
-    ).custoTotal;
+    linha.horasSemAdicionalHe += Number(registro.detalhe?.minutos_sem_adicional_he ?? 0) / 60;
+    linha.horasNoturnasRemuneraveis += horasNoturnasRemuneraveis;
+    if (registro.detalhe) {
+      const custoDetalhado = calcularCustoJornadaDetalhada(custo, {
+        horas50: apuracao.horasExtra50Apuradas,
+        horas100: apuracao.horasExtra100Apuradas,
+        horasNoturnasNormaisRemuneraveis:
+          Number(registro.detalhe.minutos_noturnos_normais_remuneraveis ?? 0) / 60,
+        horasNoturnas50Remuneraveis:
+          Number(registro.detalhe.minutos_noturnos_he_50_remuneraveis ?? 0) / 60,
+        horasNoturnas100Remuneraveis:
+          Number(registro.detalhe.minutos_noturnos_he_100_remuneraveis ?? 0) / 60,
+        horasNoturnasSemHeRemuneraveis:
+          Number(registro.detalhe.minutos_noturnos_sem_adicional_he_remuneraveis ?? 0) / 60,
+      });
+      const fatorReflexos =
+        custoDetalhado.remuneracao > 0 ? custoDetalhado.custoTotal / custoDetalhado.remuneracao : 0;
+      linha.custoHE +=
+        (custoDetalhado.remuneracao50 + custoDetalhado.remuneracao100) * fatorReflexos;
+      linha.custoAdicionalNoturno += custoDetalhado.adicionalNoturno * fatorReflexos;
+    } else {
+      linha.custoHE += calcularCustoHorasExtras(
+        custo,
+        [{ data: registro.data, horasExtras: horasExtrasApuradas }],
+        input.feriados,
+      ).custoTotal;
+    }
   }
 
   const linhasPorCentro = new Map<string, LinhaComposicaoCentro[]>();
@@ -271,9 +321,12 @@ export function consolidarCustosCentros(input: Input) {
       horasNormais: linha.horasNormais,
       horas50: linha.horas50,
       horas100: linha.horas100,
+      horasSemAdicionalHe: linha.horasSemAdicionalHe,
+      horasNoturnasRemuneraveis: linha.horasNoturnasRemuneraveis,
       custoBase: linha.custoBase,
       custoHE: linha.custoHE,
-      total: linha.custoBase + linha.custoHE,
+      custoAdicionalNoturno: linha.custoAdicionalNoturno,
+      total: linha.custoBase + linha.custoHE + linha.custoAdicionalNoturno,
     };
     const lista = linhasPorCentro.get(obraId) ?? [];
     lista.push(final);
@@ -313,6 +366,10 @@ export function consolidarCustosCentros(input: Input) {
       funcs: new Set(composicao.map((linha) => linha.funcionarioId)).size,
       dias: composicao.reduce((total, linha) => total + linha.dias, 0),
       custoHE: composicao.reduce((total, linha) => total + linha.custoHE, 0),
+      custoAdicionalNoturno: composicao.reduce(
+        (total, linha) => total + linha.custoAdicionalNoturno,
+        0,
+      ),
       linhas: composicao,
     });
   }

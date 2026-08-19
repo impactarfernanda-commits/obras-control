@@ -3,10 +3,60 @@ import test from "node:test";
 
 import {
   calcularCustoHorasExtras,
+  calcularCustoJornadaDetalhada,
   classificarHorasPorData,
   formatarHorasDecimais,
   podeVisualizarDetalhamentoFinanceiro,
 } from "./horas-extras.ts";
+
+test("HE noturna combina hora reduzida, adicional de 20% e multiplicador sem dupla contagem", () => {
+  const horaNoturnaRemuneravel = 60 / 52.5;
+  const custo = calcularCustoJornadaDetalhada(
+    { salario: 2200, encargos: 0, prov13: 0, provAvisoPrevio: 0, provFerias: 0 },
+    {
+      horas50: 1,
+      horas100: 1,
+      horasNoturnasNormaisRemuneraveis: horaNoturnaRemuneravel,
+      horasNoturnas50Remuneraveis: horaNoturnaRemuneravel,
+      horasNoturnas100Remuneraveis: horaNoturnaRemuneravel,
+      horasNoturnasSemHeRemuneraveis: horaNoturnaRemuneravel,
+    },
+  );
+  assert.ok(Math.abs(custo.remuneracao50 - 10 * horaNoturnaRemuneravel * 1.5) < 1e-10);
+  assert.ok(Math.abs(custo.remuneracao100 - 10 * horaNoturnaRemuneravel * 2) < 1e-10);
+  assert.ok(
+    Math.abs(
+      custo.adicionalNoturno -
+        (10 * horaNoturnaRemuneravel * 0.2 +
+          10 * horaNoturnaRemuneravel * 1.5 * 0.2 +
+          10 * horaNoturnaRemuneravel * 2 * 0.2 +
+          10 * horaNoturnaRemuneravel * 0.2),
+    ) < 1e-10,
+  );
+  const combinadoEsperado =
+    10 * horaNoturnaRemuneravel * 1.2 * 1.5 +
+    10 * horaNoturnaRemuneravel * 1.2 * 2 +
+    2 * 10 * horaNoturnaRemuneravel * 0.2;
+  assert.ok(Math.abs(custo.remuneracao - combinadoEsperado) < 1e-10);
+});
+
+test("supervisor noturno recebe somente adicional estimado sobre custo-base mensal", () => {
+  const custo = calcularCustoJornadaDetalhada(
+    { salario: 2200, encargos: 0, prov13: 0, provAvisoPrevio: 0, provFerias: 0 },
+    {
+      horas50: 0,
+      horas100: 0,
+      horasNoturnasNormaisRemuneraveis: 0,
+      horasNoturnas50Remuneraveis: 0,
+      horasNoturnas100Remuneraveis: 0,
+      horasNoturnasSemHeRemuneraveis: 60 / 52.5,
+    },
+  );
+  assert.equal(custo.remuneracao50, 0);
+  assert.equal(custo.remuneracao100, 0);
+  assert.ok(Math.abs(custo.adicionalNoturno - 10 * (60 / 52.5) * 0.2) < 1e-10);
+  assert.equal(custo.remuneracao, custo.adicionalNoturno);
+});
 
 test("classifica dias uteis, fim de semana e feriado sem alterar o total", () => {
   const casos = [

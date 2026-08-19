@@ -6,9 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buscarConflitosAlocacao,
-  erroBancoAlocacao,
   isAlocacaoConflitoError,
-  mensagemErroBancoAlocacao,
   TITULO_CONFLITO_ALOCACAO,
   type AlocacaoConflito,
   type MensagemAlocacaoConflito,
@@ -20,10 +18,10 @@ import {
   mensagemErroCompetenciaFechada,
   type FechamentoCompetencia,
 } from "@/lib/competencias";
-import { useAuth } from "@/hooks/use-auth";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { validarDataLancamento } from "@/lib/data-lancamento";
+import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import {
   categoriaEhAjudante,
   competenciaUsaSegmentacaoMod,
@@ -83,12 +81,6 @@ function enumerarDiasUteis(inicio: string, fim: string): string[] {
   return out;
 }
 
-function horasPadrao(iso: string): number {
-  const dow = diaDaSemana(iso);
-  if (dow === 5) return 8;
-  return 9; // seg-qui
-}
-
 const MAX_DIAS_INTERVALO = 92;
 
 type PostgrestErrorLike = { message?: string };
@@ -106,7 +98,6 @@ type Props = {
 };
 
 export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
-  const { user } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const today = isoDate(new Date());
@@ -426,53 +417,83 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         return;
       }
 
-      const alocRows = diasAlvo.map((d) => ({
-        funcionario_id: funcionarioId,
-        obra_id: obraId,
-        data: d,
-        created_by: user?.id ?? null,
-        especialidade_ajudante:
-          funcionarioEhAjudante && competenciaUsaSegmentacaoMod(calcularCompetencia(d).competencia)
-            ? especialidadeAjudante
-            : null,
-      }));
-      const { error: alocErr } = await supabase.from("alocacoes").upsert(alocRows, {
-        onConflict: "funcionario_id,obra_id,data",
-        ignoreDuplicates: true,
+      const [existentesAlocacao, existentesRegistro, feriadosResult] = await Promise.all([
+        supabase
+          .from("alocacoes")
+          .select("id,data")
+          .eq("funcionario_id", funcionarioId)
+          .eq("obra_id", obraId)
+          .in("data", diasAlvo),
+        supabase
+          .from("registros_horas")
+          .select("id,data")
+          .eq("funcionario_id", funcionarioId)
+          .eq("obra_id", obraId)
+          .in("data", diasAlvo),
+        supabase
+          .from("feriados_obras_control" as never)
+          .select("data" as never)
+          .eq("ativo" as never, true),
+      ]);
+      if (existentesAlocacao.error) throw existentesAlocacao.error;
+      if (existentesRegistro.error) throw existentesRegistro.error;
+      if (feriadosResult.error) throw feriadosResult.error;
+      const alocacaoPorData = new Map(
+        (existentesAlocacao.data ?? []).map((item) => [item.data, item.id]),
+      );
+      const registroPorData = new Map(
+        (existentesRegistro.data ?? []).map((item) => [item.data, item.id]),
+      );
+      const feriados = new Set(
+        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
+      );
+      const itens = diasAlvo.map((data) => {
+        const horaSaida = diaDaSemana(data) === 5 ? "16:00" : "17:00";
+        const detalhe = calcularJornadaDetalhada({
+          data,
+          horaEntrada: "07:00",
+          horaSaida,
+          intervaloMinutos: 60,
+          feriados,
+          funcao: funcSelecionado?.categoria_mo,
+        });
+        if (!detalhe.valido) throw new Error(detalhe.erro);
+        return {
+          alocacaoId: alocacaoPorData.get(data) ?? null,
+          registroId: registroPorData.get(data) ?? null,
+          funcionarioId,
+          obraId,
+          data,
+          horaEntrada: "07:00",
+          horaSaida,
+          intervaloMinutos: 60,
+          horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
+          horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
+          justificativa: null,
+          observacoes: null,
+          especialidadeAjudante:
+            funcionarioEhAjudante &&
+            competenciaUsaSegmentacaoMod(calcularCompetencia(data).competencia)
+              ? especialidadeAjudante
+              : null,
+          detalhe,
+        };
       });
-      if (alocErr) {
-        const erroAmigavel = erroBancoAlocacao(alocErr);
-        if (erroAmigavel) throw erroAmigavel;
-        throw new Error(
-          mensagemErroCompetenciaFechada(alocErr) ??
-            mensagemErroBancoAlocacao(alocErr) ??
-            alocErr.message,
-        );
-      }
+      const { data: salvarResultado, error: salvarErro } = await supabase.rpc(
+        "obras_copiar_jornadas_v2" as never,
+        { p_itens: itens } as never,
+      );
+      if (salvarErro)
+        throw new Error(mensagemErroCompetenciaFechada(salvarErro) ?? salvarErro.message);
+      const resumoSalvamento = salvarResultado as unknown as {
+        processados: number;
+        preservados: number;
+      };
 
-      const regRows = diasAlvo.map((d) => ({
-        funcionario_id: funcionarioId,
-        obra_id: obraId,
-        data: d,
-        horas_normais: horasPadrao(d),
-        horas_extras: 0,
-        justificativa_extras: null,
-        ausencia: false,
-        tipo_registro: "horas",
-        falta_tipo: null,
-        motivo_ausencia: null,
-        observacoes: null,
-        created_by: user?.id ?? null,
-        updated_by: user?.id ?? null,
-      }));
-      const { error: regErr } = await supabase
-        .from("registros_horas")
-        .upsert(regRows, { onConflict: "funcionario_id,obra_id,data" });
-      if (regErr) throw new Error(mensagemErroCompetenciaFechada(regErr) ?? regErr.message);
-
-      const pulados = dias.length - diasAlvo.length;
+      const processados = Number(resumoSalvamento.processados ?? 0);
+      const pulados = dias.length - diasAlvo.length + Number(resumoSalvamento.preservados ?? 0);
       toast.success(
-        `${diasAlvo.length} ${diasAlvo.length === 1 ? "dia alocado" : "dias alocados"}` +
+        `${processados} ${processados === 1 ? "dia alocado" : "dias alocados"}` +
           (pulados > 0 ? `, ${pulados} ${pulados === 1 ? "pulado" : "pulados"}` : ""),
       );
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });

@@ -87,13 +87,9 @@ import {
   garantirCompetenciaAberta,
   mensagemErroCompetenciaFechada,
 } from "@/lib/competencias";
-import {
-  calcularHorasJornada,
-  justificativaExtrasObrigatoria,
-  totalHorasTrabalhadas,
-} from "@/lib/jornada-horas";
+import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours, roundHours } from "@/lib/formatacao-horas";
-import { comporHorasParaVisualizacao } from "@/lib/horas-visualizacao";
+import { comporHorasParaVisualizacao, type DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import {
   AVISO_FALTA_INTEGRAL,
   buscarConflitoRegistroDiario,
@@ -140,11 +136,6 @@ function parseTimeToMinutes(t: string): number {
   return h * 60 + m;
 }
 
-function calcHoras(entrada: string, saida: string, dateISO: string) {
-  const calculo = calcularHorasJornada(entrada, saida, dateISO);
-  return { total: calculo.total, hn: calculo.horasNormais, he: calculo.horasExtras };
-}
-
 const schema = z
   .object({
     funcionario_id: z.string().uuid("Selecione um funcionário"),
@@ -155,6 +146,7 @@ const schema = z
     falta_tipo: z.enum(classificacoesFaltaValues).nullable(),
     hora_entrada: z.string(),
     hora_saida: z.string(),
+    intervalo_minutos: z.number().int("Intervalo inválido").nonnegative("Intervalo inválido"),
     observacoes: z.string().optional(),
     justificativa_extras: z.string().optional(),
     especialidade_ajudante: z.enum(["civil", "montagem"]).nullable(),
@@ -188,21 +180,25 @@ const schema = z
       ctx.addIssue({ code: "custom", path: ["hora_saida"], message: "Horário inválido" });
       return;
     }
-    const total = totalHorasTrabalhadas(v.hora_entrada, v.hora_saida);
-    if (total <= 0) {
+    const calculo = calcularJornadaDetalhada({
+      data: v.data,
+      horaEntrada: v.hora_entrada,
+      horaSaida: v.hora_saida,
+      intervaloMinutos: v.intervalo_minutos,
+    });
+    if (!calculo.valido) {
       ctx.addIssue({
         code: "custom",
-        path: ["hora_saida"],
-        message: "Informe uma jornada válida com horas efetivamente trabalhadas.",
+        path: calculo.erro?.includes("intervalo") ? ["intervalo_minutos"] : ["hora_saida"],
+        message: calculo.erro ?? "Informe uma jornada válida.",
       });
       return;
     }
-    const { he } = calcHoras(v.hora_entrada, v.hora_saida, v.data);
-    if (justificativaExtrasObrigatoria(he) && !v.justificativa_extras?.trim()) {
+    if (calculo.exigeJustificativa && !v.justificativa_extras?.trim()) {
       ctx.addIssue({
         code: "custom",
         path: ["justificativa_extras"],
-        message: "Justificativa obrigatória para mais de 2h extras",
+        message: "Justificativa obrigatória para jornada superior a 12 horas",
       });
     }
   });
@@ -292,6 +288,7 @@ function AlocacoesPage() {
   const [alocacaoEmEdicao, setAlocacaoEmEdicao] = useState<AlocRow | null>(null);
   const [editEntrada, setEditEntrada] = useState("07:00");
   const [editSaida, setEditSaida] = useState("17:00");
+  const [editIntervaloMinutos, setEditIntervaloMinutos] = useState(60);
   const [editJustificativa, setEditJustificativa] = useState("");
   const [editTipoRegistro, setEditTipoRegistro] = useState<TipoRegistro>("horas");
   const [editFaltaTipo, setEditFaltaTipo] = useState<FaltaTipo | null>(null);
@@ -314,6 +311,18 @@ function AlocacoesPage() {
   const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
   const semanaInicial = useMemo(() => semanaInicialDaCompetencia(year, month), [year, month]);
   const { data: categorias } = useCategorias();
+  const feriadosQuery = useQuery({
+    queryKey: ["feriados-obras-control"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("feriados_obras_control" as never)
+        .select("data" as never)
+        .eq("ativo" as never, true);
+      if (error) throw error;
+      return new Set((data as unknown as Array<{ data: string }>).map((item) => item.data));
+    },
+  });
+  const feriados = useMemo(() => feriadosQuery.data ?? new Set<string>(), [feriadosQuery.data]);
 
   const funcionariosQuery = useQuery({
     queryKey: ["funcionarios-alocacao-selecao"],
@@ -441,6 +450,25 @@ function AlocacoesPage() {
     },
   });
   const registros = registrosQuery.data;
+  const detalhesQuery = useQuery({
+    queryKey: ["registros-horas-detalhes", mesKey],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("registros_horas_detalhes" as never)
+        .select(
+          "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,minutos_noturnos_normais_remuneraveis,minutos_noturnos_he_50_remuneraveis,minutos_noturnos_he_100_remuneraveis,minutos_noturnos_sem_adicional_he_remuneraveis,jornada_excepcional" as never,
+        )
+        .gte("data_inicio" as never, startISO)
+        .lte("data_inicio" as never, endISO);
+      if (error) throw error;
+      return data as unknown as Array<DetalheJornadaVisual & { registro_horas_id: string }>;
+    },
+  });
+  const detalhePorRegistro = useMemo(
+    () =>
+      new Map((detalhesQuery.data ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe])),
+    [detalhesQuery.data],
+  );
 
   const funcionarioIdsHistoricos = useMemo(
     () =>
@@ -536,6 +564,7 @@ function AlocacoesPage() {
         observacoes: string | null;
         tipoRegistro: TipoRegistro;
         faltaTipo: FaltaTipo | null;
+        detalhe: DetalheJornadaVisual | null;
       }
     >();
     for (const r of registros ?? []) {
@@ -551,10 +580,11 @@ function AlocacoesPage() {
         observacoes: r.observacoes,
         tipoRegistro: r.tipo_registro,
         faltaTipo: r.falta_tipo,
+        detalhe: detalhePorRegistro.get(r.id) ?? null,
       });
     }
     return m;
-  }, [registros]);
+  }, [detalhePorRegistro, registros]);
 
   // Cada funcionario aparece uma vez por obra, ainda que tenha alocacoes em varias datas.
   const porObra = useMemo(() => {
@@ -572,6 +602,9 @@ function AlocacoesPage() {
             hn: number;
             he50: number;
             he100: number;
+            semHe: number;
+            noturnasRemuneraveis: number;
+            excepcional: boolean;
           }
         >;
       }
@@ -593,6 +626,9 @@ function AlocacoesPage() {
           hn: 0,
           he50: 0,
           he100: 0,
+          semHe: 0,
+          noturnasRemuneraveis: 0,
+          excepcional: false,
         });
       const fEntry = g.funcs.get(fId)!;
       fEntry.dias.add(a.data);
@@ -602,10 +638,14 @@ function AlocacoesPage() {
           data: a.data,
           horasNormais: h.hn,
           horasExtras: h.he,
+          detalhe: h.detalhe,
         });
         fEntry.hn += composicao.horasNormaisApuradas;
         fEntry.he50 += composicao.horasExtra50Apuradas;
         fEntry.he100 += composicao.horasExtra100Apuradas;
+        fEntry.semHe += composicao.horasSemAdicionalHe;
+        fEntry.noturnasRemuneraveis += composicao.horasNoturnasRemuneraveis;
+        fEntry.excepcional ||= composicao.jornadaExcepcional;
       }
     }
     for (const r of registros ?? []) {
@@ -640,6 +680,9 @@ function AlocacoesPage() {
           hn: 0,
           he50: 0,
           he100: 0,
+          semHe: 0,
+          noturnasRemuneraveis: 0,
+          excepcional: false,
         });
       g.funcs.get(r.funcionario_id)!.dias.add(r.data);
     }
@@ -648,6 +691,8 @@ function AlocacoesPage() {
         funcionario.hn = roundHours(funcionario.hn);
         funcionario.he50 = roundHours(funcionario.he50);
         funcionario.he100 = roundHours(funcionario.he100);
+        funcionario.semHe = roundHours(funcionario.semHe);
+        funcionario.noturnasRemuneraveis = roundHours(funcionario.noturnasRemuneraveis);
       }
     }
     return Array.from(out.entries())
@@ -676,6 +721,7 @@ function AlocacoesPage() {
                 data: a.data,
                 horasNormais: h.hn,
                 horasExtras: h.he,
+                detalhe: h.detalhe,
               })
             : null;
           const situacao = !h
@@ -712,6 +758,7 @@ function AlocacoesPage() {
     falta_tipo: null,
     hora_entrada: "07:00",
     hora_saida: "17:00",
+    intervalo_minutos: 60,
     observacoes: "",
     justificativa_extras: "",
     especialidade_ajudante: null,
@@ -738,18 +785,31 @@ function AlocacoesPage() {
   const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: watchTipoRegistro });
   const watchEntrada = form.watch("hora_entrada");
   const watchSaida = form.watch("hora_saida");
+  const watchIntervaloMinutos = form.watch("intervalo_minutos");
+  const watchJustificativa = form.watch("justificativa_extras");
   const previa = useMemo(
     () =>
       watchTipoRegistro === "horas" && timeRegex.test(watchEntrada) && timeRegex.test(watchSaida)
-        ? calcHoras(watchEntrada, watchSaida, watchData || today)
-        : { total: 0, hn: 0, he: 0 },
-    [watchEntrada, watchSaida, watchData, watchTipoRegistro, today],
+        ? calcularJornadaDetalhada({
+            data: watchData || today,
+            horaEntrada: watchEntrada,
+            horaSaida: watchSaida,
+            intervaloMinutos: watchIntervaloMinutos,
+            funcao: funcionarioSelecionado?.categoria_mo,
+            feriados,
+          })
+        : null,
+    [
+      watchEntrada,
+      watchSaida,
+      watchData,
+      watchIntervaloMinutos,
+      watchTipoRegistro,
+      today,
+      funcionarioSelecionado?.categoria_mo,
+      feriados,
+    ],
   );
-  const previaDow = useMemo(
-    () => new Date((watchData || today) + "T00:00:00").getDay(),
-    [watchData, today],
-  );
-  const previaIsFds = previaDow === 0 || previaDow === 6;
 
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
@@ -775,7 +835,19 @@ function AlocacoesPage() {
       }
       validarDataLancamento(v.data, "horas");
       const falta = v.tipo_registro === "falta";
-      const { hn, he } = falta ? { hn: 0, he: 0 } : calcHoras(v.hora_entrada, v.hora_saida, v.data);
+      const calculo = falta
+        ? null
+        : calcularJornadaDetalhada({
+            data: v.data,
+            horaEntrada: v.hora_entrada,
+            horaSaida: v.hora_saida,
+            intervaloMinutos: v.intervalo_minutos,
+            funcao: funcionario?.categoria_mo,
+            feriados,
+          });
+      if (calculo && !calculo.valido) throw new Error(calculo.erro);
+      const hn = calculo ? (calculo.minutosNormais + calculo.minutosSemAdicionalHe) / 60 : 0;
+      const he = calculo ? (calculo.minutosHe50 + calculo.minutosHe100) / 60 : 0;
       const erroValidacao = validarRegistroApontamento({
         tipo_registro: v.tipo_registro,
         falta_tipo: v.falta_tipo,
@@ -801,6 +873,35 @@ function AlocacoesPage() {
       });
       if (conflito) throw criarErroConflitoAlocacao(conflito);
 
+      if (calculo) {
+        const { error } = await supabase.rpc(
+          "obras_salvar_jornada_v2" as never,
+          {
+            p_alocacao_id: null,
+            p_registro_id: null,
+            p_funcionario_id: v.funcionario_id,
+            p_obra_id: v.obra_id,
+            p_data: v.data,
+            p_hora_entrada: v.hora_entrada,
+            p_hora_saida: v.hora_saida,
+            p_intervalo_minutos: v.intervalo_minutos,
+            p_horas_normais: hn,
+            p_horas_extras: he,
+            p_justificativa: v.justificativa_extras?.trim() || null,
+            p_observacoes: v.observacoes?.trim() || null,
+            p_especialidade_ajudante:
+              categoriaEhAjudante(funcionario?.categoria_mo) &&
+              competenciaUsaSegmentacaoMod(calcularCompetencia(v.data).competencia)
+                ? v.especialidade_ajudante
+                : null,
+            p_detalhe: calculo,
+            p_origem_calculo: "aplicacao",
+          } as never,
+        );
+        if (error) throw new Error(mensagemErroRegistro(error));
+        return { tipoRegistro: v.tipo_registro, faltaTipo: v.falta_tipo, hn, he };
+      }
+
       const { error: alocErr } = await supabase.from("alocacoes").upsert(
         [
           {
@@ -810,7 +911,7 @@ function AlocacoesPage() {
             created_by: user?.id ?? null,
             hora_entrada: falta ? null : v.hora_entrada,
             hora_saida: falta ? null : v.hora_saida,
-            intervalo_padrao_minutos: 60,
+            intervalo_padrao_minutos: v.intervalo_minutos,
             especialidade_ajudante:
               categoriaEhAjudante(funcionario?.categoria_mo) &&
               competenciaUsaSegmentacaoMod(calcularCompetencia(v.data).competencia)
@@ -902,22 +1003,34 @@ function AlocacoesPage() {
   const editPrevia = useMemo(
     () =>
       editTipoRegistro === "horas" && timeRegex.test(editEntrada) && timeRegex.test(editSaida)
-        ? calcHoras(
-            editEntrada,
-            editSaida,
-            alocacaoEmEdicao?.data ?? new Date().toISOString().slice(0, 10),
-          )
-        : { total: 0, hn: 0, he: 0 },
-    [alocacaoEmEdicao?.data, editEntrada, editSaida, editTipoRegistro],
+        ? calcularJornadaDetalhada({
+            data: alocacaoEmEdicao?.data ?? new Date().toISOString().slice(0, 10),
+            horaEntrada: editEntrada,
+            horaSaida: editSaida,
+            intervaloMinutos: editIntervaloMinutos,
+            funcao: alocacaoEmEdicao
+              ? infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)?.categoria
+              : null,
+            feriados,
+          })
+        : null,
+    [
+      alocacaoEmEdicao,
+      editEntrada,
+      editSaida,
+      editIntervaloMinutos,
+      editTipoRegistro,
+      infoHistoricoById,
+      feriados,
+    ],
   );
   const editHorariosValidos =
     editTipoRegistro !== "horas" ||
-    (timeRegex.test(editEntrada) &&
-      timeRegex.test(editSaida) &&
-      parseTimeToMinutes(editSaida) > parseTimeToMinutes(editEntrada) &&
-      editPrevia.total > 0);
+    (timeRegex.test(editEntrada) && timeRegex.test(editSaida) && Boolean(editPrevia?.valido));
   const editJustificativaValida =
-    editTipoRegistro !== "horas" || editPrevia.he <= 2 || editJustificativa.trim().length > 0;
+    editTipoRegistro !== "horas" ||
+    !editPrevia?.exigeJustificativa ||
+    editJustificativa.trim().length > 0;
   const editPodeSalvar =
     editHorariosValidos &&
     editJustificativaValida &&
@@ -944,6 +1057,7 @@ function AlocacoesPage() {
             `${pad(Math.floor(saidaInferida / 60))}:${pad(Math.round(saidaInferida % 60))}`,
     );
     setEditJustificativa(registro?.justificativaExtras ?? "");
+    setEditIntervaloMinutos(a.intervalo_padrao_minutos ?? 60);
     setEditEspecialidadeAjudante(a.especialidade_ajudante ?? null);
     setAlocacaoEmEdicao(a);
   }
@@ -957,11 +1071,15 @@ function AlocacoesPage() {
       await garantirCompetenciaAberta(supabase, a.data);
 
       const registro = horasMap.get(`${a.funcionario_id}|${a.obra_id}|${a.data}`);
+      const editHn = editPrevia
+        ? (editPrevia.minutosNormais + editPrevia.minutosSemAdicionalHe) / 60
+        : 0;
+      const editHe = editPrevia ? (editPrevia.minutosHe50 + editPrevia.minutosHe100) / 60 : 0;
       const erroValidacao = validarRegistroApontamento({
         tipo_registro: editTipoRegistro,
         falta_tipo: editFaltaTipo,
-        horas_normais: editPrevia.hn,
-        horas_extras: editPrevia.he,
+        horas_normais: editHn,
+        horas_extras: editHe,
       });
       if (erroValidacao) throw new Error(erroValidacao);
 
@@ -973,12 +1091,37 @@ function AlocacoesPage() {
       });
       if (conflitoRegistro) throw new Error(conflitoRegistro);
 
+      if (editTipoRegistro === "horas" && editPrevia) {
+        const { error } = await supabase.rpc(
+          "obras_salvar_jornada_v2" as never,
+          {
+            p_alocacao_id: a.id,
+            p_registro_id: registro?.id ?? null,
+            p_funcionario_id: a.funcionario_id,
+            p_obra_id: a.obra_id,
+            p_data: a.data,
+            p_hora_entrada: editEntrada,
+            p_hora_saida: editSaida,
+            p_intervalo_minutos: editIntervaloMinutos,
+            p_horas_normais: editHn,
+            p_horas_extras: editHe,
+            p_justificativa: editJustificativa.trim() || null,
+            p_observacoes: editObservacoes.trim() || null,
+            p_especialidade_ajudante: editEspecialidadeAjudante,
+            p_detalhe: editPrevia,
+            p_origem_calculo: "aplicacao",
+          } as never,
+        );
+        if (error) throw new Error(mensagemErroRegistro(error));
+        return { total: editPrevia.total, tipoRegistro: editTipoRegistro };
+      }
+
       const { error: alocErr } = await supabase
         .from("alocacoes")
         .update({
           hora_entrada: editTipoRegistro !== "horas" ? null : editEntrada,
           hora_saida: editTipoRegistro !== "horas" ? null : editSaida,
-          intervalo_padrao_minutos: 60,
+          intervalo_padrao_minutos: editIntervaloMinutos,
           ...(competenciaUsaSegmentacaoMod(calcularCompetencia(a.data).competencia)
             ? {
                 especialidade_ajudante: categoriaEhAjudante(
@@ -999,12 +1142,10 @@ function AlocacoesPage() {
         p_data: a.data,
         p_tipo_registro: editTipoRegistro,
         p_falta_tipo: editTipoRegistro === "falta" ? editFaltaTipo : null,
-        p_horas_normais: editTipoRegistro !== "horas" ? 0 : editPrevia.hn,
-        p_horas_extras: editTipoRegistro !== "horas" ? 0 : editPrevia.he,
+        p_horas_normais: editTipoRegistro !== "horas" ? 0 : editHn,
+        p_horas_extras: editTipoRegistro !== "horas" ? 0 : editHe,
         p_justificativa_extras:
-          editTipoRegistro === "horas" && editPrevia.he > 0
-            ? editJustificativa.trim() || null
-            : null,
+          editTipoRegistro === "horas" && editHe > 0 ? editJustificativa.trim() || null : null,
         p_observacoes: editObservacoes.trim() || null,
       });
       if (resultadoRegistro.error)
@@ -1012,7 +1153,7 @@ function AlocacoesPage() {
           mensagemErroCompetenciaFechada(resultadoRegistro.error) ??
             mensagemErroRegistro(resultadoRegistro.error),
         );
-      return { total: editPrevia.total, tipoRegistro: editTipoRegistro };
+      return { total: editPrevia?.total ?? 0, tipoRegistro: editTipoRegistro };
     },
     onSuccess: ({ total, tipoRegistro }) => {
       toast.success(
@@ -1289,41 +1430,113 @@ function AlocacoesPage() {
                                 <FormControl>
                                   <Input type="time" {...field} />
                                 </FormControl>
+                                {previa?.atravessaMeiaNoite && (
+                                  <div className="text-xs text-muted-foreground">
+                                    Saída em{" "}
+                                    {new Date(`${previa.dataSaida}T00:00:00`).toLocaleDateString(
+                                      "pt-BR",
+                                    )}{" "}
+                                    — dia seguinte
+                                  </div>
+                                )}
                                 <FormMessage />
                               </FormItem>
                             )}
                           />
                         </div>
+                        <FormField
+                          control={form.control}
+                          name="intervalo_minutos"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Intervalo (minutos)</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  {...field}
+                                  onChange={(event) => field.onChange(event.target.valueAsNumber)}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
                         <div className="rounded-md border bg-muted/40 p-3 text-sm">
                           <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-                            Cálculo automático (1h almoço descontada)
+                            Cálculo automático estimado
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="secondary">
-                              Total: {formatDecimalHours(previa.total)}h
+                              Permanência:{" "}
+                              {formatDecimalHours((previa?.permanenciaMinutos ?? 0) / 60)}h
                             </Badge>
                             <Badge variant="outline">
-                              Normais: {formatDecimalHours(previa.hn)}h
+                              Intervalo: {formatDecimalHours((previa?.intervaloMinutos ?? 0) / 60)}h
                             </Badge>
-                            {previa.he > 0 && (
-                              <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400">
-                                Extras: {formatExtraHours(previa.he)}
+                            <Badge variant="secondary">
+                              Total trabalhado: {formatDecimalHours(previa?.total ?? 0)}h
+                            </Badge>
+                            <Badge variant="outline">
+                              Normais: {formatDecimalHours((previa?.minutosNormais ?? 0) / 60)}h
+                            </Badge>
+                            {(previa?.minutosHe50 ?? 0) > 0 && (
+                              <Badge>
+                                HE 50%: {formatDecimalHours((previa?.minutosHe50 ?? 0) / 60)}h
                               </Badge>
                             )}
+                            {(previa?.minutosHe100 ?? 0) > 0 && (
+                              <Badge>
+                                HE 100%: {formatDecimalHours((previa?.minutosHe100 ?? 0) / 60)}h
+                              </Badge>
+                            )}
+                            {(previa?.minutosSemAdicionalHe ?? 0) > 0 && (
+                              <Badge variant="outline">
+                                Sem adicional de HE:{" "}
+                                {formatDecimalHours((previa?.minutosSemAdicionalHe ?? 0) / 60)}h
+                              </Badge>
+                            )}
+                            <Badge variant="outline">
+                              Noturnas reais:{" "}
+                              {formatDecimalHours((previa?.minutosNoturnosReais ?? 0) / 60)}h
+                            </Badge>
+                            <Badge variant="outline">
+                              Noturnas remuneráveis:{" "}
+                              {formatDecimalHours((previa?.minutosNoturnosRemuneraveis ?? 0) / 60)}h
+                            </Badge>
+                            <Badge variant="outline">Adicional noturno: 20%</Badge>
                           </div>
-                          {previaIsFds && (
-                            <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
-                              Fim de semana: todo o tempo trabalhado será contado como hora extra.
-                            </div>
-                          )}
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Estimativa calculada com rateio proporcional do intervalo entre os
+                            períodos da jornada.
+                          </div>
                         </div>
-                        {previa.he > 2 && (
+                        {previa?.excepcionalAcima12h && (
+                          <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>
+                              Jornada excepcional superior a 12 horas. Informe uma justificativa
+                              para registrar o lançamento. O registro representa as horas informadas
+                              e não constitui validação de conformidade trabalhista.
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                        {previa?.excepcionalAcima10h && !previa.excepcionalAcima12h && (
+                          <Alert>
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>
+                              Jornada superior a 10 horas. Confirme o regime autorizado.
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                        {previa?.exigeJustificativa && (
                           <FormField
                             control={form.control}
                             name="justificativa_extras"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Justificativa para extras &gt; 2h</FormLabel>
+                                <FormLabel>Justificativa da jornada excepcional *</FormLabel>
                                 <FormControl>
                                   <Textarea rows={2} {...field} />
                                 </FormControl>
@@ -1408,7 +1621,15 @@ function AlocacoesPage() {
                       <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                         Cancelar
                       </Button>
-                      <Button type="submit" disabled={createMutation.isPending}>
+                      <Button
+                        type="submit"
+                        disabled={
+                          createMutation.isPending ||
+                          (watchTipoRegistro === "horas" &&
+                            (!previa?.valido ||
+                              (previa.exigeJustificativa && !watchJustificativa?.trim())))
+                        }
+                      >
                         {createMutation.isPending ? "Salvando..." : "Salvar lançamento"}
                       </Button>
                     </DialogFooter>
@@ -1534,38 +1755,73 @@ function AlocacoesPage() {
                         value={editSaida}
                         onChange={(e) => setEditSaida(e.target.value)}
                       />
+                      {editPrevia?.atravessaMeiaNoite && (
+                        <div className="text-xs text-muted-foreground">
+                          Saída em{" "}
+                          {new Date(`${editPrevia.dataSaida}T00:00:00`).toLocaleDateString("pt-BR")}{" "}
+                          — dia seguinte
+                        </div>
+                      )}
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="edit-intervalo" className="text-sm font-medium">
+                      Intervalo (minutos)
+                    </label>
+                    <Input
+                      id="edit-intervalo"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editIntervaloMinutos}
+                      onChange={(e) => setEditIntervaloMinutos(e.target.valueAsNumber)}
+                    />
                   </div>
                   {!editHorariosValidos && (
                     <p className="text-sm text-destructive">
-                      Informe horários válidos; a saída deve permitir mais de 1h de jornada bruta.
+                      {editPrevia?.erro ?? "Informe horários e intervalo válidos."}
                     </p>
                   )}
                   <div className="rounded-md border bg-muted/40 p-3 text-sm">
                     <div className="text-xs text-muted-foreground">
-                      Intervalo padrão considerado: 1h
+                      Estimativa com rateio proporcional do intervalo entre os períodos da jornada.
                     </div>
                     <div className="mt-1 font-semibold">
-                      Horas calculadas: {formatDecimalHours(editPrevia.total)}h
+                      Permanência: {formatDecimalHours((editPrevia?.permanenciaMinutos ?? 0) / 60)}h
+                      · Intervalo: {formatDecimalHours((editPrevia?.intervaloMinutos ?? 0) / 60)}h ·
+                      Total: {formatDecimalHours(editPrevia?.total ?? 0)}h
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {formatDecimalHours(editPrevia.hn)}h normais
-                      {editPrevia.he > 0 ? ` ${formatExtraHours(editPrevia.he)} extras` : ""}
+                      {formatDecimalHours((editPrevia?.minutosNormais ?? 0) / 60)}h normais ·{" "}
+                      {formatDecimalHours((editPrevia?.minutosHe50 ?? 0) / 60)}h HE 50% ·{" "}
+                      {formatDecimalHours((editPrevia?.minutosHe100 ?? 0) / 60)}h HE 100% ·{" "}
+                      {formatDecimalHours((editPrevia?.minutosNoturnosRemuneraveis ?? 0) / 60)}h
+                      noturnas remuneráveis
                     </div>
                   </div>
-                  {editPrevia.total > 12 && (
-                    <Alert>
+                  {editPrevia?.excepcionalAcima12h && (
+                    <Alert variant="destructive">
                       <AlertTriangle className="h-4 w-4" />
-                      <AlertTitle>Confira a carga horária</AlertTitle>
+                      <AlertTitle>Jornada excepcional acima de 12h</AlertTitle>
                       <AlertDescription>
-                        Carga horária superior a 12h. Confira antes de salvar.
+                        Jornada excepcional superior a 12 horas. Informe uma justificativa para
+                        registrar o lançamento. O registro representa as horas informadas e não
+                        constitui validação de conformidade trabalhista.
                       </AlertDescription>
                     </Alert>
                   )}
-                  {editPrevia.he > 2 && (
+                  {editPrevia?.excepcionalAcima10h && !editPrevia.excepcionalAcima12h && (
+                    <Alert>
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>
+                        Jornada superior a 10 horas. Confirme o regime autorizado.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {editPrevia?.exigeJustificativa && (
                     <div className="space-y-2">
                       <label htmlFor="edit-justificativa" className="text-sm font-medium">
-                        Justificativa para extras &gt; 2h
+                        Justificativa da jornada excepcional *
                       </label>
                       <Textarea
                         id="edit-justificativa"
@@ -1824,6 +2080,24 @@ function AlocacoesPage() {
                               >
                                 <div className="col-span-3 min-w-0 sm:col-span-1">
                                   <div className="truncate font-medium">{f.nome}</div>
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {f.semHe > 0 && (
+                                      <Badge variant="outline" className="text-[9px]">
+                                        {formatDecimalHours(f.semHe)}h sem adicional de HE
+                                      </Badge>
+                                    )}
+                                    {f.noturnasRemuneraveis > 0 && (
+                                      <Badge variant="outline" className="text-[9px]">
+                                        {formatDecimalHours(f.noturnasRemuneraveis)}h noturnas
+                                        remuneráveis
+                                      </Badge>
+                                    )}
+                                    {f.excepcional && (
+                                      <Badge variant="destructive" className="text-[9px]">
+                                        Jornada excepcional
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="col-span-3 min-w-0 truncate text-xs text-muted-foreground sm:col-span-1 sm:text-sm">
                                   {f.categoria}
@@ -1949,6 +2223,7 @@ function AlocacoesPage() {
                                                   data: a.data,
                                                   horasNormais: h.hn,
                                                   horasExtras: h.he,
+                                                  detalhe: h.detalhe,
                                                 })
                                               : null;
                                             const podeEditar =
@@ -2050,6 +2325,14 @@ function AlocacoesPage() {
                                                       </Badge>
                                                     )}
                                                   </div>
+                                                  {composicaoHoras?.jornadaExcepcional && (
+                                                    <Badge
+                                                      variant="destructive"
+                                                      className="mt-1 text-[10px]"
+                                                    >
+                                                      Jornada excepcional
+                                                    </Badge>
+                                                  )}
                                                   {canViewAllocationAudit && (
                                                     <div className="mt-1.5 border-t pt-1.5 text-[10px] leading-4 text-muted-foreground">
                                                       {editorName ? (
