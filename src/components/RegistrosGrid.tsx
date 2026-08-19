@@ -563,7 +563,15 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
             value=""
             onValueChange={(id) => setExtraIds((cur) => (cur.includes(id) ? cur : [...cur, id]))}
             placeholder="+ Adicionar funcionário"
-            formatLabel={(f) => `${f.nome}${!f.ativo ? " — inativo" : ""}`}
+            formatLabel={(f) =>
+              `${f.nome}${
+                f.data_desligamento
+                  ? ` — desligado em ${new Date(
+                      `${f.data_desligamento}T00:00:00`,
+                    ).toLocaleDateString("pt-BR")}`
+                  : ""
+              }`
+            }
             className="h-9 w-auto min-w-52"
           />
         )}
