@@ -89,6 +89,7 @@ import {
   mensagemErroCompetenciaFechada,
 } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
+import { exigeJustificativaExtras, justificativaExtrasValida } from "@/lib/extras-justificativa";
 import { formatDecimalHours, formatExtraHours, roundHours } from "@/lib/formatacao-horas";
 import { comporHorasParaVisualizacao, type DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import {
@@ -195,11 +196,19 @@ const schema = z
       });
       return;
     }
-    if (calculo.exigeJustificativa && !v.justificativa_extras?.trim()) {
+    if (
+      !justificativaExtrasValida(
+        {
+          horasExtras: (calculo.minutosHe50 + calculo.minutosHe100) / 60,
+          totalTrabalhadoMinutos: calculo.totalTrabalhadoMinutos,
+        },
+        v.justificativa_extras,
+      )
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["justificativa_extras"],
-        message: "Justificativa obrigatória para jornada superior a 12 horas",
+        message: "Informe a justificativa para a jornada extraordinária.",
       });
     }
   });
@@ -811,6 +820,13 @@ function AlocacoesPage() {
       feriados,
     ],
   );
+  const previaExigeJustificativa = Boolean(
+    previa?.valido &&
+    exigeJustificativaExtras({
+      horasExtras: (previa.minutosHe50 + previa.minutosHe100) / 60,
+      totalTrabalhadoMinutos: previa.totalTrabalhadoMinutos,
+    }),
+  );
 
   const createMutation = useMutation({
     mutationFn: async (v: FormVals) => {
@@ -849,6 +865,14 @@ function AlocacoesPage() {
       if (calculo && !calculo.valido) throw new Error(calculo.erro);
       const hn = calculo ? (calculo.minutosNormais + calculo.minutosSemAdicionalHe) / 60 : 0;
       const he = calculo ? (calculo.minutosHe50 + calculo.minutosHe100) / 60 : 0;
+      if (
+        calculo &&
+        !justificativaExtrasValida(
+          { horasExtras: he, totalTrabalhadoMinutos: calculo.totalTrabalhadoMinutos },
+          v.justificativa_extras,
+        )
+      )
+        throw new Error("Informe a justificativa para a jornada extraordinária.");
       const erroValidacao = validarRegistroApontamento({
         tipo_registro: v.tipo_registro,
         falta_tipo: v.falta_tipo,
@@ -1028,10 +1052,15 @@ function AlocacoesPage() {
   const editHorariosValidos =
     editTipoRegistro !== "horas" ||
     (timeRegex.test(editEntrada) && timeRegex.test(editSaida) && Boolean(editPrevia?.valido));
-  const editJustificativaValida =
-    editTipoRegistro !== "horas" ||
-    !editPrevia?.exigeJustificativa ||
-    editJustificativa.trim().length > 0;
+  const editExigeJustificativa = Boolean(
+    editTipoRegistro === "horas" &&
+    editPrevia?.valido &&
+    exigeJustificativaExtras({
+      horasExtras: (editPrevia.minutosHe50 + editPrevia.minutosHe100) / 60,
+      totalTrabalhadoMinutos: editPrevia.totalTrabalhadoMinutos,
+    }),
+  );
+  const editJustificativaValida = !editExigeJustificativa || editJustificativa.trim().length > 0;
   const editPodeSalvar =
     editHorariosValidos &&
     editJustificativaValida &&
@@ -1525,13 +1554,13 @@ function AlocacoesPage() {
                             </AlertDescription>
                           </Alert>
                         )}
-                        {previa?.exigeJustificativa && (
+                        {previaExigeJustificativa && (
                           <FormField
                             control={form.control}
                             name="justificativa_extras"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Justificativa da jornada excepcional *</FormLabel>
+                                <FormLabel>Justificativa da hora extra *</FormLabel>
                                 <FormControl>
                                   <Textarea rows={2} {...field} />
                                 </FormControl>
@@ -1622,7 +1651,7 @@ function AlocacoesPage() {
                           createMutation.isPending ||
                           (watchTipoRegistro === "horas" &&
                             (!previa?.valido ||
-                              (previa.exigeJustificativa && !watchJustificativa?.trim())))
+                              (previaExigeJustificativa && !watchJustificativa?.trim())))
                         }
                       >
                         {createMutation.isPending ? "Salvando..." : "Salvar lançamento"}
@@ -1813,10 +1842,10 @@ function AlocacoesPage() {
                       </AlertDescription>
                     </Alert>
                   )}
-                  {editPrevia?.exigeJustificativa && (
+                  {editExigeJustificativa && (
                     <div className="space-y-2">
                       <label htmlFor="edit-justificativa" className="text-sm font-medium">
-                        Justificativa da jornada excepcional *
+                        Justificativa da hora extra *
                       </label>
                       <Textarea
                         id="edit-justificativa"
@@ -1825,7 +1854,9 @@ function AlocacoesPage() {
                         onChange={(e) => setEditJustificativa(e.target.value)}
                       />
                       {!editJustificativaValida && (
-                        <p className="text-sm text-destructive">Informe a justificativa.</p>
+                        <p className="text-sm text-destructive">
+                          Informe a justificativa para a jornada extraordinária.
+                        </p>
                       )}
                     </div>
                   )}
