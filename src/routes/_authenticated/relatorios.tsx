@@ -117,6 +117,7 @@ function RelatoriosPage() {
   >("all");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
+  const [ultimoCcFilter, setUltimoCcFilter] = useState("all");
   const [tipoRegistroFilter, setTipoRegistroFilter] = useState<
     "all" | "horas" | "falta" | "ferias" | "folga_campo"
   >("all");
@@ -212,8 +213,12 @@ function RelatoriosPage() {
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
-    queryKey: ["relatorio-sem-alocacao", start, end],
-    queryFn: () => getRelatorioSemAlocacao({ data: { inicio: start, fim: end } }),
+    queryKey: ["relatorio-sem-alocacao", start, end, dataLimiteAnalise],
+    queryFn: () =>
+      getRelatorioSemAlocacao({
+        data: { inicio: start, fim: end, referencia: dataLimiteAnalise },
+      }),
+    enabled: !competenciaSemDiasVencidos,
   });
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
@@ -238,6 +243,22 @@ function RelatoriosPage() {
     () => relatorioSemAlocacao?.alocacoes ?? [],
     [relatorioSemAlocacao],
   );
+  const ultimaAlocacaoPorFuncionario = useMemo(
+    () =>
+      new Map(
+        (relatorioSemAlocacao?.ultimasAlocacoes ?? []).map((alocacao) => [
+          alocacao.funcionario_id,
+          alocacao,
+        ]),
+      ),
+    [relatorioSemAlocacao],
+  );
+  const ultimosCentrosSemAlocacao = useMemo(() => {
+    const centros = new Map<string, string>();
+    for (const alocacao of relatorioSemAlocacao?.ultimasAlocacoes ?? [])
+      centros.set(alocacao.obra_id, alocacao.obra_nome);
+    return [...centros].sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+  }, [relatorioSemAlocacao]);
 
   const custoPorFunc = useMemo(() => {
     const m = new Map<string, ReturnType<typeof calcularCusto>>();
@@ -329,6 +350,7 @@ function RelatoriosPage() {
         return true;
       })
       .map((f) => {
+        const ultimaAlocacao = ultimaAlocacaoPorFuncionario.get(f.id) ?? null;
         const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
         const fimAnteriorAoDesligamento = f.data_desligamento
           ? diaUtilAnterior(f.data_desligamento)
@@ -369,6 +391,9 @@ function RelatoriosPage() {
           admitidoNoPeriodo,
           desligadoNoPeriodo,
           observacao: observacoes.join(" "),
+          ultimoCcId: ultimaAlocacao?.obra_id ?? null,
+          ultimoCcNome: ultimaAlocacao?.obra_nome ?? null,
+          ultimaAlocacao: ultimaAlocacao?.data ?? null,
         };
       })
       .filter((f) => {
@@ -379,6 +404,13 @@ function RelatoriosPage() {
         if (categoriaFilter !== "all" && f.categoria_mo !== categoriaFilter) return false;
         if (coberturaFilter === "zero" && f.diasComAlocacao !== 0) return false;
         if (coberturaFilter === "parcial" && f.diasComAlocacao === 0) return false;
+        if (ultimoCcFilter === "none" && f.ultimoCcId != null) return false;
+        if (
+          ultimoCcFilter !== "all" &&
+          ultimoCcFilter !== "none" &&
+          f.ultimoCcId !== ultimoCcFilter
+        )
+          return false;
         return true;
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
@@ -392,6 +424,8 @@ function RelatoriosPage() {
     pendenciaFilter,
     categoriaFilter,
     coberturaFilter,
+    ultimoCcFilter,
+    ultimaAlocacaoPorFuncionario,
   ]);
 
   const categoriasPendencias = useMemo(
@@ -411,6 +445,10 @@ function RelatoriosPage() {
         ? new Date(f.data_desligamento + "T00:00:00").toLocaleDateString("pt-BR")
         : "",
       Status: f.ativo ? "Ativo" : "Desligado",
+      "Último CC": f.ultimoCcNome ?? "Sem CC anterior",
+      "Última alocação": f.ultimaAlocacao
+        ? new Date(f.ultimaAlocacao + "T00:00:00").toLocaleDateString("pt-BR")
+        : "",
       "Dias disponíveis": f.diasDisponiveis,
       "Dias com alocação": f.diasComAlocacao,
       "Dias sem alocação": f.diasSemAlocacao,
@@ -945,6 +983,20 @@ function RelatoriosPage() {
                     <SelectItem value="desligados">Desligados no período</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={ultimoCcFilter} onValueChange={setUltimoCcFilter}>
+                  <SelectTrigger className="w-[280px]">
+                    <SelectValue placeholder="Último Centro de Custo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os últimos centros</SelectItem>
+                    <SelectItem value="none">Sem CC anterior</SelectItem>
+                    {ultimosCentrosSemAlocacao.map(([id, nome]) => (
+                      <SelectItem key={id} value={id}>
+                        {nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select value={categoriaFilter} onValueChange={setCategoriaFilter}>
                   <SelectTrigger className="w-[230px]">
                     <SelectValue />
@@ -988,9 +1040,11 @@ function RelatoriosPage() {
                       <TableHead>Admissão</TableHead>
                       <TableHead>Desligamento</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Último CC</TableHead>
+                      <TableHead>Última alocação</TableHead>
                       <TableHead className="text-right">Dias disponíveis</TableHead>
                       <TableHead className="text-right">Dias alocados</TableHead>
-                      <TableHead className="text-right">Dias pendentes</TableHead>
+                      <TableHead className="text-right">Dias sem alocação</TableHead>
                       <TableHead>Datas sem alocação</TableHead>
                       <TableHead>Observação</TableHead>
                     </TableRow>
@@ -998,7 +1052,7 @@ function RelatoriosPage() {
                   <TableBody>
                     {!semAlocacao.length ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                        <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
                           {competenciaSemDiasVencidos
                             ? "Esta competência ainda não possui dias vencidos para análise."
                             : "Nenhum funcionário com pendências vencidas no período analisado."}
@@ -1025,6 +1079,12 @@ function RelatoriosPage() {
                             <Badge variant={f.ativo ? "default" : "secondary"}>
                               {f.ativo ? "Ativo" : "Desligado"}
                             </Badge>
+                          </TableCell>
+                          <TableCell>{f.ultimoCcNome ?? "Sem CC anterior"}</TableCell>
+                          <TableCell>
+                            {f.ultimaAlocacao
+                              ? new Date(f.ultimaAlocacao + "T00:00:00").toLocaleDateString("pt-BR")
+                              : "—"}
                           </TableCell>
                           <TableCell className="text-right">{f.diasDisponiveis}</TableCell>
                           <TableCell className="text-right">{f.diasComAlocacao}</TableCell>

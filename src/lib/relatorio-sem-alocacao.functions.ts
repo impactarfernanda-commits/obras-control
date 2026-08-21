@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import {
+  ultimasAlocacoesPorFuncionario,
+  type AlocacaoHistorica,
+} from "@/lib/relatorio-sem-alocacao";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 
@@ -20,11 +24,18 @@ export type FuncionarioSemAlocacaoDTO = {
 export type RelatorioSemAlocacaoDTO = {
   funcionarios: FuncionarioSemAlocacaoDTO[];
   alocacoes: Array<{ funcionario_id: string; data: string }>;
+  ultimasAlocacoes: Array<{
+    funcionario_id: string;
+    obra_id: string;
+    obra_nome: string;
+    data: string;
+  }>;
 };
 
 const inputSchema = z.object({
   inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   fim: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  referencia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
@@ -42,41 +53,72 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
     if (!roles.some((role) => role === "coordenador" || role === "gerente" || role === "diretor"))
       throw new Error("Forbidden: relatório indisponível para este perfil");
 
-    const [funcionarios, alocacoes, ausenciasPlanejadas] = await Promise.all([
-      buscarTodasPaginas<FuncionarioSemAlocacaoDTO>((from, to) =>
-        supabaseAdmin
-          .from("funcionarios")
-          .select(
-            "id,nome,categoria_mo,ativo,data_admissao,data_desligamento,deleted_at,visivel_obras_control",
-          )
-          .order("id", { ascending: true })
-          .range(from, to),
-      ),
-      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
-        supabaseAdmin
-          .from("alocacoes")
-          .select("funcionario_id,data")
-          .gte("data", data.inicio)
-          .lte("data", data.fim)
-          .order("data", { ascending: true })
-          .order("funcionario_id", { ascending: true })
-          .range(from, to),
-      ),
-      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
-        supabaseAdmin
-          .from("registros_horas")
-          .select("funcionario_id,data")
-          .in("tipo_registro", ["ferias", "folga_campo"])
-          .gte("data", data.inicio)
-          .lte("data", data.fim)
-          .order("data", { ascending: true })
-          .order("funcionario_id", { ascending: true })
-          .range(from, to),
-      ),
-    ]);
+    if (data.referencia < data.inicio || data.referencia > data.fim)
+      throw new Error("Data de referência fora do período");
+    const [funcionarios, alocacoes, ausenciasPlanejadas, historicoAlocacoes, obras] =
+      await Promise.all([
+        buscarTodasPaginas<FuncionarioSemAlocacaoDTO>((from, to) =>
+          supabaseAdmin
+            .from("funcionarios")
+            .select(
+              "id,nome,categoria_mo,ativo,data_admissao,data_desligamento,deleted_at,visivel_obras_control",
+            )
+            .order("id", { ascending: true })
+            .range(from, to),
+        ),
+        buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+          supabaseAdmin
+            .from("alocacoes")
+            .select("funcionario_id,data")
+            .gte("data", data.inicio)
+            .lte("data", data.referencia)
+            .order("data", { ascending: true })
+            .order("funcionario_id", { ascending: true })
+            .range(from, to),
+        ),
+        buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+          supabaseAdmin
+            .from("registros_horas")
+            .select("funcionario_id,data")
+            .in("tipo_registro", ["ferias", "folga_campo"])
+            .gte("data", data.inicio)
+            .lte("data", data.referencia)
+            .order("data", { ascending: true })
+            .order("funcionario_id", { ascending: true })
+            .range(from, to),
+        ),
+        buscarTodasPaginas<AlocacaoHistorica>((from, to) =>
+          supabaseAdmin
+            .from("alocacoes")
+            .select("funcionario_id,obra_id,data")
+            .lte("data", data.referencia)
+            .order("data", { ascending: false })
+            .order("funcionario_id", { ascending: true })
+            .range(from, to),
+        ),
+        buscarTodasPaginas<{ id: string; nome: string }>((from, to) =>
+          supabaseAdmin
+            .from("obras")
+            .select("id,nome")
+            .order("id", { ascending: true })
+            .range(from, to),
+        ),
+      ]);
     const cobertura = new Map<string, { funcionario_id: string; data: string }>();
     for (const item of [...alocacoes, ...ausenciasPlanejadas]) {
       cobertura.set(`${item.funcionario_id}|${item.data}`, item);
     }
-    return { funcionarios, alocacoes: Array.from(cobertura.values()) };
+    const obraNome = new Map(obras.map((obra) => [obra.id, obra.nome]));
+    const ultimasAlocacoes = Array.from(
+      ultimasAlocacoesPorFuncionario(historicoAlocacoes, data.referencia).values(),
+      (alocacao) => ({
+        ...alocacao,
+        obra_nome: obraNome.get(alocacao.obra_id) ?? "Centro de custo não encontrado",
+      }),
+    );
+    return {
+      funcionarios,
+      alocacoes: Array.from(cobertura.values()),
+      ultimasAlocacoes,
+    };
   });

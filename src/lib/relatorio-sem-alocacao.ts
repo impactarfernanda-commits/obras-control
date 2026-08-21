@@ -24,3 +24,22 @@ export function diaUtilAnterior(dataISO: string) {
     data = new Date(data.getFullYear(), data.getMonth(), data.getDate() - 1);
   return dataLocalISO(data);
 }
+
+export type AlocacaoHistorica = {
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
+};
+
+export function ultimasAlocacoesPorFuncionario(
+  alocacoes: readonly AlocacaoHistorica[],
+  dataReferencia: string,
+) {
+  const ultimas = new Map<string, AlocacaoHistorica>();
+  for (const alocacao of alocacoes) {
+    if (alocacao.data > dataReferencia) continue;
+    const atual = ultimas.get(alocacao.funcionario_id);
+    if (!atual || alocacao.data > atual.data) ultimas.set(alocacao.funcionario_id, alocacao);
+  }
+  return ultimas;
+}
