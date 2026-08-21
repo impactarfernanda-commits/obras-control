@@ -63,7 +63,7 @@ import type { PreviaImportacao } from "@/lib/planejamento-hh-parser";
 
 export const Route = createFileRoute("/_authenticated/planejamento-hh")({
   component: () => (
-    <RequireRole allowed={["coordenador", "gerente", "diretor"]}>
+    <RequireRole allowed={["gerente", "diretor"]}>
       <PlanejamentoPage />
     </RequireRole>
   ),
@@ -395,6 +395,8 @@ function Resumo({
 }) {
   const labels: Record<string, string> = {
     horas_trabalhadas: "Horas trabalhadas",
+    regime_local: "Regime Local — dias trabalhados",
+    regime_alojado: "Regime Alojado — dias corridos",
     ferias: "Férias",
     folga_campo: "Folga de campo",
     atestado: "Atestado",

@@ -23,6 +23,16 @@ const verificacaoPlanejamento = readFileSync(
   "utf8",
 );
 
+test("planejamento HH e custos exclui coordenador no frontend, rota e backend", () => {
+  assert.match(route, /<RequireRole allowed=\{\["gerente", "diretor"\]\}>/);
+  assert.doesNotMatch(route, /<RequireRole allowed=\{\[[^\]]*"coordenador"/);
+  assert.match(
+    server,
+    /const operacional = roles\.some\(\(r\) => r === "gerente" \|\| r === "diretor"\)/,
+  );
+  assert.doesNotMatch(server, /const operacional = roles\.some\([^;]*coordenador/);
+});
+
 test("baseline possui numericos, checks, versao e uma unica ativa por obra", () => {
   assert.match(migration, /numeric\(16,4\).*CHECK \(hh_previsto >= 0\)/s);
   assert.match(migration, /numeric\(16,2\).*CHECK \(custo_previsto >= 0\)/s);

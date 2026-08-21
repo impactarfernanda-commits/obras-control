@@ -269,6 +269,47 @@ export type Database = {
         };
         Relationships: [];
       };
+      funcionario_regime_vigencias: {
+        Row: {
+          created_at: string;
+          created_by: string;
+          funcionario_id: string;
+          id: string;
+          origem: "cadastro" | "edicao" | "lote";
+          regime: "local" | "alojado";
+          vigencia_fim: string | null;
+          vigencia_inicio: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by: string;
+          funcionario_id: string;
+          id?: string;
+          origem: "cadastro" | "edicao" | "lote";
+          regime: "local" | "alojado";
+          vigencia_fim?: string | null;
+          vigencia_inicio: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string;
+          funcionario_id?: string;
+          id?: string;
+          origem?: "cadastro" | "edicao" | "lote";
+          regime?: "local" | "alojado";
+          vigencia_fim?: string | null;
+          vigencia_inicio?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "funcionario_regime_vigencias_funcionario_id_fkey";
+            columns: ["funcionario_id"];
+            isOneToOne: false;
+            referencedRelation: "funcionarios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       notificacao_config: {
         Row: {
           created_at: string;
@@ -634,8 +675,27 @@ export type Database = {
           encargos: number | null;
           id: string;
           nome: string;
+          regime: "local" | "alojado" | null;
+          regime_vigencia_inicio: string | null;
           salario: number | null;
           visivel_obras_control: boolean | null;
+        }[];
+      };
+      definir_regime_funcionarios: {
+        Args: {
+          p_funcionario_ids: string[];
+          p_origem?: "cadastro" | "edicao" | "lote";
+          p_regime: "local" | "alojado";
+          p_vigencia_inicio: string;
+        };
+        Returns: number;
+      };
+      obras_control_alocacoes_referencia_regime: {
+        Args: { p_fim: string; p_inicio: string };
+        Returns: {
+          data: string;
+          funcionario_id: string;
+          obra_id: string;
         }[];
       };
       can_view_salario: { Args: { _user_id: string }; Returns: boolean };

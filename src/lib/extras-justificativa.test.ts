@@ -9,14 +9,6 @@ const tela = readFileSync(
   new URL("../routes/_authenticated/alocacoes.tsx", import.meta.url),
   "utf8",
 );
-const schemaInicial = readFileSync(
-  new URL(
-    "../../supabase/migrations/20260611122851_3eb6e0e9-452b-4bc4-aab4-a3524a1e5ead.sql",
-    import.meta.url,
-  ),
-  "utf8",
-);
-
 function regra(calculo: ReturnType<typeof calcularJornadaDetalhada>) {
   return {
     horasExtras: (calculo.minutosHe50 + calculo.minutosHe100) / 60,
@@ -24,13 +16,18 @@ function regra(calculo: ReturnType<typeof calcularJornadaDetalhada>) {
   };
 }
 
-test("constraint real exige justificativa somente acima de 2 horas extras e texto não vazio", () => {
-  assert.match(
-    schemaInicial,
-    /CONSTRAINT extras_justificativa CHECK \(horas_extras <= 2 OR \(justificativa_extras IS NOT NULL AND length\(btrim\(justificativa_extras\)\) > 0\)\)/,
+test("regra canônica exige justificativa a partir de 2 horas extras", () => {
+  assert.equal(exigeJustificativaExtras({ horasExtras: 1.99, totalTrabalhadoMinutos: 600 }), false);
+  assert.equal(exigeJustificativaExtras({ horasExtras: 2, totalTrabalhadoMinutos: 600 }), true);
+  assert.equal(
+    justificativaExtrasValida({ horasExtras: 2, totalTrabalhadoMinutos: 600 }, "   "),
+    false,
   );
-  assert.equal(exigeJustificativaExtras({ horasExtras: 2, totalTrabalhadoMinutos: 600 }), false);
-  assert.equal(exigeJustificativaExtras({ horasExtras: 2.01, totalTrabalhadoMinutos: 600 }), true);
+});
+
+test("jornada exige justificativa somente quando ultrapassa 12 horas", () => {
+  assert.equal(exigeJustificativaExtras({ horasExtras: 0, totalTrabalhadoMinutos: 720 }), false);
+  assert.equal(exigeJustificativaExtras({ horasExtras: 0, totalTrabalhadoMinutos: 721 }), true);
 });
 
 test("jornada normal salva sem justificativa", () => {

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CalendarClock, Pencil, Plus, Search, Trash2, UserMinus } from "lucide-react";
+import { CalendarClock, History, Pencil, Plus, Search, Trash2, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -54,6 +54,7 @@ import { canDeactivateEmployee, canEditEmployeeTerminationDate } from "@/lib/acc
 import { useAuth } from "@/hooks/use-auth";
 import { calcularCusto, ENCARGOS_PCT, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,12 +72,19 @@ export const Route = createFileRoute("/_authenticated/funcionarios")({
 
 const PAGE_SIZE = 10;
 
-const funcSchema = z.object({
-  nome: z.string().trim().min(3, "Mínimo 3 caracteres").max(120),
-  categoria_mo: z.string().min(1, "Categoria obrigatória"),
-  salario: z.coerce.number().nonnegative("Salário inválido"),
-  data_admissao: z.string(),
-});
+const funcSchema = z
+  .object({
+    nome: z.string().trim().min(3, "Mínimo 3 caracteres").max(120),
+    categoria_mo: z.string().min(1, "Categoria obrigatória"),
+    salario: z.coerce.number().nonnegative("Salário inválido"),
+    data_admissao: z.string(),
+    regime: z.enum(["", "local", "alojado"]),
+    regime_vigencia_inicio: z.string(),
+  })
+  .refine((value) => !value.regime || Boolean(value.regime_vigencia_inicio), {
+    path: ["regime_vigencia_inicio"],
+    message: "Informe o início da vigência do regime",
+  });
 type FuncForm = z.infer<typeof funcSchema>;
 type FuncionarioInsert = Database["public"]["Tables"]["funcionarios"]["Insert"];
 type FuncionarioUpdate = Database["public"]["Tables"]["funcionarios"]["Update"];
@@ -93,7 +101,16 @@ type Funcionario = {
   deleted_at: string | null;
   deleted_by: string | null;
   visivel_obras_control: boolean | null;
+  regime: "local" | "alojado" | null;
+  regime_vigencia_inicio: string | null;
 };
+
+type Regime = "local" | "alojado";
+type RegimeVigencia = Database["public"]["Tables"]["funcionario_regime_vigencias"]["Row"];
+
+const hojeISO = () => new Date().toISOString().slice(0, 10);
+const regimeLabel = (regime: Regime | null) =>
+  regime === "local" ? "Local" : regime === "alojado" ? "Alojado" : "Não informado";
 
 function Row({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
   return (
@@ -130,6 +147,11 @@ function FuncionariosPage() {
   const [deactivating, setDeactivating] = useState<Funcionario | null>(null);
   const [terminationDate, setTerminationDate] = useState("");
   const [salarioDirty, setSalarioDirty] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRegime, setBulkRegime] = useState<Regime>("local");
+  const [bulkVigencia, setBulkVigencia] = useState(hojeISO());
+  const [historyEmployee, setHistoryEmployee] = useState<Funcionario | null>(null);
 
   const { data: categorias } = useCategorias();
   const moi = useMemo(() => (categorias ?? []).filter((c) => c.tipo === "MOI"), [categorias]);
@@ -236,6 +258,8 @@ function FuncionariosPage() {
       salario: 0,
       categoria_mo: "",
       data_admissao: "",
+      regime: "",
+      regime_vigencia_inicio: "",
     },
   });
 
@@ -260,7 +284,14 @@ function FuncionariosPage() {
   function openCreate() {
     setEditing(null);
     setSalarioDirty(false);
-    form.reset({ nome: "", salario: 0, categoria_mo: "", data_admissao: "" });
+    form.reset({
+      nome: "",
+      salario: 0,
+      categoria_mo: "",
+      data_admissao: "",
+      regime: "",
+      regime_vigencia_inicio: "",
+    });
     setOpen(true);
   }
 
@@ -272,6 +303,8 @@ function FuncionariosPage() {
       categoria_mo: f.categoria_mo,
       salario: f.salario != null ? Number(f.salario) : 0,
       data_admissao: f.data_admissao ?? "",
+      regime: f.regime ?? "",
+      regime_vigencia_inicio: f.regime_vigencia_inicio ?? "",
     });
     setOpen(true);
   }
@@ -281,6 +314,7 @@ function FuncionariosPage() {
       if (canSeeSalario && values.salario <= 0) {
         throw new Error("Informe um salário válido para a função selecionada.");
       }
+      let funcionarioId = editing?.id;
       if (editing) {
         const patch: FuncionarioUpdate = {
           nome: values.nome,
@@ -305,7 +339,21 @@ function FuncionariosPage() {
           payload.salario = values.salario;
           payload.encargos = Number(values.salario) * ENCARGOS_PCT;
         }
-        const { error } = await supabase.from("funcionarios").insert(payload);
+        const { data, error } = await supabase
+          .from("funcionarios")
+          .insert(payload)
+          .select("id")
+          .single();
+        if (error) throw error;
+        funcionarioId = data.id;
+      }
+      if (values.regime && values.regime_vigencia_inicio && funcionarioId) {
+        const { error } = await supabase.rpc("definir_regime_funcionarios", {
+          p_funcionario_ids: [funcionarioId],
+          p_regime: values.regime,
+          p_vigencia_inicio: values.regime_vigencia_inicio,
+          p_origem: editing ? "edicao" : "cadastro",
+        });
         if (error) throw error;
       }
     },
@@ -327,6 +375,42 @@ function FuncionariosPage() {
           "Já existe um funcionário cadastrado com este nome. Verifique o cadastro antes de adicionar novamente.",
         );
       } else toast.error(message || "Erro ao salvar");
+    },
+  });
+
+  const bulkRegimeMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedIds.size) throw new Error("Selecione ao menos um funcionário.");
+      if (!bulkVigencia) throw new Error("Informe a data de vigência.");
+      const { error } = await supabase.rpc("definir_regime_funcionarios", {
+        p_funcionario_ids: [...selectedIds],
+        p_regime: bulkRegime,
+        p_vigencia_inicio: bulkVigencia,
+        p_origem: "lote",
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success(`Regime definido para ${selectedIds.size} funcionário(s).`);
+      setSelectedIds(new Set());
+      setBulkOpen(false);
+      qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+    },
+    onError: (error: unknown) =>
+      toast.error(databaseError(error).message || "Erro ao definir regime em lote"),
+  });
+
+  const { data: regimeHistory = [], isLoading: regimeHistoryLoading } = useQuery({
+    queryKey: ["funcionario-regime-historico", historyEmployee?.id],
+    enabled: Boolean(historyEmployee),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("funcionario_regime_vigencias")
+        .select("*")
+        .eq("funcionario_id", historyEmployee!.id)
+        .order("vigencia_inicio", { ascending: false });
+      if (error) throw error;
+      return data satisfies RegimeVigencia[];
     },
   });
 
@@ -502,6 +586,53 @@ function FuncionariosPage() {
                       </FormItem>
                     )}
                   />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="regime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Regime</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Não informado" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="local">Local</SelectItem>
+                              <SelectItem value="alojado">Alojado</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="regime_vigencia_inicio"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Início da vigência</FormLabel>
+                          <FormControl>
+                            <Input type="date" max={hojeISO()} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  {editing && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setHistoryEmployee(editing)}
+                    >
+                      <History className="mr-2 h-4 w-4" />
+                      Ver histórico de regime
+                    </Button>
+                  )}
                   {canSeeSalario && (
                     <>
                       <FormField
@@ -645,6 +776,20 @@ function FuncionariosPage() {
         </CardContent>
       </Card>
 
+      {selectedIds.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
+          <span className="text-sm font-medium">
+            {selectedIds.size} funcionário(s) selecionado(s)
+          </span>
+          <Button size="sm" onClick={() => setBulkOpen(true)}>
+            Definir regime
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+            Limpar seleção
+          </Button>
+        </div>
+      )}
+
       {funcionariosError ? (
         <Card>
           <CardContent className="py-10 text-center text-destructive">
@@ -663,11 +808,29 @@ function FuncionariosPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      aria-label="Selecionar funcionários desta página"
+                      checked={
+                        pageItems.length > 0 && pageItems.every((item) => selectedIds.has(item.id))
+                      }
+                      onCheckedChange={(checked) => {
+                        setSelectedIds((current) => {
+                          const next = new Set(current);
+                          for (const item of pageItems)
+                            if (checked) next.add(item.id);
+                            else next.delete(item.id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Centro de custo atual</TableHead>
                   <TableHead>Admissão</TableHead>
+                  <TableHead>Regime</TableHead>
                   {canSeeSalario && <TableHead className="text-right">Salário</TableHead>}
                   {canSeeSalario && <TableHead className="text-right">Custo total</TableHead>}
                   <TableHead>Status</TableHead>
@@ -678,7 +841,7 @@ function FuncionariosPage() {
                 {pageItems.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canSeeSalario ? 8 : 6}
+                      colSpan={canSeeSalario ? 11 : 9}
                       className="py-10 text-center text-muted-foreground"
                     >
                       Nenhum funcionário encontrado.
@@ -697,11 +860,30 @@ function FuncionariosPage() {
                       : null;
                     return (
                       <TableRow key={f.id}>
+                        <TableCell>
+                          <Checkbox
+                            aria-label={`Selecionar ${f.nome}`}
+                            checked={selectedIds.has(f.id)}
+                            onCheckedChange={(checked) =>
+                              setSelectedIds((current) => {
+                                const next = new Set(current);
+                                if (checked) next.add(f.id);
+                                else next.delete(f.id);
+                                return next;
+                              })
+                            }
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">{f.nome}</TableCell>
                         <TableCell>{f.categoria_mo}</TableCell>
                         <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
                         <TableCell className="text-sm">
                           {cur?.nome ?? <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={f.regime ? "outline" : "destructive"}>
+                            {regimeLabel(f.regime)}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-sm">
                           {f.data_admissao
@@ -742,6 +924,14 @@ function FuncionariosPage() {
                               aria-label="Editar"
                             >
                               <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setHistoryEmployee(f)}
+                              aria-label="Histórico de regime"
+                            >
+                              <History className="h-4 w-4" />
                             </Button>
                             {canDeactivateEmployee(role, f.ativo) && (
                               <Button
@@ -887,6 +1077,98 @@ function FuncionariosPage() {
                   : "Salvar data"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Definir regime em lote</DialogTitle>
+            <DialogDescription>
+              A nova vigência será registrada para {selectedIds.size} funcionário(s), preservando o
+              histórico anterior.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Regime</label>
+              <Select value={bulkRegime} onValueChange={(value: Regime) => setBulkRegime(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">Local</SelectItem>
+                  <SelectItem value="alojado">Alojado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Início da vigência</label>
+              <Input
+                type="date"
+                max={hojeISO()}
+                value={bulkVigencia}
+                onChange={(event) => setBulkVigencia(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBulkOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!bulkVigencia || bulkRegimeMutation.isPending}
+              onClick={() => bulkRegimeMutation.mutate()}
+            >
+              {bulkRegimeMutation.isPending ? "Salvando..." : "Salvar regime"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(historyEmployee)}
+        onOpenChange={(value) => {
+          if (!value) setHistoryEmployee(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Histórico de regime</DialogTitle>
+            <DialogDescription>{historyEmployee?.nome}</DialogDescription>
+          </DialogHeader>
+          {regimeHistoryLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : regimeHistory.length === 0 ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              Regime não informado.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Regime</TableHead>
+                  <TableHead>Início</TableHead>
+                  <TableHead>Fim</TableHead>
+                  <TableHead>Origem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {regimeHistory.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{regimeLabel(item.regime)}</TableCell>
+                    <TableCell>
+                      {new Date(`${item.vigencia_inicio}T00:00:00`).toLocaleDateString("pt-BR")}
+                    </TableCell>
+                    <TableCell>
+                      {item.vigencia_fim
+                        ? new Date(`${item.vigencia_fim}T00:00:00`).toLocaleDateString("pt-BR")
+                        : "Atual"}
+                    </TableCell>
+                    <TableCell className="capitalize">{item.origem}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </DialogContent>
       </Dialog>
     </div>

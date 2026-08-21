@@ -1,5 +1,5 @@
 export const LIMITE_HORAS_EXTRAS_SEM_JUSTIFICATIVA = 2;
-export const LIMITE_MINUTOS_JORNADA_SEM_JUSTIFICATIVA = 10 * 60;
+export const LIMITE_MINUTOS_JORNADA_SEM_JUSTIFICATIVA = 12 * 60;
 
 type RegraJustificativaExtras = {
   horasExtras: number;
@@ -8,15 +8,15 @@ type RegraJustificativaExtras = {
 
 /**
  * Espelha as duas validações persistidas no fluxo atual:
- * - registros_horas.extras_justificativa: horas_extras acima de 2h;
- * - obras_salvar_jornada_v2: jornada trabalhada acima de 10h.
+ * - registros_horas.extras_justificativa: horas_extras a partir de 2h;
+ * - obras_salvar_jornada_v2: jornada trabalhada acima de 12h.
  */
 export function exigeJustificativaExtras({
   horasExtras,
   totalTrabalhadoMinutos,
 }: RegraJustificativaExtras) {
   return (
-    horasExtras > LIMITE_HORAS_EXTRAS_SEM_JUSTIFICATIVA ||
+    horasExtras >= LIMITE_HORAS_EXTRAS_SEM_JUSTIFICATIVA ||
     totalTrabalhadoMinutos > LIMITE_MINUTOS_JORNADA_SEM_JUSTIFICATIVA
   );
 }

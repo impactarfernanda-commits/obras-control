@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { diasUteisNoIntervalo } from "@/lib/custos-core";
+import { apurarCustosRegime, type DiaTrabalhado, type RegimeVigencia } from "@/lib/regimes";
 import {
   classificarRegistroGerencial,
   composicoesNaoReconciliadas,
@@ -39,6 +40,8 @@ type Registro = {
 };
 type Funcionario = {
   id: string;
+  data_admissao: string | null;
+  data_desligamento: string | null;
   deleted_at: string | null;
   visivel_obras_control: boolean | null;
 };
@@ -49,6 +52,17 @@ type CustoVigenciaRow = {
   categoria_mo: string;
   custo_mensal_total: number;
   status_historico: "estimado_inicial" | "apurado_por_vigencia";
+};
+type RegimeVigenciaRow = {
+  funcionario_id: string;
+  regime: "local" | "alojado";
+  vigencia_inicio: string;
+  vigencia_fim: string | null;
+};
+type AlocacaoReferenciaRow = {
+  funcionario_id: string;
+  obra_id: string;
+  data: string;
 };
 
 const consultaSchema = z
@@ -82,7 +96,7 @@ async function permissoes(userId: string) {
   const result = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
   if (result.error) throw new Error(result.error.message);
   const roles = (result.data ?? []).map((r) => r.role as Role);
-  const operacional = roles.some((r) => ["coordenador", "gerente", "diretor"].includes(r));
+  const operacional = roles.some((r) => r === "gerente" || r === "diretor");
   const financeiro = roles.some((r) => r === "gerente" || r === "diretor");
   return { operacional, financeiro };
 }
@@ -123,7 +137,15 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       };
     const inicio = new Date(`${data.dataInicial}T00:00:00`),
       fim = new Date(`${data.dataFinal}T00:00:00`);
-    const [itens, funcionarios, registros, vigenciasRows, categorias] = await Promise.all([
+    const [
+      itens,
+      funcionarios,
+      registros,
+      vigenciasRows,
+      regimeRows,
+      alocacoesReferencia,
+      categorias,
+    ] = await Promise.all([
       buscarTodasPaginas<ItemBase>(
         (from, to) =>
           supabaseAdmin
@@ -138,7 +160,7 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       buscarTodasPaginas<Funcionario>((from, to) =>
         supabaseAdmin
           .from("funcionarios")
-          .select("id,deleted_at,visivel_obras_control")
+          .select("id,data_admissao,data_desligamento,deleted_at,visivel_obras_control")
           .order("id")
           .range(from, to),
       ),
@@ -166,6 +188,25 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
             .order("vigencia_inicio" as never)
             .range(from, to) as never,
       ),
+      buscarTodasPaginas<RegimeVigenciaRow>(
+        (from, to) =>
+          supabaseAdmin
+            .from("funcionario_regime_vigencias" as never)
+            .select("funcionario_id,regime,vigencia_inicio,vigencia_fim" as never)
+            .lte("vigencia_inicio" as never, data.dataFinal as never)
+            .or(`vigencia_fim.is.null,vigencia_fim.gte.${data.dataInicial}` as never)
+            .order("funcionario_id" as never)
+            .order("vigencia_inicio" as never)
+            .range(from, to) as never,
+      ),
+      (async () => {
+        const result = await supabaseAdmin.rpc(
+          "obras_control_alocacoes_referencia_regime" as never,
+          { p_inicio: data.dataInicial, p_fim: data.dataFinal } as never,
+        );
+        if (result.error) throw new Error(result.error.message);
+        return (result.data ?? []) as unknown as AlocacaoReferenciaRow[];
+      })(),
       buscarTodasPaginas<{ nome: string; tipo: TipoMO }>(
         (from, to) =>
           supabaseAdmin
@@ -182,6 +223,12 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       categoriaMo: v.categoria_mo,
       custoMensalTotal: Number(v.custo_mensal_total),
       statusHistorico: v.status_historico,
+    }));
+    const regimes: RegimeVigencia[] = regimeRows.map((v) => ({
+      funcionarioId: v.funcionario_id,
+      regime: v.regime,
+      vigenciaInicio: v.vigencia_inicio,
+      vigenciaFim: v.vigencia_fim,
     }));
     const tipoMap = new Map(categorias.map((c) => [c.nome, c.tipo]));
     const funcMap = new Map(
@@ -204,6 +251,7 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
       funcoesOrcamento: string[];
     };
     const linhas = new Map<string, Acum>();
+    const diasTrabalhados: DiaTrabalhado[] = [];
     for (const item of itens) {
       const chave = item.categoria_mo_mapeada ?? `orcamento:${item.id}`;
       const tipoEfetivo = item.categoria_mo_mapeada
@@ -262,7 +310,64 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
         l.custoRealizado += custo;
         l.custos[chaveCusto] = (l.custos[chaveCusto] ?? 0) + custo;
       }
+      if (
+        acesso.financeiro &&
+        registro.tipo_registro === "horas" &&
+        Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0) > 0
+      )
+        diasTrabalhados.push({
+          funcionarioId: registro.funcionario_id,
+          obraId: data.obraId,
+          data: registro.data,
+        });
       linhas.set(categoria, l);
+    }
+    let existeRegimeNaoInformado = false;
+    let existeAlojadoSemCc = false;
+    if (acesso.financeiro) {
+      const apuracaoRegime = apurarCustosRegime({
+        vigencias: regimes,
+        alocacoes: alocacoesReferencia.map((alocacao) => ({
+          funcionarioId: alocacao.funcionario_id,
+          obraId: alocacao.obra_id,
+          data: alocacao.data,
+        })),
+        diasTrabalhados,
+        inicio: data.dataInicial,
+        fim: data.dataFinal,
+        funcionarioElegivelNaData: (funcionarioId, dia) => {
+          const funcionario = funcMap.get(funcionarioId);
+          return Boolean(
+            funcionario &&
+            (!funcionario.data_admissao || funcionario.data_admissao <= dia) &&
+            (!funcionario.data_desligamento || funcionario.data_desligamento >= dia),
+          );
+        },
+      });
+      existeRegimeNaoInformado = apuracaoRegime.existeRegimeNaoInformado;
+      existeAlojadoSemCc = apuracaoRegime.existeAlojadoSemCc;
+      for (const lancamento of apuracaoRegime.lancamentos) {
+        if (lancamento.obraId !== data.obraId) continue;
+        const vigencia = vigenciaNaData(vigencias, lancamento.funcionarioId, lancamento.data);
+        const categoria = vigencia?.categoriaMo ?? "Nao mapeado";
+        const linha = linhas.get(categoria) ?? {
+          funcao: categoria,
+          tipo: tipoMap.get(categoria) ?? "MOD",
+          hhPrevisto: 0,
+          hhRealizado: 0,
+          horasAusencia: 0,
+          custoPrevisto: 0,
+          custoRealizado: 0,
+          custos: {},
+          ausencias: {},
+          semMapeamento: true,
+          funcoesOrcamento: [],
+        };
+        const chaveCusto = lancamento.regime === "local" ? "regime_local" : "regime_alojado";
+        linha.custoRealizado += lancamento.valor;
+        linha.custos[chaveCusto] = (linha.custos[chaveCusto] ?? 0) + lancamento.valor;
+        linhas.set(categoria, linha);
+      }
     }
     const dtoLinhas = [...linhas.values()].map((l) => ({
       funcao: l.funcao,
@@ -326,6 +431,10 @@ export const getPlanejamentoHH = createServerFn({ method: "POST" })
         registros.some((r) => !vigenciaNaData(vigencias, r.funcionario_id, r.data))
           ? ["Existem apontamentos sem vigencia financeira reconciliada."]
           : []),
+        ...(existeRegimeNaoInformado
+          ? ["Regime nao informado para funcionario com dia trabalhado no periodo."]
+          : []),
+        ...(existeAlojadoSemCc ? ["Alojado sem CC de referência."] : []),
       ],
       periodo: { inicio: isoLocal(inicio), fim: isoLocal(fim) },
     };

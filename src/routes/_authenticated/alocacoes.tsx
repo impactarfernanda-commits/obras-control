@@ -196,15 +196,7 @@ const schema = z
       });
       return;
     }
-    if (
-      !justificativaExtrasValida(
-        {
-          horasExtras: (calculo.minutosHe50 + calculo.minutosHe100) / 60,
-          totalTrabalhadoMinutos: calculo.totalTrabalhadoMinutos,
-        },
-        v.justificativa_extras,
-      )
-    ) {
+    if (calculo.exigeJustificativa && !v.justificativa_extras?.trim()) {
       ctx.addIssue({
         code: "custom",
         path: ["justificativa_extras"],

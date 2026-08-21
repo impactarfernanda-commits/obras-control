@@ -12,7 +12,7 @@ export const APP_NAVIGATION_ITEMS = [
     title: "Planejamento HH e Custos",
     url: "/planejamento-hh",
     minLevel: 2,
-    allowedRoles: ["coordenador", "gerente", "diretor"],
+    allowedRoles: ["gerente", "diretor"],
   },
   { title: "Configurações", url: "/configuracoes", minLevel: 3 },
   { title: "Usuários", url: "/admin/usuarios", minLevel: 1, requiresUserManagement: true },
