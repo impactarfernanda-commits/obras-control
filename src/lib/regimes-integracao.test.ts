@@ -8,6 +8,10 @@ const migration = readFileSync(
 );
 const funcionarios = readFileSync("src/routes/_authenticated/funcionarios.tsx", "utf8");
 const planejamento = readFileSync("src/lib/planejamento-hh.functions.ts", "utf8");
+const relatorio = readFileSync("src/lib/relatorio-centro-custo.functions.ts", "utf8");
+const composicao = readFileSync("src/lib/relatorio-centro-custo.ts", "utf8");
+const telaRelatorios = readFileSync("src/routes/_authenticated/relatorios.tsx", "utf8");
+const excel = readFileSync("src/lib/relatorio-centro-custo-xlsx.ts", "utf8");
 
 test("vigencias de regime sao independentes das vigencias financeiras e nao sobrepoem", () => {
   assert.match(migration, /CREATE TABLE public\.funcionario_regime_vigencias/);
@@ -53,6 +57,27 @@ test("Funcionarios centraliza coluna, edicao, historico e acao em lote", () => {
   assert.match(funcionarios, /Definir regime em lote/);
   assert.match(funcionarios, /Histórico de regime/);
   assert.match(funcionarios, /definir_regime_funcionarios/);
+  assert.match(funcionarios, /Classificação inicial com vigência oficial em 25\/07\/2026/);
+  assert.match(funcionarios, /Data efetiva da mudança/);
+  assert.ok(
+    funcionarios.indexOf("f.data_admissao") <
+      funcionarios.indexOf("regimeLabel(f.regime)", funcionarios.indexOf("f.data_admissao")),
+    "Admissão deve ser renderizada antes de Regime",
+  );
+});
+
+test("relatorio de CC integra fonte, calculo, cards, tabela e Excel", () => {
+  assert.match(relatorio, /funcionario_regime_vigencias/);
+  assert.match(relatorio, /obras_control_alocacoes_referencia_regime/);
+  assert.match(composicao, /apurarCustosRegime/);
+  assert.match(composicao, /custoRegimeLocal/);
+  assert.match(composicao, /custoRegimeAlojado/);
+  assert.match(telaRelatorios, /Regime Local/);
+  assert.match(telaRelatorios, /Regime Alojado/);
+  assert.match(telaRelatorios, /Custo Regime/);
+  assert.match(excel, /Custo Regime Local/);
+  assert.match(excel, /Custo Regime Alojado/);
+  assert.match(excel, /Custo Regime/);
 });
 
 test("apuracao soma custos de regime e alerta ausencia", () => {

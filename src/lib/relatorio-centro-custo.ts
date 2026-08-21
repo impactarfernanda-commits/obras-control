@@ -11,6 +11,12 @@ import {
   type EspecialidadeAjudante,
   type TipoModRelatorio,
 } from "./especialidade-ajudante.ts";
+import {
+  apurarCustosRegime,
+  regimeNaData,
+  type AlocacaoReferencia,
+  type RegimeVigencia,
+} from "./regimes.ts";
 
 export type TipoRelatorio = "MOD" | "MOI";
 
@@ -39,6 +45,8 @@ export type FuncionarioRelatorio = {
   id: string;
   nome: string;
   categoria_mo: string;
+  data_admissao?: string | null;
+  data_desligamento?: string | null;
 };
 
 export type LinhaComposicaoCentro = {
@@ -57,6 +65,10 @@ export type LinhaComposicaoCentro = {
   custoBase: number;
   custoHE: number;
   custoAdicionalNoturno: number;
+  regime: "Local" | "Alojado" | "Local / Alojado" | "Não informado";
+  custoRegimeLocal: number;
+  custoRegimeAlojado: number;
+  custoRegime: number;
   total: number;
 };
 
@@ -73,10 +85,12 @@ export type CentroConsolidado = {
   dias: number;
   custoHE: number;
   custoAdicionalNoturno: number;
+  custoRegimeLocal: number;
+  custoRegimeAlojado: number;
   linhas: LinhaComposicaoCentro[];
 };
 
-type AcumuladorLinha = Omit<LinhaComposicaoCentro, "dias" | "total"> & {
+type AcumuladorLinha = Omit<LinhaComposicaoCentro, "dias" | "regime" | "custoRegime" | "total"> & {
   datas: Set<string>;
 };
 
@@ -101,6 +115,10 @@ type Input = {
   horasNormaisPadrao: (dataISO: string) => number;
   segmentarMod?: boolean;
   feriados?: ReadonlySet<string>;
+  periodoInicial?: string;
+  periodoFinal?: string;
+  vigenciasRegime?: readonly RegimeVigencia[];
+  alocacoesReferenciaRegime?: readonly AlocacaoReferencia[];
 };
 
 function chave(funcionarioId: string, obraId: string, data: string) {
@@ -157,6 +175,8 @@ export function consolidarCustosCentros(input: Input) {
       custoBase: 0,
       custoHE: 0,
       custoAdicionalNoturno: 0,
+      custoRegimeLocal: 0,
+      custoRegimeAlojado: 0,
     };
     atual.tipoInferido ||= tipoInferido;
     linhas.set(id, atual);
@@ -307,6 +327,62 @@ export function consolidarCustosCentros(input: Input) {
     }
   }
 
+  if (input.periodoInicial && input.periodoFinal) {
+    const diasTrabalhados = input.registros
+      .filter(
+        (registro) =>
+          (registro.tipo_registro == null || registro.tipo_registro === "horas") &&
+          !registro.ausencia &&
+          Number(registro.horas_normais || 0) + Number(registro.horas_extras || 0) > 0,
+      )
+      .map((registro) => ({
+        funcionarioId: registro.funcionario_id,
+        obraId: registro.obra_id,
+        data: registro.data,
+      }));
+    const vigencias = [...(input.vigenciasRegime ?? [])];
+    const apuracao = apurarCustosRegime({
+      vigencias,
+      alocacoes: [...(input.alocacoesReferenciaRegime ?? [])],
+      diasTrabalhados,
+      inicio: input.periodoInicial,
+      fim: input.periodoFinal,
+      funcionarioElegivelNaData: (funcionarioId, data) => {
+        const funcionario = funcMap.get(funcionarioId);
+        return Boolean(
+          funcionario &&
+          (!funcionario.data_admissao || funcionario.data_admissao <= data) &&
+          (!funcionario.data_desligamento || funcionario.data_desligamento >= data),
+        );
+      },
+    });
+    if (apuracao.existeRegimeNaoInformado)
+      avisos.add("Regime não informado para funcionário com dia trabalhado no período.");
+    if (apuracao.existeAlojadoSemCc) avisos.add("Alojado sem CC de referência.");
+    for (const lancamento of apuracao.lancamentos) {
+      if (!lancamento.obraId) continue;
+      const funcionario = funcMap.get(lancamento.funcionarioId);
+      if (!funcionario) continue;
+      const alocacao = alocIndex.get(
+        chave(lancamento.funcionarioId, lancamento.obraId, lancamento.data),
+      );
+      const tipo = input.resolverTipo(alocacao, funcionario);
+      const tipoMod =
+        input.segmentarMod !== false && tipo === "MOD"
+          ? classificarTipoMod(funcionario.categoria_mo, alocacao?.especialidade_ajudante)
+          : null;
+      const linha = obterLinha(
+        lancamento.obraId,
+        funcionario,
+        tipo,
+        tipoMod,
+        !alocacao?.tipo_mao_obra,
+      );
+      if (lancamento.regime === "local") linha.custoRegimeLocal += lancamento.valor;
+      else linha.custoRegimeAlojado += lancamento.valor;
+    }
+  }
+
   const linhasPorCentro = new Map<string, LinhaComposicaoCentro[]>();
   for (const [id, linha] of linhas) {
     const obraId = id.split("|")[0];
@@ -326,7 +402,29 @@ export function consolidarCustosCentros(input: Input) {
       custoBase: linha.custoBase,
       custoHE: linha.custoHE,
       custoAdicionalNoturno: linha.custoAdicionalNoturno,
-      total: linha.custoBase + linha.custoHE + linha.custoAdicionalNoturno,
+      regime: (() => {
+        const regimes = new Set(
+          (input.vigenciasRegime ?? [])
+            .filter((vigencia) => vigencia.funcionarioId === linha.funcionarioId)
+            .map((vigencia) => vigencia.regime),
+        );
+        if (regimes.size > 1) return "Local / Alojado";
+        const vigente = regimeNaData(
+          [...(input.vigenciasRegime ?? [])],
+          linha.funcionarioId,
+          input.periodoFinal ?? "9999-12-31",
+        )?.regime;
+        return vigente === "local" ? "Local" : vigente === "alojado" ? "Alojado" : "Não informado";
+      })(),
+      custoRegimeLocal: linha.custoRegimeLocal,
+      custoRegimeAlojado: linha.custoRegimeAlojado,
+      custoRegime: linha.custoRegimeLocal + linha.custoRegimeAlojado,
+      total:
+        linha.custoBase +
+        linha.custoHE +
+        linha.custoAdicionalNoturno +
+        linha.custoRegimeLocal +
+        linha.custoRegimeAlojado,
     };
     const lista = linhasPorCentro.get(obraId) ?? [];
     lista.push(final);
@@ -370,6 +468,8 @@ export function consolidarCustosCentros(input: Input) {
         (total, linha) => total + linha.custoAdicionalNoturno,
         0,
       ),
+      custoRegimeLocal: composicao.reduce((total, linha) => total + linha.custoRegimeLocal, 0),
+      custoRegimeAlojado: composicao.reduce((total, linha) => total + linha.custoRegimeAlojado, 0),
       linhas: composicao,
     });
   }

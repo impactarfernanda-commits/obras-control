@@ -1085,6 +1085,8 @@ function RelatoriosPage() {
                   ["Funcionários", String(centroDetalhe.funcs)],
                   ["Dias alocados — soma da equipe", String(centroDetalhe.dias)],
                   ["Custo das horas extras", fmtBRL(centroDetalhe.custoHE)],
+                  ["Regime Local", fmtBRL(centroDetalhe.custoRegimeLocal)],
+                  ["Regime Alojado", fmtBRL(centroDetalhe.custoRegimeAlojado)],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">{label}</div>
@@ -1101,12 +1103,14 @@ function RelatoriosPage() {
                       <TableHead>Função</TableHead>
                       <TableHead>Tipo</TableHead>
                       {segmentarMod && <TableHead>Tipo MOD</TableHead>}
+                      <TableHead>Regime</TableHead>
                       <TableHead className="text-right">Dias</TableHead>
                       <TableHead className="text-right">Horas normais</TableHead>
                       <TableHead className="text-right">HE 50%</TableHead>
                       <TableHead className="text-right">HE 100%</TableHead>
                       <TableHead className="text-right">Custo base</TableHead>
                       <TableHead className="text-right">Custo HE</TableHead>
+                      <TableHead className="text-right">Custo Regime</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1114,7 +1118,7 @@ function RelatoriosPage() {
                     {centroDetalhe.linhas.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={segmentarMod ? 11 : 10}
+                          colSpan={segmentarMod ? 13 : 12}
                           className="py-8 text-center text-muted-foreground"
                         >
                           Nenhum funcionário ou custo encontrado para este centro de custo na
@@ -1153,6 +1157,7 @@ function RelatoriosPage() {
                             </span>
                           </TableCell>
                           {segmentarMod && <TableCell>{linha.tipoMod ?? "-"}</TableCell>}
+                          <TableCell>{linha.regime}</TableCell>
                           <TableCell className="text-right">{linha.dias}</TableCell>
                           <TableCell className="text-right">
                             {formatarHorasDecimais(linha.horasNormais)}
@@ -1165,6 +1170,7 @@ function RelatoriosPage() {
                           </TableCell>
                           <TableCell className="text-right">{fmtBRL(linha.custoBase)}</TableCell>
                           <TableCell className="text-right">{fmtBRL(linha.custoHE)}</TableCell>
+                          <TableCell className="text-right">{fmtBRL(linha.custoRegime)}</TableCell>
                           <TableCell className="text-right font-semibold">
                             {fmtBRL(linha.total)}
                           </TableCell>
@@ -1174,7 +1180,7 @@ function RelatoriosPage() {
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={7} className="text-right font-medium">
+                      <TableCell colSpan={segmentarMod ? 9 : 8} className="text-right font-medium">
                         Total
                       </TableCell>
                       <TableCell className="text-right">
@@ -1183,6 +1189,9 @@ function RelatoriosPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">{fmtBRL(centroDetalhe.custoHE)}</TableCell>
+                      <TableCell className="text-right">
+                        {fmtBRL(centroDetalhe.custoRegimeLocal + centroDetalhe.custoRegimeAlojado)}
+                      </TableCell>
                       <TableCell className="text-right font-semibold">
                         {fmtBRL(centroDetalhe.total)}
                       </TableCell>

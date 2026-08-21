@@ -65,6 +65,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { MARCO_INICIAL_REGIMES, vigenciaInicialOuMudanca } from "@/lib/regimes";
 
 export const Route = createFileRoute("/_authenticated/funcionarios")({
   component: FuncionariosPage,
@@ -72,19 +73,14 @@ export const Route = createFileRoute("/_authenticated/funcionarios")({
 
 const PAGE_SIZE = 10;
 
-const funcSchema = z
-  .object({
-    nome: z.string().trim().min(3, "Mínimo 3 caracteres").max(120),
-    categoria_mo: z.string().min(1, "Categoria obrigatória"),
-    salario: z.coerce.number().nonnegative("Salário inválido"),
-    data_admissao: z.string(),
-    regime: z.enum(["", "local", "alojado"]),
-    regime_vigencia_inicio: z.string(),
-  })
-  .refine((value) => !value.regime || Boolean(value.regime_vigencia_inicio), {
-    path: ["regime_vigencia_inicio"],
-    message: "Informe o início da vigência do regime",
-  });
+const funcSchema = z.object({
+  nome: z.string().trim().min(3, "Mínimo 3 caracteres").max(120),
+  categoria_mo: z.string().min(1, "Categoria obrigatória"),
+  salario: z.coerce.number().nonnegative("Salário inválido"),
+  data_admissao: z.string(),
+  regime: z.enum(["", "local", "alojado"]),
+  regime_vigencia_inicio: z.string(),
+});
 type FuncForm = z.infer<typeof funcSchema>;
 type FuncionarioInsert = Database["public"]["Tables"]["funcionarios"]["Insert"];
 type FuncionarioUpdate = Database["public"]["Tables"]["funcionarios"]["Update"];
@@ -265,6 +261,17 @@ function FuncionariosPage() {
 
   const watchedCategoria = form.watch("categoria_mo");
   const watchedSalario = form.watch("salario");
+  const watchedRegime = form.watch("regime");
+  const exigeDataMudancaRegime = Boolean(
+    editing?.regime && watchedRegime && watchedRegime !== editing.regime,
+  );
+  const selecionados = useMemo(
+    () => (funcionarios ?? []).filter((funcionario) => selectedIds.has(funcionario.id)),
+    [funcionarios, selectedIds],
+  );
+  const exigeDataMudancaLote = selecionados.some(
+    (funcionario) => funcionario.regime && funcionario.regime !== bulkRegime,
+  );
   useEffect(() => {
     if (!open || !watchedCategoria || !tabelaSalarios) return;
     if (editing) return;
@@ -304,7 +311,7 @@ function FuncionariosPage() {
       salario: f.salario != null ? Number(f.salario) : 0,
       data_admissao: f.data_admissao ?? "",
       regime: f.regime ?? "",
-      regime_vigencia_inicio: f.regime_vigencia_inicio ?? "",
+      regime_vigencia_inicio: "",
     });
     setOpen(true);
   }
@@ -347,11 +354,18 @@ function FuncionariosPage() {
         if (error) throw error;
         funcionarioId = data.id;
       }
-      if (values.regime && values.regime_vigencia_inicio && funcionarioId) {
+      const regimeMudou = Boolean(values.regime && values.regime !== editing?.regime);
+      if (regimeMudou && editing?.regime && !values.regime_vigencia_inicio) {
+        throw new Error("Informe a data efetiva da mudança de regime.");
+      }
+      if (values.regime && regimeMudou && funcionarioId) {
         const { error } = await supabase.rpc("definir_regime_funcionarios", {
           p_funcionario_ids: [funcionarioId],
           p_regime: values.regime,
-          p_vigencia_inicio: values.regime_vigencia_inicio,
+          p_vigencia_inicio: vigenciaInicialOuMudanca(
+            editing?.regime ?? null,
+            values.regime_vigencia_inicio,
+          ),
           p_origem: editing ? "edicao" : "cadastro",
         });
         if (error) throw error;
@@ -381,14 +395,30 @@ function FuncionariosPage() {
   const bulkRegimeMutation = useMutation({
     mutationFn: async () => {
       if (!selectedIds.size) throw new Error("Selecione ao menos um funcionário.");
-      if (!bulkVigencia) throw new Error("Informe a data de vigência.");
-      const { error } = await supabase.rpc("definir_regime_funcionarios", {
-        p_funcionario_ids: [...selectedIds],
-        p_regime: bulkRegime,
-        p_vigencia_inicio: bulkVigencia,
-        p_origem: "lote",
-      });
-      if (error) throw error;
+      const iniciais = selecionados.filter((funcionario) => !funcionario.regime);
+      const alteracoes = selecionados.filter(
+        (funcionario) => funcionario.regime && funcionario.regime !== bulkRegime,
+      );
+      if (alteracoes.length && !bulkVigencia)
+        throw new Error("Informe a data efetiva da mudança de regime.");
+      if (alteracoes.length) {
+        const { error } = await supabase.rpc("definir_regime_funcionarios", {
+          p_funcionario_ids: alteracoes.map((funcionario) => funcionario.id),
+          p_regime: bulkRegime,
+          p_vigencia_inicio: bulkVigencia,
+          p_origem: "lote",
+        });
+        if (error) throw error;
+      }
+      if (iniciais.length) {
+        const { error } = await supabase.rpc("definir_regime_funcionarios", {
+          p_funcionario_ids: iniciais.map((funcionario) => funcionario.id),
+          p_regime: bulkRegime,
+          p_vigencia_inicio: MARCO_INICIAL_REGIMES,
+          p_origem: "lote",
+        });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       toast.success(`Regime definido para ${selectedIds.size} funcionário(s).`);
@@ -608,19 +638,25 @@ function FuncionariosPage() {
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name="regime_vigencia_inicio"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Início da vigência</FormLabel>
-                          <FormControl>
-                            <Input type="date" max={hojeISO()} {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {exigeDataMudancaRegime ? (
+                      <FormField
+                        control={form.control}
+                        name="regime_vigencia_inicio"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Data efetiva da mudança</FormLabel>
+                            <FormControl>
+                              <Input type="date" max={hojeISO()} {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    ) : watchedRegime && !editing?.regime ? (
+                      <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        Classificação inicial com vigência oficial em 25/07/2026.
+                      </div>
+                    ) : null}
                   </div>
                   {editing && (
                     <Button
@@ -880,15 +916,15 @@ function FuncionariosPage() {
                         <TableCell className="text-sm">
                           {cur?.nome ?? <span className="text-muted-foreground">—</span>}
                         </TableCell>
-                        <TableCell>
-                          <Badge variant={f.regime ? "outline" : "destructive"}>
-                            {regimeLabel(f.regime)}
-                          </Badge>
-                        </TableCell>
                         <TableCell className="text-sm">
                           {f.data_admissao
                             ? new Date(f.data_admissao + "T00:00:00").toLocaleDateString("pt-BR")
                             : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={f.regime ? "outline" : "destructive"}>
+                            {regimeLabel(f.regime)}
+                          </Badge>
                         </TableCell>
                         {canSeeSalario && (
                           <TableCell className="text-right">
@@ -1101,22 +1137,28 @@ function FuncionariosPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Início da vigência</label>
-              <Input
-                type="date"
-                max={hojeISO()}
-                value={bulkVigencia}
-                onChange={(event) => setBulkVigencia(event.target.value)}
-              />
-            </div>
+            {exigeDataMudancaLote ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data efetiva da mudança</label>
+                <Input
+                  type="date"
+                  max={hojeISO()}
+                  value={bulkVigencia}
+                  onChange={(event) => setBulkVigencia(event.target.value)}
+                />
+              </div>
+            ) : (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+                Funcionários ainda não classificados terão vigência oficial em 25/07/2026.
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setBulkOpen(false)}>
               Cancelar
             </Button>
             <Button
-              disabled={!bulkVigencia || bulkRegimeMutation.isPending}
+              disabled={(exigeDataMudancaLote && !bulkVigencia) || bulkRegimeMutation.isPending}
               onClick={() => bulkRegimeMutation.mutate()}
             >
               {bulkRegimeMutation.isPending ? "Salvando..." : "Salvar regime"}

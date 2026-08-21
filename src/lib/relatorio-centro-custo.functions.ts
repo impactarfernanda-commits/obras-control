@@ -17,6 +17,7 @@ import {
   type RegistroRelatorio,
 } from "@/lib/relatorio-centro-custo";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
+import type { RegimeVigencia } from "@/lib/regimes";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 type FuncionarioInterno = {
@@ -26,6 +27,8 @@ type FuncionarioInterno = {
   salario: number | null;
   deleted_at: string | null;
   visivel_obras_control: boolean | null;
+  data_admissao: string | null;
+  data_desligamento: string | null;
 };
 export type RelatorioCentrosCustoDTO = {
   competencia: string;
@@ -58,6 +61,12 @@ export function montarRelatorioCentrosCusto(input: {
   registros: RegistroRelatorio[];
   detalhes?: Array<DetalheJornadaVisual & { registro_horas_id: string }>;
   feriados?: string[];
+  vigenciasRegime?: RegimeVigencia[];
+  alocacoesReferenciaRegime?: Array<{
+    funcionarioId: string;
+    obraId: string;
+    data: string;
+  }>;
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
   const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
@@ -95,6 +104,10 @@ export function montarRelatorioCentrosCusto(input: {
     horasNormaisPadrao: horasPadraoDoDia,
     segmentarMod,
     feriados: new Set(input.feriados ?? []),
+    periodoInicial: periodo.start,
+    periodoFinal: periodo.end,
+    vigenciasRegime: input.vigenciasRegime,
+    alocacoesReferenciaRegime: input.alocacoesReferenciaRegime,
   });
   return {
     competencia: input.competencia,
@@ -133,11 +146,15 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
       registros,
       detalhesRes,
       feriadosRes,
+      regimes,
+      alocacoesReferenciaRegime,
     ] = await Promise.all([
       buscarTodasPaginas<FuncionarioInterno>((from, to) =>
         supabaseAdmin
           .from("funcionarios")
-          .select("id,nome,categoria_mo,salario,deleted_at,visivel_obras_control")
+          .select(
+            "id,nome,categoria_mo,salario,deleted_at,visivel_obras_control,data_admissao,data_desligamento",
+          )
           .order("id", { ascending: true })
           .range(from, to),
       ),
@@ -197,6 +214,29 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
         .from("feriados_obras_control" as never)
         .select("data" as never)
         .eq("ativo" as never, true),
+      buscarTodasPaginas<{
+        funcionario_id: string;
+        regime: "local" | "alojado";
+        vigencia_inicio: string;
+        vigencia_fim: string | null;
+      }>((from, to) =>
+        supabaseAdmin
+          .from("funcionario_regime_vigencias")
+          .select("funcionario_id,regime,vigencia_inicio,vigencia_fim")
+          .lte("vigencia_inicio", periodo.end)
+          .or(`vigencia_fim.is.null,vigencia_fim.gte.${periodo.start}`)
+          .order("funcionario_id")
+          .order("vigencia_inicio")
+          .range(from, to),
+      ),
+      (async () => {
+        const result = await supabaseAdmin.rpc("obras_control_alocacoes_referencia_regime", {
+          p_inicio: periodo.start,
+          p_fim: periodo.end,
+        });
+        if (result.error) throw new Error(result.error.message);
+        return result.data ?? [];
+      })(),
     ]);
     if (beneficiosRes.error) throw new Error(beneficiosRes.error.message);
     if (detalhesRes.error) throw new Error(detalhesRes.error.message);
@@ -214,5 +254,16 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
         DetalheJornadaVisual & { registro_horas_id: string }
       >,
       feriados: (feriadosRes.data as unknown as Array<{ data: string }>).map((item) => item.data),
+      vigenciasRegime: regimes.map((vigencia) => ({
+        funcionarioId: vigencia.funcionario_id,
+        regime: vigencia.regime,
+        vigenciaInicio: vigencia.vigencia_inicio,
+        vigenciaFim: vigencia.vigencia_fim,
+      })),
+      alocacoesReferenciaRegime: alocacoesReferenciaRegime.map((alocacao) => ({
+        funcionarioId: alocacao.funcionario_id,
+        obraId: alocacao.obra_id,
+        data: alocacao.data,
+      })),
     });
   });

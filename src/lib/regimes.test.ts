@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   CUSTO_ALOJADO_DIA_CORRIDO,
   CUSTO_LOCAL_DIA_TRABALHADO,
+  MARCO_INICIAL_REGIMES,
   apurarCustosRegime,
   regimeNaData,
   ultimaAlocacaoNaData,
+  vigenciaInicialOuMudanca,
   type RegimeVigencia,
 } from "./regimes.ts";
 
@@ -97,4 +99,51 @@ test("troca de regime respeita a vigencia de cada data", () => {
   ];
   assert.equal(regimeNaData(vigencias, funcionarioId, "2026-08-07")?.regime, "local");
   assert.equal(regimeNaData(vigencias, funcionarioId, "2026-08-08")?.regime, "alojado");
+});
+
+test("nenhum regime gera custo antes do marco oficial de 25/07/2026", () => {
+  const resultado = apurarCustosRegime({
+    vigencias: [
+      { funcionarioId, regime: "local", vigenciaInicio: "2026-01-01", vigenciaFim: null },
+    ],
+    alocacoes: [],
+    diasTrabalhados: [
+      { funcionarioId, obraId: obraA, data: "2026-07-24" },
+      { funcionarioId, obraId: obraA, data: "2026-07-25" },
+    ],
+    inicio: "2026-07-01",
+    fim: "2026-07-25",
+  });
+  assert.deepEqual(
+    resultado.lancamentos.map((item) => item.data),
+    ["2026-07-25"],
+  );
+});
+
+test("admissao e desligamento limitam os dias corridos de Alojado", () => {
+  const resultado = apurarCustosRegime({
+    vigencias: [
+      {
+        funcionarioId,
+        regime: "alojado",
+        vigenciaInicio: MARCO_INICIAL_REGIMES,
+        vigenciaFim: null,
+      },
+    ],
+    alocacoes: [{ funcionarioId, obraId: obraA, data: "2026-08-01" }],
+    diasTrabalhados: [],
+    inicio: "2026-08-01",
+    fim: "2026-08-12",
+    funcionarioElegivelNaData: (_id, data) => data >= "2026-08-08" && data <= "2026-08-10",
+  });
+  assert.deepEqual(
+    resultado.lancamentos.map((item) => item.data),
+    ["2026-08-08", "2026-08-09", "2026-08-10"],
+  );
+});
+
+test("classificacao inicial usa o marco e mudanca futura usa a data informada", () => {
+  assert.equal(vigenciaInicialOuMudanca(null, ""), MARCO_INICIAL_REGIMES);
+  assert.equal(vigenciaInicialOuMudanca("local", "2026-09-15"), "2026-09-15");
+  assert.equal(vigenciaInicialOuMudanca("alojado", "2026-10-01"), "2026-10-01");
 });

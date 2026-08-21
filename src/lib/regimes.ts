@@ -17,6 +17,7 @@ export type LancamentoCustoRegime = {
 
 export const CUSTO_LOCAL_DIA_TRABALHADO = 45;
 export const CUSTO_ALOJADO_DIA_CORRIDO = 77;
+export const MARCO_INICIAL_REGIMES = "2026-07-25";
 
 export function regimeNaData(vigencias: RegimeVigencia[], funcionarioId: string, data: string) {
   return vigencias.find(
@@ -65,6 +66,8 @@ export function apurarCustosRegime(input: {
   let existeAlojadoSemCc = false;
 
   for (const dia of input.diasTrabalhados) {
+    if (dia.data < MARCO_INICIAL_REGIMES || dia.data < input.inicio || dia.data > input.fim)
+      continue;
     const regime = regimeNaData(input.vigencias, dia.funcionarioId, dia.data)?.regime;
     if (!regime) {
       existeRegimeNaoInformado = true;
@@ -80,6 +83,7 @@ export function apurarCustosRegime(input: {
   const funcionarios = new Set(input.vigencias.map((vigencia) => vigencia.funcionarioId));
   for (const funcionarioId of funcionarios) {
     for (const data of datasISOEntre(input.inicio, input.fim)) {
+      if (data < MARCO_INICIAL_REGIMES) continue;
       if (input.funcionarioElegivelNaData?.(funcionarioId, data) === false) continue;
       if (regimeNaData(input.vigencias, funcionarioId, data)?.regime !== "alojado") continue;
       const referencia = ultimaAlocacaoNaData(input.alocacoes, funcionarioId, data);
@@ -94,4 +98,8 @@ export function apurarCustosRegime(input: {
     }
   }
   return { lancamentos, existeRegimeNaoInformado, existeAlojadoSemCc };
+}
+
+export function vigenciaInicialOuMudanca(regimeAtual: Regime | null, dataMudanca: string) {
+  return regimeAtual == null ? MARCO_INICIAL_REGIMES : dataMudanca;
 }
