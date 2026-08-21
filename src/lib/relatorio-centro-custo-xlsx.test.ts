@@ -79,6 +79,20 @@ test("resumo preserva centro, competência e período 25→24", () => {
   assert.equal(resumo[3][1], "25/07/2026 a 24/08/2026");
 });
 
+test("Excel apresenta custos financeiros como refeição e preserva a coluna operacional Regime", () => {
+  const { resumo, detalhe } = sheets();
+  assert.deepEqual(
+    resumo.slice(12, 15).map((linha) => linha[0]),
+    ["Custo Refeição Local", "Custo Refeição Alojado", "Custo Refeição"],
+  );
+  assert.equal(detalhe[0][8], "Regime");
+  assert.deepEqual(detalhe[0].slice(18, 21), [
+    "Custo Refeição Local",
+    "Custo Refeição Alojado",
+    "Custo Refeição",
+  ]);
+});
+
 test("KPIs financeiros e quantitativos do modal permanecem numéricos", () => {
   const { resumo } = sheets();
   for (const index of [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])

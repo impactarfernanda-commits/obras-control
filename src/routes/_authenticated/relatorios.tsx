@@ -1085,8 +1085,8 @@ function RelatoriosPage() {
                   ["Funcionários", String(centroDetalhe.funcs)],
                   ["Dias alocados — soma da equipe", String(centroDetalhe.dias)],
                   ["Custo das horas extras", fmtBRL(centroDetalhe.custoHE)],
-                  ["Regime Local", fmtBRL(centroDetalhe.custoRegimeLocal)],
-                  ["Regime Alojado", fmtBRL(centroDetalhe.custoRegimeAlojado)],
+                  ["Refeição Local", fmtBRL(centroDetalhe.custoRegimeLocal)],
+                  ["Refeição Alojado", fmtBRL(centroDetalhe.custoRegimeAlojado)],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">{label}</div>
@@ -1110,7 +1110,7 @@ function RelatoriosPage() {
                       <TableHead className="text-right">HE 100%</TableHead>
                       <TableHead className="text-right">Custo base</TableHead>
                       <TableHead className="text-right">Custo HE</TableHead>
-                      <TableHead className="text-right">Custo Regime</TableHead>
+                      <TableHead className="text-right">Custo Refeição</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>

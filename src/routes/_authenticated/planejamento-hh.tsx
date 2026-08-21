@@ -395,8 +395,8 @@ function Resumo({
 }) {
   const labels: Record<string, string> = {
     horas_trabalhadas: "Horas trabalhadas",
-    regime_local: "Regime Local — dias trabalhados",
-    regime_alojado: "Regime Alojado — dias corridos",
+    regime_local: "Refeição Local — dias trabalhados",
+    regime_alojado: "Refeição Alojado — dias corridos",
     ferias: "Férias",
     folga_campo: "Folga de campo",
     atestado: "Atestado",

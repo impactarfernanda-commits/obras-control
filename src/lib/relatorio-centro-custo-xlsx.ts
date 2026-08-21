@@ -75,9 +75,9 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     ["Dias alocados — soma da equipe", centro.dias],
     ["Custo das horas extras", centro.custoHE],
     ["Custo do adicional noturno", centro.custoAdicionalNoturno],
-    ["Custo Regime Local", centro.custoRegimeLocal],
-    ["Custo Regime Alojado", centro.custoRegimeAlojado],
-    ["Custo Regime", centro.custoRegimeLocal + centro.custoRegimeAlojado],
+    ["Custo Refeição Local", centro.custoRegimeLocal],
+    ["Custo Refeição Alojado", centro.custoRegimeAlojado],
+    ["Custo Refeição", centro.custoRegimeLocal + centro.custoRegimeAlojado],
   ]);
   resumo["!cols"] = [{ wch: 34 }, { wch: 35 }];
   aplicarFormato(resumo, { inicio: 4, fim: 8 }, [1], FORMATO_MOEDA);
@@ -102,9 +102,9 @@ export function buildCostCenterWorkbook(input: CostCenterWorkbookInput) {
     "Custo base",
     "Custo HE",
     "Custo adicional noturno",
-    "Custo Regime Local",
-    "Custo Regime Alojado",
-    "Custo Regime",
+    "Custo Refeição Local",
+    "Custo Refeição Alojado",
+    "Custo Refeição",
     "Total",
   ];
   const linhas = centro.linhas.map((linha) => [

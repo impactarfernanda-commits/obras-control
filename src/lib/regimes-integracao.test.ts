@@ -72,12 +72,14 @@ test("relatorio de CC integra fonte, calculo, cards, tabela e Excel", () => {
   assert.match(composicao, /apurarCustosRegime/);
   assert.match(composicao, /custoRegimeLocal/);
   assert.match(composicao, /custoRegimeAlojado/);
-  assert.match(telaRelatorios, /Regime Local/);
-  assert.match(telaRelatorios, /Regime Alojado/);
-  assert.match(telaRelatorios, /Custo Regime/);
-  assert.match(excel, /Custo Regime Local/);
-  assert.match(excel, /Custo Regime Alojado/);
-  assert.match(excel, /Custo Regime/);
+  assert.match(telaRelatorios, /Refeição Local/);
+  assert.match(telaRelatorios, /Refeição Alojado/);
+  assert.match(telaRelatorios, /Custo Refeição/);
+  assert.match(excel, /Custo Refeição Local/);
+  assert.match(excel, /Custo Refeição Alojado/);
+  assert.match(excel, /Custo Refeição/);
+  assert.doesNotMatch(telaRelatorios, /Custo Regime/);
+  assert.doesNotMatch(excel, /Custo Regime/);
 });
 
 test("apuracao soma custos de regime e alerta ausencia", () => {
