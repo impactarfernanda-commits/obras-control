@@ -1,14 +1,23 @@
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy } from "lucide-react";
+import { Copy, Pencil, RotateCcw, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { formatarDataCopia, logErroCopiaDia, type ResumoCopiaDia } from "@/lib/copiar-dia-anterior";
+import {
+  formatarDataCopia,
+  itensSelecionadosCopia,
+  logErroCopiaDia,
+  totalNaoCopiar,
+  totalSelecionadosCopia,
+  type JornadaCopiaRascunho,
+  type ResumoCopiaDia,
+} from "@/lib/copiar-dia-anterior";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularCompetencia } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
+import { exigeJustificativaExtras, justificativaExtrasValida } from "@/lib/extras-justificativa";
 import { categoriaEhAjudante, type EspecialidadeAjudante } from "@/lib/especialidade-ajudante";
 import {
   especialidadeNovaAlocacao,
@@ -57,6 +66,10 @@ export function CopiarDiaAnteriorDialog({
   const hoje = dataLocalHoje();
   const [destino, setDestino] = useState(hoje);
   const [previa, setPrevia] = useState<ResumoCopiaResolvido | null>(null);
+  const [rascunhos, setRascunhos] = useState<Record<string, JornadaCopiaRascunho>>({});
+  const [funcoes, setFuncoes] = useState<Record<string, string | null>>({});
+  const [feriados, setFeriados] = useState<Set<string>>(new Set());
+  const [editandoId, setEditandoId] = useState<string | null>(null);
   const [escolhas, setEscolhas] = useState<Record<string, EspecialidadeAjudante>>({});
   const [carregando, setCarregando] = useState(false);
   const confirmacaoEmAndamento = useRef(false);
@@ -80,7 +93,14 @@ export function CopiarDiaAnteriorDialog({
         return;
       }
       const competenciaDestino = calcularCompetencia(destino);
-      const [resumoResult, origemResult, historicoResult, funcionariosResult] = await Promise.all([
+      const [
+        resumoResult,
+        origemResult,
+        registrosOrigemResult,
+        historicoResult,
+        funcionariosResult,
+        feriadosResult,
+      ] = await Promise.all([
         supabase.rpc(
           "obras_copiar_dia_anterior" as never,
           {
@@ -92,9 +112,17 @@ export function CopiarDiaAnteriorDialog({
         ),
         supabase
           .from("alocacoes")
-          .select("funcionario_id, obra_id, data, especialidade_ajudante")
+          .select(
+            "funcionario_id, obra_id, data, especialidade_ajudante, hora_entrada, hora_saida, intervalo_padrao_minutos",
+          )
           .eq("obra_id", obraId)
           .eq("data", origem.data),
+        supabase
+          .from("registros_horas")
+          .select("funcionario_id,horas_normais,horas_extras,justificativa_extras,observacoes")
+          .eq("obra_id", obraId)
+          .eq("data", origem.data)
+          .eq("tipo_registro", "horas"),
         supabase
           .from("alocacoes")
           .select("funcionario_id, obra_id, data, especialidade_ajudante")
@@ -103,11 +131,17 @@ export function CopiarDiaAnteriorDialog({
           .lt("data", destino)
           .not("especialidade_ajudante", "is", null),
         supabase.rpc("obras_control_funcionarios_safe"),
+        supabase
+          .from("feriados_obras_control" as never)
+          .select("data" as never)
+          .eq("ativo" as never, true),
       ]);
       if (resumoResult.error) throw resumoResult.error;
       if (origemResult.error) throw origemResult.error;
+      if (registrosOrigemResult.error) throw registrosOrigemResult.error;
       if (historicoResult.error) throw historicoResult.error;
       if (funcionariosResult.error) throw funcionariosResult.error;
+      if (feriadosResult.error) throw feriadosResult.error;
       const resumo = resumoResult.data as unknown as ResumoCopiaDia;
       const categorias = new Map(
         (
@@ -117,12 +151,59 @@ export function CopiarDiaAnteriorDialog({
       const origens = new Map(
         (origemResult.data ?? []).map((alocacao) => [alocacao.funcionario_id, alocacao]),
       );
+      const registrosOrigem = new Map(
+        (registrosOrigemResult.data ?? []).map((registro) => [registro.funcionario_id, registro]),
+      );
+      const feriadosPrevia = new Set(
+        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
+      );
+      const funcoesPrevia = Object.fromEntries(categorias);
+      const rascunhosPrevia: Record<string, JornadaCopiaRascunho> = {};
       setEscolhas({});
-      setPrevia({
+      setEditandoId(null);
+      const previaResolvida: ResumoCopiaResolvido = {
         ...resumo,
         itens: resumo.itens.map((item) => {
           const ajudante = categoriaEhAjudante(categorias.get(item.funcionario_id));
           const alocacaoOrigem = origens.get(item.funcionario_id);
+          const registroOrigem = registrosOrigem.get(item.funcionario_id);
+          if (item.status === "adicionar") {
+            const horaEntrada = alocacaoOrigem?.hora_entrada?.slice(0, 5) ?? "07:00";
+            const intervaloMinutos = alocacaoOrigem?.intervalo_padrao_minutos ?? 60;
+            const totalLegado =
+              Number(registroOrigem?.horas_normais ?? 0) +
+              Number(registroOrigem?.horas_extras ?? 0);
+            const minutosSaida =
+              (Number(horaEntrada.slice(0, 2)) * 60 +
+                Number(horaEntrada.slice(3, 5)) +
+                Math.round(totalLegado * 60) +
+                intervaloMinutos) %
+              1440;
+            const horaSaida =
+              alocacaoOrigem?.hora_saida?.slice(0, 5) ??
+              `${String(Math.floor(minutosSaida / 60)).padStart(2, "0")}:${String(minutosSaida % 60).padStart(2, "0")}`;
+            const detalhe = calcularJornadaDetalhada({
+              data: destino,
+              horaEntrada,
+              horaSaida,
+              intervaloMinutos,
+              funcao: categorias.get(item.funcionario_id),
+              feriados: feriadosPrevia,
+            });
+            rascunhosPrevia[item.funcionario_id] = {
+              funcionarioId: item.funcionario_id,
+              incluirNaCopia: true,
+              horaEntrada,
+              horaSaida,
+              intervaloMinutos,
+              horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
+              horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
+              justificativa: registroOrigem?.justificativa_extras ?? null,
+              observacoes: registroOrigem?.observacoes ?? null,
+              detalhe,
+              ajustada: false,
+            };
+          }
           return {
             ...item,
             ajudante,
@@ -138,7 +219,11 @@ export function CopiarDiaAnteriorDialog({
               : null,
           };
         }),
-      });
+      };
+      setFuncoes(funcoesPrevia);
+      setFeriados(feriadosPrevia);
+      setRascunhos(rascunhosPrevia);
+      setPrevia(previaResolvida);
     } catch (error) {
       logErroCopiaDia("previa", error);
       toast.error((error as { message?: string }).message ?? "Erro ao preparar a cópia");
@@ -147,9 +232,52 @@ export function CopiarDiaAnteriorDialog({
     }
   }
 
+  function atualizarJornadaRascunho(
+    funcionarioId: string,
+    alteracao: Partial<
+      Pick<
+        JornadaCopiaRascunho,
+        "horaEntrada" | "horaSaida" | "intervaloMinutos" | "justificativa" | "observacoes"
+      >
+    >,
+  ) {
+    setRascunhos((atuais) => {
+      const atual = atuais[funcionarioId];
+      if (!atual || !previa) return atuais;
+      const proximo = { ...atual, ...alteracao };
+      const detalhe = calcularJornadaDetalhada({
+        data: previa.destino_data,
+        horaEntrada: proximo.horaEntrada,
+        horaSaida: proximo.horaSaida,
+        intervaloMinutos: proximo.intervaloMinutos,
+        funcao: funcoes[funcionarioId],
+        feriados,
+      });
+      return {
+        ...atuais,
+        [funcionarioId]: {
+          ...proximo,
+          horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
+          horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
+          detalhe,
+          ajustada: true,
+        },
+      };
+    });
+  }
+
+  function definirInclusao(funcionarioId: string, incluirNaCopia: boolean) {
+    setRascunhos((atuais) => ({
+      ...atuais,
+      [funcionarioId]: { ...atuais[funcionarioId], incluirNaCopia },
+    }));
+    if (!incluirNaCopia) setEditandoId((atual) => (atual === funcionarioId ? null : atual));
+  }
+
   async function confirmar() {
     if (!previa || confirmacaoEmAndamento.current) return;
-    const pendentes = funcionariosAjudantesSemEspecialidade(previa.itens, escolhas);
+    const candidatos = itensSelecionadosCopia(previa.itens, rascunhos);
+    const pendentes = funcionariosAjudantesSemEspecialidade(candidatos, escolhas);
     if (pendentes.length > 0) {
       toast.error(`Informe a atuação de: ${pendentes.map(({ nome }) => nome).join(", ")}.`);
       return;
@@ -158,16 +286,8 @@ export function CopiarDiaAnteriorDialog({
     setCarregando(true);
     try {
       validarDataLancamento(previa.destino_data, "alocacao");
-      const candidatos = previa.itens.filter(({ status }) => status === "adicionar");
       const ids = candidatos.map(({ funcionario_id }) => funcionario_id);
-      const [
-        alocacoesDestino,
-        registrosDestino,
-        alocacoesOrigem,
-        registrosOrigem,
-        funcionarios,
-        feriadosResult,
-      ] = await Promise.all([
+      const [alocacoesDestino, registrosDestino] = await Promise.all([
         supabase
           .from("alocacoes")
           .select("funcionario_id")
@@ -180,91 +300,40 @@ export function CopiarDiaAnteriorDialog({
           .eq("obra_id", obraId)
           .eq("data", previa.destino_data)
           .in("funcionario_id", ids),
-        supabase
-          .from("alocacoes")
-          .select("funcionario_id,hora_entrada,hora_saida,intervalo_padrao_minutos")
-          .eq("obra_id", obraId)
-          .eq("data", previa.origem_data)
-          .in("funcionario_id", ids),
-        supabase
-          .from("registros_horas")
-          .select("funcionario_id,horas_normais,horas_extras,justificativa_extras,observacoes")
-          .eq("obra_id", obraId)
-          .eq("data", previa.origem_data)
-          .eq("tipo_registro", "horas")
-          .in("funcionario_id", ids),
-        supabase.rpc("obras_control_funcionarios_safe"),
-        supabase
-          .from("feriados_obras_control" as never)
-          .select("data" as never)
-          .eq("ativo" as never, true),
       ]);
-      for (const resultado of [
-        alocacoesDestino,
-        registrosDestino,
-        alocacoesOrigem,
-        registrosOrigem,
-        funcionarios,
-        feriadosResult,
-      ])
+      for (const resultado of [alocacoesDestino, registrosDestino])
         if (resultado.error) throw resultado.error;
       const ocupados = new Set([
         ...(alocacoesDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
         ...(registrosDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
       ]);
       const alvos = candidatos.filter(({ funcionario_id }) => !ocupados.has(funcionario_id));
-      const origemPorFuncionario = new Map(
-        (alocacoesOrigem.data ?? []).map((item) => [item.funcionario_id, item]),
-      );
-      const registroPorFuncionario = new Map(
-        (registrosOrigem.data ?? []).map((item) => [item.funcionario_id, item]),
-      );
-      const categoriaPorFuncionario = new Map(
-        (funcionarios.data as unknown as Array<{ id: string; categoria_mo: string | null }>).map(
-          (item) => [item.id, item.categoria_mo],
-        ),
-      );
-      const feriados = new Set(
-        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
-      );
       const itens = alvos.map((item) => {
-        const origem = origemPorFuncionario.get(item.funcionario_id);
-        const registro = registroPorFuncionario.get(item.funcionario_id);
-        const horaEntrada = origem?.hora_entrada?.slice(0, 5) ?? "07:00";
-        const intervaloMinutos = origem?.intervalo_padrao_minutos ?? 60;
-        const totalLegado =
-          Number(registro?.horas_normais ?? 0) + Number(registro?.horas_extras ?? 0);
-        const minutosSaida =
-          (Number(horaEntrada.slice(0, 2)) * 60 +
-            Number(horaEntrada.slice(3, 5)) +
-            Math.round(totalLegado * 60) +
-            intervaloMinutos) %
-          1440;
-        const horaSaida =
-          origem?.hora_saida?.slice(0, 5) ??
-          `${String(Math.floor(minutosSaida / 60)).padStart(2, "0")}:${String(minutosSaida % 60).padStart(2, "0")}`;
-        const detalhe = calcularJornadaDetalhada({
-          data: previa.destino_data,
-          horaEntrada,
-          horaSaida,
-          intervaloMinutos,
-          funcao: categoriaPorFuncionario.get(item.funcionario_id),
-          feriados,
-        });
+        const rascunho = rascunhos[item.funcionario_id];
+        if (!rascunho) throw new Error(`${item.nome}: jornada da prévia não encontrada.`);
+        const { detalhe } = rascunho;
         if (!detalhe.valido) throw new Error(`${item.nome}: ${detalhe.erro}`);
-        if (detalhe.exigeJustificativa && !registro?.justificativa_extras?.trim())
-          throw new Error(`${item.nome}: a jornada copiada exige justificativa.`);
+        if (
+          !justificativaExtrasValida(
+            {
+              horasExtras: rascunho.horasExtras,
+              totalTrabalhadoMinutos: detalhe.totalTrabalhadoMinutos,
+            },
+            rascunho.justificativa,
+          )
+        )
+          throw new Error(`${item.nome}: a jornada copiada exige justificativa de hora extra.`);
         return {
           funcionarioId: item.funcionario_id,
           obraId,
           data: previa.destino_data,
-          horaEntrada,
-          horaSaida,
-          intervaloMinutos,
-          horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
-          horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
-          justificativa: registro?.justificativa_extras ?? null,
-          observacoes: registro?.observacoes ?? null,
+          horaEntrada: rascunho.horaEntrada,
+          horaSaida: rascunho.horaSaida,
+          intervaloMinutos: rascunho.intervaloMinutos,
+          horasNormais: rascunho.horasNormais,
+          horasExtras: rascunho.horasExtras,
+          justificativa: rascunho.justificativa?.trim() || null,
+          observacoes: rascunho.observacoes?.trim() || null,
           especialidadeAjudante: especialidadeNovaAlocacao({
             ajudante: item.ajudante,
             resolucao: item.resolucao,
@@ -309,12 +378,20 @@ export function CopiarDiaAnteriorDialog({
     }
   }
 
+  const selecionados = previa ? totalSelecionadosCopia(previa.itens, rascunhos) : 0;
+  const naoCopiar = previa ? totalNaoCopiar(previa.itens, rascunhos) : 0;
+
   return (
     <Dialog
       open={open}
       onOpenChange={(value) => {
         setOpen(value);
-        if (!value) setPrevia(null);
+        if (!value) {
+          setPrevia(null);
+          setRascunhos({});
+          setEscolhas({});
+          setEditandoId(null);
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -338,6 +415,8 @@ export function CopiarDiaAnteriorDialog({
               onChange={(e) => {
                 setDestino(e.target.value);
                 setPrevia(null);
+                setRascunhos({});
+                setEditandoId(null);
               }}
             />
           </div>
@@ -351,7 +430,7 @@ export function CopiarDiaAnteriorDialog({
                 Copiar equipe de {formatarDataCopia(previa.origem_data)} para{" "}
                 {formatarDataCopia(previa.destino_data)}
               </p>
-              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
                 <div className="rounded border p-2">
                   Equipe origem
                   <br />
@@ -368,9 +447,14 @@ export function CopiarDiaAnteriorDialog({
                   <strong>{previa.total_inelegiveis}</strong>
                 </div>
                 <div className="rounded border p-2">
+                  Não copiar
+                  <br />
+                  <strong>{naoCopiar}</strong>
+                </div>
+                <div className="rounded border p-2">
                   Serão adicionados
                   <br />
-                  <strong>{previa.total_adicionar}</strong>
+                  <strong>{selecionados}</strong>
                 </div>
               </div>
               {previa.total_suprimidos > 0 && (
@@ -382,54 +466,189 @@ export function CopiarDiaAnteriorDialog({
                   .
                 </p>
               )}
-              <ul className="max-h-64 divide-y overflow-y-auto rounded border">
-                {previa.itens.map((item) => (
-                  <li
-                    key={item.funcionario_id}
-                    className="flex items-center justify-between gap-3 p-2 text-sm"
-                  >
-                    <div>
-                      <span>{item.nome}</span>
-                      {item.status === "adicionar" && item.ajudante && (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Atuação:{" "}
-                          {item.resolucao?.estado === "resolvida" ? (
-                            <Badge variant="outline">
-                              {item.resolucao.especialidade === "civil" ? "Civil" : "Montagem"}
+              <ul className="max-h-96 divide-y overflow-y-auto rounded border">
+                {previa.itens.map((item) => {
+                  const rascunho = rascunhos[item.funcionario_id];
+                  const selecionado = rascunho?.incluirNaCopia ?? false;
+                  const editando = editandoId === item.funcionario_id;
+                  const exigeJustificativa = rascunho
+                    ? exigeJustificativaExtras({
+                        horasExtras: rascunho.horasExtras,
+                        totalTrabalhadoMinutos: rascunho.detalhe.totalTrabalhadoMinutos,
+                      })
+                    : false;
+                  return (
+                    <li key={item.funcionario_id} className="space-y-2 p-2 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span>{item.nome}</span>
+                          {rascunho?.ajustada && selecionado && (
+                            <Badge variant="outline" className="ml-2">
+                              Jornada ajustada
                             </Badge>
+                          )}
+                          {item.status === "adicionar" && item.ajudante && selecionado && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Atuação:{" "}
+                              {item.resolucao?.estado === "resolvida" ? (
+                                <Badge variant="outline">
+                                  {item.resolucao.especialidade === "civil" ? "Civil" : "Montagem"}
+                                </Badge>
+                              ) : (
+                                <Select
+                                  value={escolhas[item.funcionario_id] ?? ""}
+                                  onValueChange={(value: EspecialidadeAjudante) =>
+                                    setEscolhas((atuais) => ({
+                                      ...atuais,
+                                      [item.funcionario_id]: value,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger className="mt-1 h-8 w-36">
+                                    <SelectValue placeholder="A definir" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="civil">Civil</SelectItem>
+                                    <SelectItem value="montagem">Montagem</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <Badge
+                          variant={
+                            item.status === "adicionar" && selecionado ? "default" : "secondary"
+                          }
+                        >
+                          {item.status === "adicionar"
+                            ? selecionado
+                              ? "Será adicionado"
+                              : "Não será copiado"
+                            : item.status === "excluido_destino"
+                              ? "Excluído no destino — não será recriado"
+                              : item.status === "inelegivel"
+                                ? item.motivo || "Não será copiado — desligado/inelegível"
+                                : "Já existe no destino"}
+                        </Badge>
+                      </div>
+                      {item.status === "adicionar" && rascunho && (
+                        <div className="flex flex-wrap gap-2">
+                          {selecionado ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditandoId(editando ? null : item.funcionario_id)}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Editar jornada
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => definirInclusao(item.funcionario_id, false)}
+                              >
+                                <UserMinus className="mr-1 h-3.5 w-3.5" />
+                                Não copiar
+                              </Button>
+                            </>
                           ) : (
-                            <Select
-                              value={escolhas[item.funcionario_id] ?? ""}
-                              onValueChange={(value: EspecialidadeAjudante) =>
-                                setEscolhas((atuais) => ({
-                                  ...atuais,
-                                  [item.funcionario_id]: value,
-                                }))
-                              }
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => definirInclusao(item.funcionario_id, true)}
                             >
-                              <SelectTrigger className="mt-1 h-8 w-36">
-                                <SelectValue placeholder="A definir" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="civil">Civil</SelectItem>
-                                <SelectItem value="montagem">Montagem</SelectItem>
-                              </SelectContent>
-                            </Select>
+                              <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                              Restaurar
+                            </Button>
                           )}
                         </div>
                       )}
-                    </div>
-                    <Badge variant={item.status === "adicionar" ? "default" : "secondary"}>
-                      {item.status === "adicionar"
-                        ? "Será adicionado"
-                        : item.status === "excluido_destino"
-                          ? "Excluído no destino — não será recriado"
-                          : item.status === "inelegivel"
-                            ? "Não será copiado — desligado/inelegível"
-                            : "Já existe no destino"}
-                    </Badge>
-                  </li>
-                ))}
+                      {item.status === "adicionar" && rascunho && selecionado && editando && (
+                        <div className="space-y-3 rounded-md bg-muted/40 p-3">
+                          <div className="grid grid-cols-3 gap-2">
+                            <label className="space-y-1 text-xs">
+                              <span>Entrada</span>
+                              <Input
+                                type="time"
+                                value={rascunho.horaEntrada}
+                                onChange={(event) =>
+                                  atualizarJornadaRascunho(item.funcionario_id, {
+                                    horaEntrada: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1 text-xs">
+                              <span>Saída</span>
+                              <Input
+                                type="time"
+                                value={rascunho.horaSaida}
+                                onChange={(event) =>
+                                  atualizarJornadaRascunho(item.funcionario_id, {
+                                    horaSaida: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1 text-xs">
+                              <span>Intervalo (min)</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={rascunho.intervaloMinutos}
+                                onChange={(event) =>
+                                  atualizarJornadaRascunho(item.funcionario_id, {
+                                    intervaloMinutos: Number(event.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                          {rascunho.detalhe.valido ? (
+                            <p className="text-xs text-muted-foreground">
+                              Normais: {rascunho.horasNormais.toFixed(2)}h · HE50:{" "}
+                              {(rascunho.detalhe.minutosHe50 / 60).toFixed(2)}h · HE100:{" "}
+                              {(rascunho.detalhe.minutosHe100 / 60).toFixed(2)}h · Noturnas:{" "}
+                              {(rascunho.detalhe.minutosNoturnosRemuneraveis / 60).toFixed(2)}h
+                            </p>
+                          ) : (
+                            <p className="text-xs text-destructive">{rascunho.detalhe.erro}</p>
+                          )}
+                          {exigeJustificativa && (
+                            <label className="block space-y-1 text-xs">
+                              <span>Justificativa de hora extra</span>
+                              <Input
+                                value={rascunho.justificativa ?? ""}
+                                onChange={(event) =>
+                                  atualizarJornadaRascunho(item.funcionario_id, {
+                                    justificativa: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                          <label className="block space-y-1 text-xs">
+                            <span>Observações</span>
+                            <Input
+                              value={rascunho.observacoes ?? ""}
+                              onChange={(event) =>
+                                atualizarJornadaRascunho(item.funcionario_id, {
+                                  observacoes: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}
@@ -439,8 +658,8 @@ export function CopiarDiaAnteriorDialog({
             Cancelar
           </Button>
           {previa && (
-            <Button onClick={confirmar} disabled={carregando || previa.total_adicionar === 0}>
-              {carregando ? "Copiando..." : `Copiar ${previa.total_adicionar} funcionários`}
+            <Button onClick={confirmar} disabled={carregando || selecionados === 0}>
+              {carregando ? "Copiando..." : `Copiar ${selecionados} funcionários`}
             </Button>
           )}
         </DialogFooter>

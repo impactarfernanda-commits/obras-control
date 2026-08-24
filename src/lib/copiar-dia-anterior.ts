@@ -1,8 +1,24 @@
+import type { CalculoJornada } from "./jornada-horas";
+
 export type ItemCopiaDia = {
   funcionario_id: string;
   nome: string;
   status: "adicionar" | "copiado" | "ja_existente" | "inelegivel" | "excluido_destino";
   motivo: string | null;
+};
+
+export type JornadaCopiaRascunho = {
+  funcionarioId: string;
+  incluirNaCopia: boolean;
+  horaEntrada: string;
+  horaSaida: string;
+  intervaloMinutos: number;
+  horasNormais: number;
+  horasExtras: number;
+  justificativa: string | null;
+  observacoes: string | null;
+  detalhe: CalculoJornada;
+  ajustada: boolean;
 };
 
 export type ResumoCopiaDia = {
@@ -23,6 +39,33 @@ export function ultimaDataAnterior(datas: readonly string[], destino: string) {
 
 export function formatarDataCopia(data: string) {
   return new Date(`${data}T00:00:00`).toLocaleDateString("pt-BR");
+}
+
+export function totalSelecionadosCopia(
+  itens: readonly ItemCopiaDia[],
+  rascunhos: Readonly<Record<string, JornadaCopiaRascunho>>,
+) {
+  return itens.filter(
+    (item) => item.status === "adicionar" && rascunhos[item.funcionario_id]?.incluirNaCopia,
+  ).length;
+}
+
+export function totalNaoCopiar(
+  itens: readonly ItemCopiaDia[],
+  rascunhos: Readonly<Record<string, JornadaCopiaRascunho>>,
+) {
+  return itens.filter(
+    (item) => item.status === "adicionar" && !rascunhos[item.funcionario_id]?.incluirNaCopia,
+  ).length;
+}
+
+export function itensSelecionadosCopia<T extends ItemCopiaDia>(
+  itens: readonly T[],
+  rascunhos: Readonly<Record<string, JornadaCopiaRascunho>>,
+) {
+  return itens.filter(
+    (item) => item.status === "adicionar" && rascunhos[item.funcionario_id]?.incluirNaCopia,
+  );
 }
 
 export function logErroCopiaDia(etapa: "previa" | "aplicacao", error: unknown) {
