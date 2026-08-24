@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canDeactivateEmployee,
+  canDeleteDailyAllocation,
   canEditEmployeeTerminationDate,
   hasAnyRole,
   highestRole,
@@ -10,6 +11,16 @@ import {
   isTransientReadError,
   shouldRetryRead,
 } from "./access-control.ts";
+
+test("exclusão diária segue exatamente autoria ou papel gerente/diretor", () => {
+  assert.equal(canDeleteDailyAllocation("assistente", "u1", "u1", "u1"), true);
+  assert.equal(canDeleteDailyAllocation("supervisor", "u1", "u1", null), true);
+  assert.equal(canDeleteDailyAllocation("coordenador", "u1", "u2", "u2"), false);
+  assert.equal(canDeleteDailyAllocation("assistente", "u1", "u1", "u2"), false);
+  assert.equal(canDeleteDailyAllocation("gerente", "u1", "u2", "u2"), true);
+  assert.equal(canDeleteDailyAllocation("diretor", "u1", "u2", "u3"), true);
+  assert.equal(canDeleteDailyAllocation(null, undefined, "u1", "u1"), false);
+});
 
 test("todos os perfis internos podem desligar somente funcionario ativo", () => {
   for (const role of ["assistente", "supervisor", "coordenador", "gerente", "diretor"] as const) {

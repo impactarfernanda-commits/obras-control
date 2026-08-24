@@ -1,7 +1,7 @@
 export type ItemCopiaDia = {
   funcionario_id: string;
   nome: string;
-  status: "adicionar" | "copiado" | "ja_existente" | "inelegivel";
+  status: "adicionar" | "copiado" | "ja_existente" | "inelegivel" | "excluido_destino";
   motivo: string | null;
 };
 
@@ -12,6 +12,7 @@ export type ResumoCopiaDia = {
   total_copiados: number;
   total_ja_existentes: number;
   total_inelegiveis: number;
+  total_suprimidos: number;
   total_adicionar: number;
   itens: ItemCopiaDia[];
 };

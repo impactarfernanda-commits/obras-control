@@ -74,6 +74,7 @@ import { CopiarDiaAnteriorDialog } from "@/components/CopiarDiaAnteriorDialog";
 import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
 import { ImportarPlanilhaLegadoDialog } from "@/components/ImportarPlanilhaLegadoDialog";
 import { canImportarPlanilhaLegado } from "@/lib/permissoes-especiais";
+import { canDeleteDailyAllocation } from "@/lib/access-control";
 import {
   buscarConflitoAlocacao,
   criarErroConflitoAlocacao,
@@ -997,18 +998,14 @@ function AlocacoesPage() {
       data: string;
     }) => {
       await garantirCompetenciaAberta(supabase, a.data);
-      const { error } = await supabase.from("alocacoes").delete().eq("id", a.id);
+      const { error } = await supabase.rpc(
+        "obras_excluir_lancamento_dia" as never,
+        { p_alocacao_id: a.id } as never,
+      );
       if (error) throw new Error(mensagemErroCompetenciaFechada(error) ?? error.message);
-      const { error: regDelErr } = await supabase.from("registros_horas").delete().match({
-        funcionario_id: a.funcionario_id,
-        obra_id: a.obra_id,
-        data: a.data,
-      });
-      if (regDelErr)
-        throw new Error(mensagemErroCompetenciaFechada(regDelErr) ?? regDelErr.message);
     },
     onSuccess: () => {
-      toast.success("Alocação removida");
+      toast.success("Lançamento excluído");
       qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
@@ -1016,6 +1013,18 @@ function AlocacoesPage() {
     },
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao remover"),
   });
+
+  function confirmarExclusao(a: AlocRow) {
+    const dataBr = new Date(`${a.data}T00:00:00`).toLocaleDateString("pt-BR");
+    const confirmado = window.confirm(`Excluir o lançamento deste funcionário em ${dataBr}?`);
+    if (!confirmado) return;
+    deleteMutation.mutate({
+      id: a.id,
+      funcionario_id: a.funcionario_id,
+      obra_id: a.obra_id,
+      data: a.data,
+    });
+  }
 
   const editPrevia = useMemo(
     () =>
@@ -2248,6 +2257,12 @@ function AlocacoesPage() {
                                               canEditAllocationHoursByRole ||
                                               (a.created_by === user?.id &&
                                                 (!h || h.createdBy === user?.id));
+                                            const podeExcluir = canDeleteDailyAllocation(
+                                              role,
+                                              user?.id,
+                                              a.created_by,
+                                              h?.createdBy,
+                                            );
                                             const creatorName = a.created_by
                                               ? (auditUserById.get(a.created_by) ??
                                                 "Usuário não identificado")
@@ -2375,22 +2390,17 @@ function AlocacoesPage() {
                                                       onClick={() => abrirEdicao(a)}
                                                     >
                                                       <Pencil className="mr-1 h-3.5 w-3.5" />
-                                                      Editar
+                                                      Editar jornada
                                                     </Button>
                                                   )}
-                                                  {!a.registroOnly && (
+                                                  {podeExcluir && !a.registroOnly && (
                                                     <Button
                                                       size="icon"
                                                       variant="ghost"
-                                                      onClick={() =>
-                                                        deleteMutation.mutate({
-                                                          id: a.id,
-                                                          funcionario_id: a.funcionario_id,
-                                                          obra_id: a.obra_id,
-                                                          data: a.data,
-                                                        })
-                                                      }
-                                                      aria-label="Remover"
+                                                      onClick={() => confirmarExclusao(a)}
+                                                      disabled={deleteMutation.isPending}
+                                                      aria-label="Excluir lançamento"
+                                                      title="Excluir lançamento"
                                                     >
                                                       <Trash2 className="h-4 w-4 text-destructive" />
                                                     </Button>

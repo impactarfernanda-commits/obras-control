@@ -373,6 +373,15 @@ export function CopiarDiaAnteriorDialog({
                   <strong>{previa.total_adicionar}</strong>
                 </div>
               </div>
+              {previa.total_suprimidos > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {previa.total_suprimidos}{" "}
+                  {previa.total_suprimidos === 1
+                    ? "lançamento excluído foi preservado"
+                    : "lançamentos excluídos foram preservados"}
+                  .
+                </p>
+              )}
               <ul className="max-h-64 divide-y overflow-y-auto rounded border">
                 {previa.itens.map((item) => (
                   <li
@@ -413,9 +422,11 @@ export function CopiarDiaAnteriorDialog({
                     <Badge variant={item.status === "adicionar" ? "default" : "secondary"}>
                       {item.status === "adicionar"
                         ? "Será adicionado"
-                        : item.status === "inelegivel"
-                          ? "Não será copiado — desligado/inelegível"
-                          : "Já existe no destino"}
+                        : item.status === "excluido_destino"
+                          ? "Excluído no destino — não será recriado"
+                          : item.status === "inelegivel"
+                            ? "Não será copiado — desligado/inelegível"
+                            : "Já existe no destino"}
                     </Badge>
                   </li>
                 ))}

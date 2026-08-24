@@ -20,6 +20,20 @@ export function canEditEmployeeTerminationDate(role: Role | null, active: boolea
   return (role === "gerente" || role === "diretor") && !active;
 }
 
+export function canDeleteDailyAllocation(
+  role: Role | null,
+  userId: string | null | undefined,
+  allocationCreatedBy: string | null,
+  recordCreatedBy: string | null | undefined,
+): boolean {
+  if (role === "gerente" || role === "diretor") return true;
+  return Boolean(
+    userId &&
+    allocationCreatedBy === userId &&
+    (recordCreatedBy == null || recordCreatedBy === userId),
+  );
+}
+
 export function isExpectedAccessError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { status?: number; code?: string };
