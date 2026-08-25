@@ -67,6 +67,7 @@ export function montarRelatorioCentrosCusto(input: {
     obraId: string;
     data: string;
   }>;
+  alocacoesReferenciaClassificacao?: AlocacaoRelatorio[];
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
   const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
@@ -108,6 +109,7 @@ export function montarRelatorioCentrosCusto(input: {
     periodoFinal: periodo.end,
     vigenciasRegime: input.vigenciasRegime,
     alocacoesReferenciaRegime: input.alocacoesReferenciaRegime,
+    alocacoesReferenciaClassificacao: input.alocacoesReferenciaClassificacao,
   });
   return {
     competencia: input.competencia,
@@ -241,6 +243,23 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
     if (beneficiosRes.error) throw new Error(beneficiosRes.error.message);
     if (detalhesRes.error) throw new Error(detalhesRes.error.message);
     if (feriadosRes.error) throw new Error(feriadosRes.error.message);
+    const referenciasAnteriores = alocacoesReferenciaRegime.filter(
+      (referencia) => referencia.data < periodo.start,
+    );
+    const idsComReferenciaAnterior = [
+      ...new Set(referenciasAnteriores.map((referencia) => referencia.funcionario_id)),
+    ];
+    const alocacoesAnteriores = idsComReferenciaAnterior.length
+      ? await buscarTodasPaginas<AlocacaoRelatorio>((from, to) =>
+          supabaseAdmin
+            .from("alocacoes")
+            .select("funcionario_id,obra_id,data,tipo_mao_obra,especialidade_ajudante" as never)
+            .in("funcionario_id", idsComReferenciaAnterior)
+            .lt("data", periodo.start)
+            .order("data", { ascending: false })
+            .range(from, to),
+        )
+      : [];
     return montarRelatorioCentrosCusto({
       competencia: data.competencia,
       funcionarios,
@@ -265,5 +284,6 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
         obraId: alocacao.obra_id,
         data: alocacao.data,
       })),
+      alocacoesReferenciaClassificacao: [...alocacoesAnteriores, ...alocacoes],
     });
   });

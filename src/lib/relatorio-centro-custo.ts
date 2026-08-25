@@ -119,6 +119,7 @@ type Input = {
   periodoFinal?: string;
   vigenciasRegime?: readonly RegimeVigencia[];
   alocacoesReferenciaRegime?: readonly AlocacaoReferencia[];
+  alocacoesReferenciaClassificacao?: readonly AlocacaoRelatorio[];
 };
 
 function chave(funcionarioId: string, obraId: string, data: string) {
@@ -150,6 +151,18 @@ export function consolidarCustosCentros(input: Input) {
   );
   const linhas = new Map<string, AcumuladorLinha>();
   const avisos = new Set<string>();
+
+  function ultimaClassificacaoModValida(funcionario: FuncionarioRelatorio, data: string) {
+    let ultima: { data: string; tipoMod: Exclude<TipoModRelatorio, "A classificar"> } | undefined;
+    for (const alocacao of input.alocacoesReferenciaClassificacao ?? input.alocacoes) {
+      if (alocacao.funcionario_id !== funcionario.id || alocacao.data > data) continue;
+      if (input.resolverTipo(alocacao, funcionario) !== "MOD") continue;
+      const tipoMod = classificarTipoMod(funcionario.categoria_mo, alocacao.especialidade_ajudante);
+      if (tipoMod === "A classificar") continue;
+      if (!ultima || alocacao.data > ultima.data) ultima = { data: alocacao.data, tipoMod };
+    }
+    return ultima?.tipoMod;
+  }
 
   function obterLinha(
     obraId: string,
@@ -367,10 +380,14 @@ export function consolidarCustosCentros(input: Input) {
         chave(lancamento.funcionarioId, lancamento.obraId, lancamento.data),
       );
       const tipo = input.resolverTipo(alocacao, funcionario);
-      const tipoMod =
+      const tipoModDaData =
         input.segmentarMod !== false && tipo === "MOD"
           ? classificarTipoMod(funcionario.categoria_mo, alocacao?.especialidade_ajudante)
           : null;
+      const tipoMod =
+        tipoModDaData === "A classificar" && lancamento.regime === "alojado"
+          ? (ultimaClassificacaoModValida(funcionario, lancamento.data) ?? tipoModDaData)
+          : tipoModDaData;
       const linha = obterLinha(
         lancamento.obraId,
         funcionario,
