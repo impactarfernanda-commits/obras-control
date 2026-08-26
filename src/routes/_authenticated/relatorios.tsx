@@ -59,7 +59,7 @@ import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
-    <RequireRole allowed={["coordenador", "gerente", "diretor"]}>
+    <RequireRole allowed={["assistente", "supervisor", "coordenador", "gerente", "diretor"]}>
       <RelatoriosPage />
     </RequireRole>
   ),
@@ -223,6 +223,7 @@ function RelatoriosPage() {
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
     queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
+    enabled: podeVerFolha,
   });
 
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
@@ -615,7 +616,11 @@ function RelatoriosPage() {
     <div>
       <PageHeader
         title="Relatórios"
-        description="Custos consolidados de mão de obra por funcionário e por centro de custo."
+        description={
+          podeVerFolha
+            ? "Custos consolidados de mão de obra por funcionário e por centro de custo."
+            : "Pendências operacionais de funcionários sem alocação."
+        }
         actions={
           <div className="flex items-center gap-1 rounded-md border bg-card p-1">
             <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Mês anterior">
@@ -673,10 +678,10 @@ function RelatoriosPage() {
         </Card>
       )}
 
-      <Tabs defaultValue={podeVerFolha ? "funcionarios" : "obras"} className="space-y-4">
+      <Tabs defaultValue={podeVerFolha ? "funcionarios" : "sem-alocacao"} className="space-y-4">
         <TabsList>
           {podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>}
-          <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>
+          {podeVerFolha && <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>}
           <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
@@ -808,141 +813,147 @@ function RelatoriosPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="obras">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Custo de mão de obra por centro de custo — {mesLabel}{" "}
-                <span className="text-sm font-normal text-muted-foreground">({periodoLabel})</span>
-              </CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Custo proporcional: (custo mensal ÷ {diasUteis} dias úteis) × dias alocados, com
-                horas extras a 50% ou 100% e seus encargos/provisões somados quando registradas.
-              </p>
-            </CardHeader>
-            <CardContent className="p-0">
-              {loadingCentros ? (
-                <div className="space-y-2 p-4">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <>
-                  {avisosObras.length > 0 && (
-                    <Alert className="m-4">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertTitle>Avisos do calculo</AlertTitle>
-                      <AlertDescription>
-                        <ul className="list-disc space-y-1 pl-4">
-                          {avisosObras.map((aviso) => (
-                            <li key={aviso}>{aviso}</li>
-                          ))}
-                        </ul>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <div className="overflow-x-auto">
-                    <Table className="min-w-[760px]">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Centro de custo</TableHead>
-                          {segmentarMod ? (
-                            <>
-                              <TableHead className="text-right">MOD Civil</TableHead>
-                              <TableHead className="text-right">MOD Montagem</TableHead>
-                            </>
-                          ) : (
-                            <TableHead className="text-right">MOD</TableHead>
-                          )}
-                          {segmentarMod && totaisObra.modAClassificar > 0 && (
-                            <TableHead className="text-right">MOD a classificar</TableHead>
-                          )}
-                          <TableHead className="text-right">MOI</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {obrasComCusto.length === 0 ? (
+        {podeVerFolha && (
+          <TabsContent value="obras">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Custo de mão de obra por centro de custo — {mesLabel}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">
+                    ({periodoLabel})
+                  </span>
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Custo proporcional: (custo mensal ÷ {diasUteis} dias úteis) × dias alocados, com
+                  horas extras a 50% ou 100% e seus encargos/provisões somados quando registradas.
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loadingCentros ? (
+                  <div className="space-y-2 p-4">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : (
+                  <>
+                    {avisosObras.length > 0 && (
+                      <Alert className="m-4">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Avisos do calculo</AlertTitle>
+                        <AlertDescription>
+                          <ul className="list-disc space-y-1 pl-4">
+                            {avisosObras.map((aviso) => (
+                              <li key={aviso}>{aviso}</li>
+                            ))}
+                          </ul>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[760px]">
+                        <TableHeader>
                           <TableRow>
-                            <TableCell
-                              colSpan={segmentarMod && totaisObra.modAClassificar > 0 ? 6 : 5}
-                              className="py-8 text-center text-muted-foreground"
-                            >
-                              Nenhuma alocação no mês.
-                            </TableCell>
+                            <TableHead>Centro de custo</TableHead>
+                            {segmentarMod ? (
+                              <>
+                                <TableHead className="text-right">MOD Civil</TableHead>
+                                <TableHead className="text-right">MOD Montagem</TableHead>
+                              </>
+                            ) : (
+                              <TableHead className="text-right">MOD</TableHead>
+                            )}
+                            {segmentarMod && totaisObra.modAClassificar > 0 && (
+                              <TableHead className="text-right">MOD a classificar</TableHead>
+                            )}
+                            <TableHead className="text-right">MOI</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
                           </TableRow>
-                        ) : (
-                          obrasComCusto.map((o) => (
-                            <TableRow key={o.id}>
-                              <TableCell className="font-medium">
-                                <button
-                                  type="button"
-                                  className="cursor-pointer text-left hover:underline"
-                                  onClick={() => setCentroDetalheId(o.id)}
-                                >
-                                  {o.nome}
-                                </button>
-                              </TableCell>
-                              {segmentarMod ? (
-                                <>
-                                  <TableCell className="text-right">{fmtBRL(o.modCivil)}</TableCell>
-                                  <TableCell className="text-right">
-                                    {fmtBRL(o.modMontagem)}
-                                  </TableCell>
-                                </>
-                              ) : (
-                                <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
-                              )}
-                              {segmentarMod && totaisObra.modAClassificar > 0 && (
-                                <TableCell className="text-right">
-                                  {fmtBRL(o.modAClassificar)}
-                                </TableCell>
-                              )}
-                              <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
-                              <TableCell className="text-right font-semibold">
-                                {fmtBRL(o.total)}
+                        </TableHeader>
+                        <TableBody>
+                          {obrasComCusto.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={segmentarMod && totaisObra.modAClassificar > 0 ? 6 : 5}
+                                className="py-8 text-center text-muted-foreground"
+                              >
+                                Nenhuma alocação no mês.
                               </TableCell>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                      <TableFooter>
-                        <TableRow>
-                          <TableCell className="font-medium">Total geral</TableCell>
-                          {segmentarMod ? (
-                            <>
-                              <TableCell className="text-right font-medium">
-                                {fmtBRL(totaisObra.modCivil)}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                {fmtBRL(totaisObra.modMontagem)}
-                              </TableCell>
-                            </>
                           ) : (
-                            <TableCell className="text-right font-medium">
-                              {fmtBRL(totaisObra.mod)}
-                            </TableCell>
+                            obrasComCusto.map((o) => (
+                              <TableRow key={o.id}>
+                                <TableCell className="font-medium">
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer text-left hover:underline"
+                                    onClick={() => setCentroDetalheId(o.id)}
+                                  >
+                                    {o.nome}
+                                  </button>
+                                </TableCell>
+                                {segmentarMod ? (
+                                  <>
+                                    <TableCell className="text-right">
+                                      {fmtBRL(o.modCivil)}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      {fmtBRL(o.modMontagem)}
+                                    </TableCell>
+                                  </>
+                                ) : (
+                                  <TableCell className="text-right">{fmtBRL(o.mod)}</TableCell>
+                                )}
+                                {segmentarMod && totaisObra.modAClassificar > 0 && (
+                                  <TableCell className="text-right">
+                                    {fmtBRL(o.modAClassificar)}
+                                  </TableCell>
+                                )}
+                                <TableCell className="text-right">{fmtBRL(o.moi)}</TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {fmtBRL(o.total)}
+                                </TableCell>
+                              </TableRow>
+                            ))
                           )}
-                          {segmentarMod && totaisObra.modAClassificar > 0 && (
+                        </TableBody>
+                        <TableFooter>
+                          <TableRow>
+                            <TableCell className="font-medium">Total geral</TableCell>
+                            {segmentarMod ? (
+                              <>
+                                <TableCell className="text-right font-medium">
+                                  {fmtBRL(totaisObra.modCivil)}
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {fmtBRL(totaisObra.modMontagem)}
+                                </TableCell>
+                              </>
+                            ) : (
+                              <TableCell className="text-right font-medium">
+                                {fmtBRL(totaisObra.mod)}
+                              </TableCell>
+                            )}
+                            {segmentarMod && totaisObra.modAClassificar > 0 && (
+                              <TableCell className="text-right font-medium">
+                                {fmtBRL(totaisObra.modAClassificar)}
+                              </TableCell>
+                            )}
                             <TableCell className="text-right font-medium">
-                              {fmtBRL(totaisObra.modAClassificar)}
+                              {fmtBRL(totaisObra.moi)}
                             </TableCell>
-                          )}
-                          <TableCell className="text-right font-medium">
-                            {fmtBRL(totaisObra.moi)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold">
-                            {fmtBRL(totaisObra.total)}
-                          </TableCell>
-                        </TableRow>
-                      </TableFooter>
-                    </Table>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                            <TableCell className="text-right font-semibold">
+                              {fmtBRL(totaisObra.total)}
+                            </TableCell>
+                          </TableRow>
+                        </TableFooter>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="sem-alocacao">
           <Card>

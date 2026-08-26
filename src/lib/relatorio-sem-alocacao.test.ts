@@ -6,6 +6,8 @@ import { ultimasAlocacoesPorFuncionario } from "./relatorio-sem-alocacao.ts";
 
 const servidor = readFileSync("src/lib/relatorio-sem-alocacao.functions.ts", "utf8");
 const tela = readFileSync("src/routes/_authenticated/relatorios.tsx", "utf8");
+const navegacao = readFileSync("src/lib/navigation.ts", "utf8");
+const financeiro = readFileSync("src/lib/relatorio-centro-custo.functions.ts", "utf8");
 
 test("último CC usa a alocação válida mais recente até a data de referência", () => {
   const ultimas = ultimasAlocacoesPorFuncionario(
@@ -45,4 +47,39 @@ test("tela e Excel exibem e filtram os novos campos sem renomear a semântica", 
   assert.match(tela, /referencia: dataLimiteAnalise/);
   assert.match(tela, /Sem CC anterior/);
   assert.doesNotMatch(tela, /Responsável pelo CC/);
+});
+
+test("todas as roles internas acessam somente o relatorio operacional quando nao financeiras", () => {
+  for (const role of ["assistente", "supervisor", "coordenador", "gerente", "diretor"]) {
+    assert.match(servidor, new RegExp(`role === "${role}"`));
+    assert.match(navegacao, new RegExp(`"${role}"`));
+  }
+  assert.match(tela, /defaultValue=\{podeVerFolha \? "funcionarios" : "sem-alocacao"\}/);
+  assert.match(
+    tela,
+    /\{podeVerFolha && <TabsTrigger value="obras">Custo por centro de custo<\/TabsTrigger>\}/,
+  );
+  assert.match(tela, /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerFolha/);
+  for (const roleExterna of ["cliente", "externo", "visualizador"])
+    assert.doesNotMatch(servidor, new RegExp(`role === "${roleExterna}"`));
+});
+
+test("backend financeiro continua restrito a gerente e diretor", () => {
+  assert.match(financeiro, /role === "gerente" \|\| role === "diretor"/);
+  for (const role of ["assistente", "supervisor", "coordenador"])
+    assert.doesNotMatch(financeiro, new RegExp(`role === "${role}"`));
+});
+
+test("Excel Sem alocacao contem somente campos operacionais", () => {
+  const exportacao = tela.match(/function exportarSemAlocacao\(\) \{([\s\S]*?)\n {2}\}/)?.[1] ?? "";
+  for (const campo of [
+    "Funcionário",
+    "Função/Categoria",
+    "Último CC",
+    "Dias sem alocação",
+    "Observação",
+  ])
+    assert.match(exportacao, new RegExp(campo));
+  for (const proibido of ["salário", "custo-base", "refeição", "HE 50%", "custo total"])
+    assert.doesNotMatch(exportacao, new RegExp(proibido, "i"));
 });

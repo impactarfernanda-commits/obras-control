@@ -50,7 +50,16 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
       .eq("user_id", context.userId);
     if (roleResult.error) throw new Error(roleResult.error.message);
     const roles = (roleResult.data ?? []).map((row) => row.role as Role);
-    if (!roles.some((role) => role === "coordenador" || role === "gerente" || role === "diretor"))
+    if (
+      !roles.some(
+        (role) =>
+          role === "assistente" ||
+          role === "supervisor" ||
+          role === "coordenador" ||
+          role === "gerente" ||
+          role === "diretor",
+      )
+    )
       throw new Error("Forbidden: relatório indisponível para este perfil");
 
     if (data.referencia < data.inicio || data.referencia > data.fim)

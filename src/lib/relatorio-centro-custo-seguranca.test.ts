@@ -42,16 +42,23 @@ test("mantem paridade das formulas financeiras compartilhadas", () => {
   assert.equal(resultado.centros[0].total, custo.total / dias);
 });
 
-test("coordenador usa somente a server function e consultas financeiras ficam desabilitadas", () => {
+test("somente gerente e diretor carregam consultas e abas financeiras", () => {
   const route = readFileSync(
     new URL("../routes/_authenticated/relatorios.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(route, /allowed=\{\["coordenador", "gerente", "diretor"\]\}/);
+  assert.match(
+    route,
+    /allowed=\{\["assistente", "supervisor", "coordenador", "gerente", "diretor"\]\}/,
+  );
   assert.match(route, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
   assert.match(route, /useBeneficios\(\{ enabled: podeVerFolha \}\)/);
   assert.match(route, /getRelatorioCentrosCusto/);
   assert.match(route, /enabled: podeVerFolha/g);
+  assert.match(
+    route,
+    /\{podeVerFolha && \(\s*<TabsContent value="obras">[\s\S]*?<\/TabsContent>\s*\)\}/,
+  );
 });
 
 test("DTO publico nao declara campos de folha", () => {
@@ -63,5 +70,6 @@ test("DTO publico nao declara campos de folha", () => {
     source.match(/export type RelatorioCentrosCustoDTO = \{([^;]+;){4}[^}]*\}/s)?.[0] ?? "";
   for (const proibido of ["salario", "beneficios", "seguroVida", "encargos", "prov13"])
     assert.doesNotMatch(dto, new RegExp(proibido, "i"));
-  assert.match(source, /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/);
+  assert.match(source, /role === "gerente" \|\| role === "diretor"/);
+  assert.doesNotMatch(source, /role === "coordenador" \|\| role === "gerente"/);
 });

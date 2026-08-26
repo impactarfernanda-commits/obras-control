@@ -80,8 +80,8 @@ test("ordem e permissões da navegação permanecem restritas", () => {
     {
       title: "Relatórios",
       url: "/relatorios",
-      minLevel: 2,
-      allowedRoles: ["coordenador", "gerente", "diretor"],
+      minLevel: 1,
+      allowedRoles: ["assistente", "supervisor", "coordenador", "gerente", "diretor"],
     },
     {
       title: "Planejamento HH e Custos",
