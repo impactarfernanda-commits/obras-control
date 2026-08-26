@@ -119,9 +119,6 @@ function RelatoriosPage() {
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
   const [ultimoCcFilter, setUltimoCcFilter] = useState("all");
-  const [tipoRegistroFilter, setTipoRegistroFilter] = useState<
-    "all" | "horas" | "falta" | "ferias" | "folga_campo"
-  >("all");
   const [funcionarioDetalheId, setFuncionarioDetalheId] = useState<string | null>(null);
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
   const [exportandoCentro, setExportandoCentro] = useState(false);
@@ -493,11 +490,7 @@ function RelatoriosPage() {
     : null;
   const registrosDetalhe = funcionarioDetalhe
     ? (registros ?? [])
-        .filter(
-          (registro) =>
-            registro.funcionario_id === funcionarioDetalhe.id &&
-            (tipoRegistroFilter === "all" || registro.tipo_registro === tipoRegistroFilter),
-        )
+        .filter((registro) => registro.funcionario_id === funcionarioDetalhe.id)
         .map((registro) => {
           const alocacao = alocacaoMap.get(
             `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
@@ -620,32 +613,6 @@ function RelatoriosPage() {
           </div>
         }
       />
-
-      {podeVerFolha && (
-        <Card className="mb-4">
-          <CardContent className="flex flex-wrap items-center gap-3 p-4">
-            <Select
-              value={tipoRegistroFilter}
-              onValueChange={(value) => setTipoRegistroFilter(value as typeof tipoRegistroFilter)}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os apontamentos</SelectItem>
-                <SelectItem value="horas">Horas trabalhadas</SelectItem>
-                <SelectItem value="falta">Faltas</SelectItem>
-                <SelectItem value="ferias">Férias</SelectItem>
-                <SelectItem value="folga_campo">Folga de campo</SelectItem>
-              </SelectContent>
-            </Select>
-            <Badge variant="secondary">
-              {(registros ?? []).filter((r) => r.tipo_registro === "falta").length} falta(s) no
-              período
-            </Badge>
-          </CardContent>
-        </Card>
-      )}
 
       <Tabs
         defaultValue={podeVerFolha ? "funcionarios" : podeVerCentroCusto ? "obras" : "sem-alocacao"}

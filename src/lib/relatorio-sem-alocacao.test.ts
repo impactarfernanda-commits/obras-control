@@ -99,10 +99,14 @@ test("Excel Sem alocacao contem somente campos operacionais", () => {
     assert.doesNotMatch(exportacao, new RegExp(proibido, "i"));
 });
 
-test("remove somente a exportacao geral de apontamentos", () => {
+test("remove controles legados de apontamentos e preserva relatorios", () => {
   assert.doesNotMatch(tela, /Exportar apontamentos|exportarApontamentos|apontamentos-\$\{start\}/);
-  assert.match(tela, /<SelectItem value="all">Todos os apontamentos<\/SelectItem>/);
-  assert.match(tela, /tipo_registro === "falta"/);
+  assert.doesNotMatch(tela, /tipoRegistroFilter|Todos os apontamentos|falta\(s\) no período/);
+  assert.match(tela, /<TabsTrigger value="funcionarios">Custo por funcionário<\/TabsTrigger>/);
+  assert.match(tela, /<TabsTrigger value="obras">Custo por centro de custo<\/TabsTrigger>/);
+  assert.match(tela, /<TabsTrigger value="sem-alocacao">Sem alocação<\/TabsTrigger>/);
   assert.match(tela, /function exportarSemAlocacao\(\)/);
   assert.match(tela, /function exportarCentroDetalhe\(\)/);
+  assert.match(tela, /aria-label="Mês anterior"/);
+  assert.match(tela, /aria-label="Próximo mês"/);
 });
