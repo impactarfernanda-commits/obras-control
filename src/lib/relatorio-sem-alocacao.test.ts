@@ -98,3 +98,11 @@ test("Excel Sem alocacao contem somente campos operacionais", () => {
   for (const proibido of ["salário", "custo-base", "refeição", "HE 50%", "custo total"])
     assert.doesNotMatch(exportacao, new RegExp(proibido, "i"));
 });
+
+test("remove somente a exportacao geral de apontamentos", () => {
+  assert.doesNotMatch(tela, /Exportar apontamentos|exportarApontamentos|apontamentos-\$\{start\}/);
+  assert.match(tela, /<SelectItem value="all">Todos os apontamentos<\/SelectItem>/);
+  assert.match(tela, /tipo_registro === "falta"/);
+  assert.match(tela, /function exportarSemAlocacao\(\)/);
+  assert.match(tela, /function exportarCentroDetalhe\(\)/);
+});

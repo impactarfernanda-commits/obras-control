@@ -463,36 +463,6 @@ function RelatoriosPage() {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Sem alocação");
     XLSX.writeFile(workbook, `funcionarios-sem-alocacao-${start}-${end}.xlsx`);
   }
-  function exportarApontamentos() {
-    const nomes = new Map(funcionariosRelatorio.map((f) => [f.id, f.nome]));
-    const centros = new Map((obras ?? []).map((o) => [o.id, o.nome]));
-    const rows = (registros ?? [])
-      .filter((r) => tipoRegistroFilter === "all" || r.tipo_registro === tipoRegistroFilter)
-      .map((r) => ({
-        ...(() => {
-          const detalhe = detalhePorRegistro.get(r.id);
-          return {
-            "HE 50%": detalhe ? detalhe.minutos_he_50 / 60 : 0,
-            "HE 100%": detalhe ? detalhe.minutos_he_100 / 60 : 0,
-            "Horas sem adicional de HE": detalhe ? detalhe.minutos_sem_adicional_he / 60 : 0,
-            "Horas noturnas reais": detalhe ? detalhe.minutos_noturnos_reais / 60 : 0,
-            "Horas noturnas remuneráveis": detalhe ? detalhe.minutos_noturnos_remuneraveis / 60 : 0,
-            "Jornada excepcional": detalhe?.jornada_excepcional ? "Sim" : "Não",
-          };
-        })(),
-        Data: new Date(r.data + "T00:00:00").toLocaleDateString("pt-BR"),
-        Funcionário: nomes.get(r.funcionario_id) ?? "—",
-        "Centro de custo": centros.get(r.obra_id) ?? "—",
-        "Tipo de registro": rotuloTipoRegistro(r.tipo_registro),
-        "Classificação da falta": r.tipo_registro === "falta" ? rotuloFalta(r.falta_tipo) : "",
-        "Horas normais": r.tipo_registro === "horas" ? r.horas_normais : 0,
-        "Horas extras": r.tipo_registro === "horas" ? r.horas_extras : 0,
-        Observação: r.observacoes ?? "",
-      }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Apontamentos");
-    XLSX.writeFile(workbook, `apontamentos-${start}-${end}.xlsx`);
-  }
   // Mostra ativos + inativos com lançamentos no período (custos pagos mesmo após desligamento).
   const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce(
@@ -673,10 +643,6 @@ function RelatoriosPage() {
               {(registros ?? []).filter((r) => r.tipo_registro === "falta").length} falta(s) no
               período
             </Badge>
-            <Button variant="outline" onClick={exportarApontamentos} disabled={!registros?.length}>
-              <Download className="mr-2 h-4 w-4" />
-              Exportar apontamentos
-            </Button>
           </CardContent>
         </Card>
       )}
