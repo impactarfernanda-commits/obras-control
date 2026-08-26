@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { consolidarCustosCentros } from "./relatorio-centro-custo.ts";
+import { buildCostCenterWorkbook } from "./relatorio-centro-custo-xlsx.ts";
 
 const funcionarios = [
   {
@@ -191,18 +192,27 @@ function consolidarAjudante(input: {
 test("Alojado AJUDANTE propaga Montagem nos dias sem jornada sem criar outra linha", () => {
   const datasTrabalhadas = Array.from(
     { length: 16 },
-    (_, indice) => `2026-08-${String(indice + 1).padStart(2, "0")}`,
+    (_, indice) => `2026-08-${String(indice + 3).padStart(2, "0")}`,
   );
   const resultado = consolidarAjudante({
     inicio: "2026-08-01",
     fim: "2026-08-31",
-    referencias: datasTrabalhadas.map((data) => ({
-      funcionario_id: "tiago",
-      obra_id: "236",
-      data,
-      tipo_mao_obra: "montagem" as const,
-      especialidade_ajudante: "montagem" as const,
-    })),
+    referencias: [
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-01",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: null,
+      },
+      ...datasTrabalhadas.map((data) => ({
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data,
+        tipo_mao_obra: "montagem" as const,
+        especialidade_ajudante: "montagem" as const,
+      })),
+    ],
     registros: datasTrabalhadas.map((data, indice) => ({
       funcionario_id: "tiago",
       obra_id: "236",
@@ -219,55 +229,84 @@ test("Alojado AJUDANTE propaga Montagem nos dias sem jornada sem criar outra lin
   assert.equal(linhas[0].dias, 16);
   assert.equal(linhas[0].horasNormais + linhas[0].horas50 + linhas[0].horas100, 141);
   assert.equal(linhas[0].custoRegimeAlojado, 31 * 77);
+  assert.equal(linhas[0].custoBase, 0);
+  assert.equal(resultado.centros[0].modAClassificar, 0);
+  assert.equal(resultado.centros[0].total, 31 * 77);
+
+  const workbook = buildCostCenterWorkbook({
+    centro: resultado.centros[0],
+    competencia: "Agosto/2026",
+    periodoInicial: "2026-08-01",
+    periodoFinal: "2026-08-31",
+    segmentarMod: true,
+  });
+  const detalhe = workbook.Sheets.Detalhamento;
+  assert.equal(detalhe.H2.v, "Montagem");
+  assert.equal(detalhe.T2.v, 31 * 77);
 });
 
-test("mudanca Montagem para Civil tambem vale somente na data registrada", () => {
+test("primeira Montagem retropreenche o inicio e mudanca para Civil vale na propria data", () => {
   const resultado = consolidarAjudante({
     inicio: "2026-08-01",
-    fim: "2026-08-04",
+    fim: "2026-08-31",
     referencias: [
       {
         funcionario_id: "tiago",
         obra_id: "236",
-        data: "2026-07-31",
+        data: "2026-08-01",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: null,
+      },
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-05",
         tipo_mao_obra: "montagem",
         especialidade_ajudante: "montagem",
       },
       {
         funcionario_id: "tiago",
         obra_id: "236",
-        data: "2026-08-03",
+        data: "2026-08-20",
         tipo_mao_obra: "civil",
         especialidade_ajudante: "civil",
       },
     ],
   });
   const linhas = resultado.centros[0].linhas;
-  assert.equal(linhas.find((linha) => linha.tipoMod === "Montagem")?.custoRegimeAlojado, 2 * 77);
-  assert.equal(linhas.find((linha) => linha.tipoMod === "Civil")?.custoRegimeAlojado, 2 * 77);
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Montagem")?.custoRegimeAlojado, 19 * 77);
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Civil")?.custoRegimeAlojado, 12 * 77);
+  assert.equal(resultado.centros[0].total, 31 * 77);
 });
 
-test("Alojado respeita mudancas Civil e Montagem somente a partir da data registrada", () => {
+test("primeira Civil retropreenche o inicio e mudanca para Montagem vale na propria data", () => {
   const referencias = [
     {
       funcionario_id: "tiago",
       obra_id: "236",
-      data: "2026-07-31",
+      data: "2026-08-01",
+      tipo_mao_obra: "civil" as const,
+      especialidade_ajudante: null,
+    },
+    {
+      funcionario_id: "tiago",
+      obra_id: "236",
+      data: "2026-08-05",
       tipo_mao_obra: "civil" as const,
       especialidade_ajudante: "civil" as const,
     },
     {
       funcionario_id: "tiago",
       obra_id: "236",
-      data: "2026-08-03",
+      data: "2026-08-20",
       tipo_mao_obra: "montagem" as const,
       especialidade_ajudante: "montagem" as const,
     },
   ];
-  const resultado = consolidarAjudante({ referencias, inicio: "2026-08-01", fim: "2026-08-04" });
+  const resultado = consolidarAjudante({ referencias, inicio: "2026-08-01", fim: "2026-08-31" });
   const linhas = resultado.centros[0].linhas;
-  assert.equal(linhas.find((linha) => linha.tipoMod === "Civil")?.custoRegimeAlojado, 2 * 77);
-  assert.equal(linhas.find((linha) => linha.tipoMod === "Montagem")?.custoRegimeAlojado, 2 * 77);
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Civil")?.custoRegimeAlojado, 19 * 77);
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Montagem")?.custoRegimeAlojado, 12 * 77);
   assert.equal(
     linhas.reduce((total, linha) => total + linha.dias, 0),
     0,
@@ -276,6 +315,40 @@ test("Alojado respeita mudancas Civil e Montagem somente a partir da data regist
     linhas.reduce((total, linha) => total + linha.horasNormais, 0),
     0,
   );
+  assert.equal(resultado.centros[0].total, 31 * 77);
+});
+
+test("classificacao anterior ao periodo prevalece ate a mudanca explicita", () => {
+  const resultado = consolidarAjudante({
+    inicio: "2026-08-01",
+    fim: "2026-08-31",
+    referencias: [
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-01",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: null,
+      },
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-07-25",
+        tipo_mao_obra: "civil",
+        especialidade_ajudante: "civil",
+      },
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-12",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: "montagem",
+      },
+    ],
+  });
+  const linhas = resultado.centros[0].linhas;
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Civil")?.custoRegimeAlojado, 11 * 77);
+  assert.equal(linhas.find((linha) => linha.tipoMod === "Montagem")?.custoRegimeAlojado, 20 * 77);
 });
 
 test("sem classificacao valida anterior Alojado permanece A classificar", () => {
@@ -308,4 +381,48 @@ test("Local sem jornada nao gera refeicao", () => {
     ],
   });
   assert.equal(resultado.centros.length, 0);
+});
+
+test("redistribuicao global simulada retira somente valores com classificacao conhecida", () => {
+  const conhecido = consolidarAjudante({
+    inicio: "2026-08-01",
+    fim: "2026-08-03",
+    referencias: [
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-01",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: null,
+      },
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-03",
+        tipo_mao_obra: "montagem",
+        especialidade_ajudante: "montagem",
+      },
+    ],
+  });
+  const semClassificacao = consolidarAjudante({
+    inicio: "2026-08-01",
+    fim: "2026-08-30",
+    referencias: [
+      {
+        funcionario_id: "tiago",
+        obra_id: "236",
+        data: "2026-08-01",
+        tipo_mao_obra: "civil",
+        especialidade_ajudante: null,
+      },
+    ],
+  });
+  const residuoAnteriorSimulado = 2 * 77 + 30 * 77;
+  const residuoDepois =
+    conhecido.centros[0].modAClassificar + semClassificacao.centros[0].modAClassificar;
+  assert.equal(residuoAnteriorSimulado, 2464);
+  assert.equal(conhecido.centros[0].modMontagem, 3 * 77);
+  assert.equal(residuoDepois, 2310);
+  assert.equal(residuoAnteriorSimulado - residuoDepois, 154);
+  assert.equal(conhecido.centros[0].total + semClassificacao.centros[0].total, 33 * 77);
 });

@@ -154,14 +154,25 @@ export function consolidarCustosCentros(input: Input) {
 
   function ultimaClassificacaoModValida(funcionario: FuncionarioRelatorio, data: string) {
     let ultima: { data: string; tipoMod: Exclude<TipoModRelatorio, "A classificar"> } | undefined;
+    let primeiraNoPeriodo:
+      { data: string; tipoMod: Exclude<TipoModRelatorio, "A classificar"> } | undefined;
     for (const alocacao of input.alocacoesReferenciaClassificacao ?? input.alocacoes) {
-      if (alocacao.funcionario_id !== funcionario.id || alocacao.data > data) continue;
+      if (alocacao.funcionario_id !== funcionario.id) continue;
       if (input.resolverTipo(alocacao, funcionario) !== "MOD") continue;
       const tipoMod = classificarTipoMod(funcionario.categoria_mo, alocacao.especialidade_ajudante);
       if (tipoMod === "A classificar") continue;
-      if (!ultima || alocacao.data > ultima.data) ultima = { data: alocacao.data, tipoMod };
+      if (alocacao.data <= data && (!ultima || alocacao.data > ultima.data))
+        ultima = { data: alocacao.data, tipoMod };
+      if (
+        input.periodoInicial &&
+        input.periodoFinal &&
+        alocacao.data >= input.periodoInicial &&
+        alocacao.data <= input.periodoFinal &&
+        (!primeiraNoPeriodo || alocacao.data < primeiraNoPeriodo.data)
+      )
+        primeiraNoPeriodo = { data: alocacao.data, tipoMod };
     }
-    return ultima?.tipoMod;
+    return ultima?.tipoMod ?? primeiraNoPeriodo?.tipoMod;
   }
 
   function obterLinha(
