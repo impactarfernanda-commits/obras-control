@@ -109,6 +109,7 @@ function payrollRange(year: number, month: number) {
 function RelatoriosPage() {
   const { role } = useAuth();
   const podeVerFolha = role === "gerente" || role === "diretor";
+  const podeVerCentroCusto = role === "coordenador" || podeVerFolha;
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -223,7 +224,7 @@ function RelatoriosPage() {
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
     queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
-    enabled: podeVerFolha,
+    enabled: podeVerCentroCusto,
   });
 
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
@@ -619,7 +620,9 @@ function RelatoriosPage() {
         description={
           podeVerFolha
             ? "Custos consolidados de mão de obra por funcionário e por centro de custo."
-            : "Pendências operacionais de funcionários sem alocação."
+            : podeVerCentroCusto
+              ? "Custos consolidados de mão de obra por centro de custo."
+              : "Pendências operacionais de funcionários sem alocação."
         }
         actions={
           <div className="flex items-center gap-1 rounded-md border bg-card p-1">
@@ -678,10 +681,13 @@ function RelatoriosPage() {
         </Card>
       )}
 
-      <Tabs defaultValue={podeVerFolha ? "funcionarios" : "sem-alocacao"} className="space-y-4">
+      <Tabs
+        defaultValue={podeVerFolha ? "funcionarios" : podeVerCentroCusto ? "obras" : "sem-alocacao"}
+        className="space-y-4"
+      >
         <TabsList>
           {podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>}
-          {podeVerFolha && <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>}
+          {podeVerCentroCusto && <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>}
           <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
@@ -813,7 +819,7 @@ function RelatoriosPage() {
           </TabsContent>
         )}
 
-        {podeVerFolha && (
+        {podeVerCentroCusto && (
           <TabsContent value="obras">
             <Card>
               <CardHeader>

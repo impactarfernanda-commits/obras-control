@@ -49,24 +49,39 @@ test("tela e Excel exibem e filtram os novos campos sem renomear a semântica", 
   assert.doesNotMatch(tela, /Responsável pelo CC/);
 });
 
-test("todas as roles internas acessam somente o relatorio operacional quando nao financeiras", () => {
+test("todas as roles internas acessam o relatorio operacional", () => {
   for (const role of ["assistente", "supervisor", "coordenador", "gerente", "diretor"]) {
     assert.match(servidor, new RegExp(`role === "${role}"`));
     assert.match(navegacao, new RegExp(`"${role}"`));
   }
-  assert.match(tela, /defaultValue=\{podeVerFolha \? "funcionarios" : "sem-alocacao"\}/);
   assert.match(
     tela,
-    /\{podeVerFolha && <TabsTrigger value="obras">Custo por centro de custo<\/TabsTrigger>\}/,
+    /defaultValue=\{podeVerFolha \? "funcionarios" : podeVerCentroCusto \? "obras" : "sem-alocacao"\}/,
   );
-  assert.match(tela, /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerFolha/);
   for (const roleExterna of ["cliente", "externo", "visualizador"])
     assert.doesNotMatch(servidor, new RegExp(`role === "${roleExterna}"`));
 });
 
-test("backend financeiro continua restrito a gerente e diretor", () => {
-  assert.match(financeiro, /role === "gerente" \|\| role === "diretor"/);
-  for (const role of ["assistente", "supervisor", "coordenador"])
+test("matriz preserva centro de custo do coordenador sem liberar folha individual", () => {
+  assert.match(
+    financeiro,
+    /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/,
+  );
+  assert.match(tela, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
+  assert.match(tela, /const podeVerCentroCusto = role === "coordenador" \|\| podeVerFolha/);
+  assert.match(
+    tela,
+    /\{podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário<\/TabsTrigger>\}/,
+  );
+  assert.match(
+    tela,
+    /\{podeVerCentroCusto && <TabsTrigger value="obras">Custo por centro de custo<\/TabsTrigger>\}/,
+  );
+  assert.match(
+    tela,
+    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerCentroCusto/,
+  );
+  for (const role of ["assistente", "supervisor", "cliente", "externo"])
     assert.doesNotMatch(financeiro, new RegExp(`role === "${role}"`));
 });
 

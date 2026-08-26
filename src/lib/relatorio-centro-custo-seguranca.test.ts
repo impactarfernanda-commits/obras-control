@@ -42,7 +42,7 @@ test("mantem paridade das formulas financeiras compartilhadas", () => {
   assert.equal(resultado.centros[0].total, custo.total / dias);
 });
 
-test("somente gerente e diretor carregam consultas e abas financeiras", () => {
+test("separa acesso a folha individual do acesso ao centro de custo", () => {
   const route = readFileSync(
     new URL("../routes/_authenticated/relatorios.tsx", import.meta.url),
     "utf8",
@@ -52,12 +52,20 @@ test("somente gerente e diretor carregam consultas e abas financeiras", () => {
     /allowed=\{\["assistente", "supervisor", "coordenador", "gerente", "diretor"\]\}/,
   );
   assert.match(route, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
+  assert.match(route, /const podeVerCentroCusto = role === "coordenador" \|\| podeVerFolha/);
   assert.match(route, /useBeneficios\(\{ enabled: podeVerFolha \}\)/);
   assert.match(route, /getRelatorioCentrosCusto/);
-  assert.match(route, /enabled: podeVerFolha/g);
   assert.match(
     route,
-    /\{podeVerFolha && \(\s*<TabsContent value="obras">[\s\S]*?<\/TabsContent>\s*\)\}/,
+    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerCentroCusto/,
+  );
+  assert.match(
+    route,
+    /\{podeVerCentroCusto && \(\s*<TabsContent value="obras">[\s\S]*?<\/TabsContent>\s*\)\}/,
+  );
+  assert.match(
+    route,
+    /\{podeVerFolha && \(\s*<TabsContent value="funcionarios">[\s\S]*?<\/TabsContent>\s*\)\}/,
   );
 });
 
@@ -70,6 +78,7 @@ test("DTO publico nao declara campos de folha", () => {
     source.match(/export type RelatorioCentrosCustoDTO = \{([^;]+;){4}[^}]*\}/s)?.[0] ?? "";
   for (const proibido of ["salario", "beneficios", "seguroVida", "encargos", "prov13"])
     assert.doesNotMatch(dto, new RegExp(proibido, "i"));
-  assert.match(source, /role === "gerente" \|\| role === "diretor"/);
-  assert.doesNotMatch(source, /role === "coordenador" \|\| role === "gerente"/);
+  assert.match(source, /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/);
+  for (const role of ["assistente", "supervisor", "cliente", "externo"])
+    assert.doesNotMatch(source, new RegExp(`role === "${role}"`));
 });
