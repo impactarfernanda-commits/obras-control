@@ -334,6 +334,7 @@ export function CopiarDiaAnteriorDialog({
           horasExtras: rascunho.horasExtras,
           justificativa: rascunho.justificativa?.trim() || null,
           observacoes: rascunho.observacoes?.trim() || null,
+          origemCalculo: "copia",
           especialidadeAjudante: especialidadeNovaAlocacao({
             ajudante: item.ajudante,
             resolucao: item.resolucao,

@@ -472,6 +472,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
           justificativa: null,
           observacoes: null,
+          origemCalculo: "aplicacao",
           especialidadeAjudante:
             funcionarioEhAjudante &&
             competenciaUsaSegmentacaoMod(calcularCompetencia(data).competencia)
