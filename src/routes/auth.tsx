@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TanksBRLogo } from "@/components/TanksBRLogo";
 import { Loader2, MailCheck, AlertCircle } from "lucide-react";
-import { portalLoginUrl } from "@/lib/sso";
+import { portalLoginUrl, safeReturnPath } from "@/lib/sso";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -56,7 +56,7 @@ function translateAuthError(message: string): string {
 }
 
 function AuthPage() {
-  const navigate = useNavigate();
+  const returnPath = safeReturnPath(new URLSearchParams(window.location.search).get("return_path"));
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [email, setEmail] = useState("");
@@ -90,9 +90,9 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/funcionarios" });
+      if (data.session) window.location.replace(returnPath);
     });
-  }, [navigate]);
+  }, [returnPath]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -110,7 +110,7 @@ function AuthPage() {
       return;
     }
     toast.success("Bem-vindo de volta!");
-    navigate({ to: "/funcionarios" });
+    window.location.replace(returnPath);
   }
 
   async function handleSignup(e: React.FormEvent) {

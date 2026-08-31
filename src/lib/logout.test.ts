@@ -41,7 +41,7 @@ test("guard preserva o retorno normal de uma sessao ausente", () => {
     sessionIsMissing && !isLoggingOut;
   assert.equal(shouldRedirect(true, false), true);
   assert.equal(shouldRedirect(true, true), false);
-  assert.match(guard, /portalLoginUrl\(pathname, consumePortalLaunchMarker\(window\)\)/);
+  assert.match(guard, /portalLoginUrl\(currentUrl, consumePortalLaunchMarker\(window\)\)/);
 });
 
 test("clique duplicado e ignorado e os botoes ficam desabilitados", () => {

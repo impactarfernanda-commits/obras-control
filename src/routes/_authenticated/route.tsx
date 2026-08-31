@@ -23,9 +23,10 @@ function AuthenticatedLayout() {
 
 function Shell() {
   const { loading, authStatus, profileStatus, retryProfile, isLoggingOut, signOut } = useAuth();
+  const currentUrl = useRouterState({ select: (state) => state.location.href });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   if (authStatus === "unauthenticated" && !isLoggingOut) {
-    window.location.replace(portalLoginUrl(pathname, consumePortalLaunchMarker(window)));
+    window.location.replace(portalLoginUrl(currentUrl, consumePortalLaunchMarker(window)));
     return null;
   }
   if (authStatus === "authenticated") consumePortalLaunchMarker(window);

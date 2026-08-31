@@ -11,6 +11,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { highestRole, type Role } from "@/lib/access-control";
 import { portalLogoutUrl } from "@/lib/sso";
+import { preserveAuthenticatedUser } from "@/lib/auth-session";
 
 interface AuthContextValue {
   user: User | null;
@@ -48,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const applySession = (s: Session | null) => {
       if (!active) return;
       setSession(s);
-      setUser(s?.user ?? null);
+      setUser((current) => preserveAuthenticatedUser(current, s?.user ?? null));
       setAuthStatus(s ? "authenticated" : "unauthenticated");
       if (!s) {
         setRole(null);

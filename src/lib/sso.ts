@@ -13,9 +13,15 @@ export const OBRAS_PATHS = new Set([
   "/configuracoes",
 ]);
 export function safeReturnPath(path: string | null | undefined) {
-  return path && path.startsWith("/") && !path.startsWith("//") && OBRAS_PATHS.has(path)
-    ? path
-    : "/alocacoes";
+  if (!path || !path.startsWith("/") || path.startsWith("//")) return "/alocacoes";
+  try {
+    const parsed = new URL(path, "https://obras-control.local");
+    if (parsed.origin !== "https://obras-control.local" || !OBRAS_PATHS.has(parsed.pathname))
+      return "/alocacoes";
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/alocacoes";
+  }
 }
 export const PORTAL_LAUNCH_WINDOW_NAME = "obras-control-bootstrap";
 
