@@ -25,6 +25,8 @@ import {
   supervisorPodeRegistrarTipoNoPeriodo,
 } from "@/lib/supervisor-cc";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
+import { useAuth } from "@/hooks/use-auth";
+import { usePersistentDraft } from "@/hooks/use-persistent-draft";
 import { validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import {
@@ -102,8 +104,35 @@ type Props = {
   obraNome: string;
 };
 
+type AlocarPeriodoDraft = {
+  funcionarioId: string;
+  dataInicio: string;
+  dataFim: string;
+  tipoRegistro: TipoRegistro;
+  especialidadeAjudante: EspecialidadeAjudante | null;
+  modo: "pular" | "sobrescrever";
+};
+
+function isAlocarPeriodoDraft(value: unknown): value is AlocarPeriodoDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Partial<AlocarPeriodoDraft>;
+  return (
+    typeof draft.funcionarioId === "string" &&
+    typeof draft.dataInicio === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.dataInicio) &&
+    typeof draft.dataFim === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.dataFim) &&
+    ["horas", "falta", "ferias", "folga_campo"].includes(draft.tipoRegistro ?? "") &&
+    (draft.especialidadeAjudante === null ||
+      draft.especialidadeAjudante === "civil" ||
+      draft.especialidadeAjudante === "montagem") &&
+    (draft.modo === "pular" || draft.modo === "sobrescrever")
+  );
+}
+
 export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const today = isoDate(new Date());
   const [funcionarioId, setFuncionarioId] = useState<string>("");
@@ -124,6 +153,39 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [verificando, setVerificando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const contextoSugestaoAplicado = useRef("");
+  const draft = usePersistentDraft<AlocarPeriodoDraft>({
+    userId: user?.id,
+    flow: "alocar-periodo",
+    context: obraId,
+    validate: isAlocarPeriodoDraft,
+  });
+  const {
+    clear: clearDraft,
+    persist: persistDraft,
+    recovered: draftRecovered,
+    restored: restoredDraft,
+  } = draft;
+
+  useEffect(() => {
+    if (!restoredDraft) return;
+    setFuncionarioId(restoredDraft.funcionarioId);
+    setDataInicio(restoredDraft.dataInicio);
+    setDataFim(restoredDraft.dataFim);
+    setTipoRegistro(restoredDraft.tipoRegistro);
+    setEspecialidadeAjudante(restoredDraft.especialidadeAjudante);
+    setModo(restoredDraft.modo);
+  }, [restoredDraft]);
+
+  useEffect(() => {
+    persistDraft({
+      funcionarioId,
+      dataInicio,
+      dataFim,
+      tipoRegistro,
+      especialidadeAjudante,
+      modo,
+    });
+  }, [dataFim, dataInicio, persistDraft, especialidadeAjudante, funcionarioId, modo, tipoRegistro]);
 
   const { data: funcionarios } = useQuery({
     queryKey: ["funcionarios-alocar-periodo-base-segura"],
@@ -160,10 +222,14 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     [funcionarios, dataInicio, dataFim, tipoRegistro],
   );
   useEffect(() => {
-    if (funcionarioId && !funcionariosElegiveis.some((f) => f.id === funcionarioId)) {
+    if (
+      funcionarios !== undefined &&
+      funcionarioId &&
+      !funcionariosElegiveis.some((f) => f.id === funcionarioId)
+    ) {
       setFuncionarioId("");
     }
-  }, [funcionarioId, funcionariosElegiveis]);
+  }, [funcionarioId, funcionarios, funcionariosElegiveis]);
   const funcSelecionado = useMemo(
     () => funcionariosElegiveis.find((f) => f.id === funcionarioId) ?? null,
     [funcionariosElegiveis, funcionarioId],
@@ -257,7 +323,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const intervaloMuitoGrande = totalDiasIntervalo > MAX_DIAS_INTERVALO;
   const intervaloInvalido = !dataInicio || !dataFim || new Date(dataFim) < new Date(dataInicio);
 
-  function resetAndClose(state: boolean) {
+  function closeDialog(state: boolean) {
     setOpen(state);
     if (!state) {
       setStep("form");
@@ -266,13 +332,23 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       setConflitosOutraObra([]);
       setCompetenciasFechadas([]);
       setDialogFeedback(null);
-      setFuncionarioId("");
-      setDataInicio(today);
-      setDataFim(today);
-      setModo("pular");
-      setTipoRegistro("horas");
-      setEspecialidadeAjudante(null);
     }
+  }
+
+  function resetForm() {
+    setStep("form");
+    setFuncionarioId("");
+    setDataInicio(today);
+    setDataFim(today);
+    setModo("pular");
+    setTipoRegistro("horas");
+    setEspecialidadeAjudante(null);
+  }
+
+  function completeAndClose() {
+    clearDraft();
+    resetForm();
+    closeDialog(false);
   }
 
   async function verificar() {
@@ -298,7 +374,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         qc.invalidateQueries({ queryKey: ["registros-mes"] });
         qc.invalidateQueries({ queryKey: ["aloc-week", obraId] });
         qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
-        resetAndClose(false);
+        completeAndClose();
       } catch (error) {
         toast.error(mensagemErroRegistro(error as Error));
       } finally {
@@ -425,7 +501,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       if (diasAlvo.length === 0) {
         toast.info("Nada a alocar — todos os dias já estavam ocupados.");
         setSalvando(false);
-        resetAndClose(false);
+        completeAndClose();
         return;
       }
 
@@ -513,7 +589,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["aloc-week", obraId] });
       qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
-      resetAndClose(false);
+      completeAndClose();
     } catch (e: unknown) {
       if (isAlocacaoConflitoError(e)) {
         setDialogFeedback({ title: e.title, description: e.description });
@@ -574,7 +650,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={resetAndClose}>
+    <Dialog open={open} onOpenChange={closeDialog}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className={ALOCACAO_ACTION_BUTTON_CLASS}>
           <CalendarRange className="mr-2 h-4 w-4" />
@@ -590,6 +666,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               : "Cria alocações para todos os dias úteis (seg–sex) e lança horas padrão."}
           </DialogDescription>
         </DialogHeader>
+
+        {draftRecovered && <p className="text-xs text-muted-foreground">Rascunho recuperado</p>}
 
         {dialogFeedback && (
           <Alert variant="destructive" className="mb-4">
@@ -727,7 +805,16 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               )}
             </div>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => resetAndClose(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  clearDraft();
+                  resetForm();
+                }}
+              >
+                Descartar rascunho
+              </Button>
+              <Button variant="ghost" onClick={() => closeDialog(false)}>
                 Cancelar
               </Button>
               <Button

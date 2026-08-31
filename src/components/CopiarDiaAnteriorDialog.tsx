@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, Pencil, RotateCcw, UserMinus } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,8 @@ import {
   type ResumoCopiaDia,
 } from "@/lib/copiar-dia-anterior";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
+import { useAuth } from "@/hooks/use-auth";
+import { usePersistentDraft } from "@/hooks/use-persistent-draft";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularCompetencia } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
@@ -55,6 +57,66 @@ type ResumoCopiaResolvido = Omit<ResumoCopiaDia, "itens"> & {
   >;
 };
 
+type CopiarDiaDraft = {
+  destino: string;
+  previa: ResumoCopiaResolvido | null;
+  rascunhos: Record<string, JornadaCopiaRascunho>;
+  funcoes: Record<string, string | null>;
+  feriados: string[];
+  editandoId: string | null;
+  escolhas: Record<string, EspecialidadeAjudante>;
+};
+
+function isCopiarDiaDraft(value: unknown): value is CopiarDiaDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Partial<CopiarDiaDraft>;
+  const previaValida =
+    draft.previa === null ||
+    (!!draft.previa &&
+      typeof draft.previa === "object" &&
+      typeof draft.previa.origem_data === "string" &&
+      typeof draft.previa.destino_data === "string" &&
+      Array.isArray(draft.previa.itens) &&
+      draft.previa.itens.every(
+        (item) =>
+          !!item &&
+          typeof item === "object" &&
+          typeof item.funcionario_id === "string" &&
+          typeof item.nome === "string" &&
+          typeof item.status === "string",
+      ));
+  const rascunhosValidos =
+    !!draft.rascunhos &&
+    typeof draft.rascunhos === "object" &&
+    Object.values(draft.rascunhos).every(
+      (item) =>
+        !!item &&
+        typeof item === "object" &&
+        typeof item.funcionarioId === "string" &&
+        typeof item.incluirNaCopia === "boolean" &&
+        typeof item.horaEntrada === "string" &&
+        typeof item.horaSaida === "string" &&
+        typeof item.intervaloMinutos === "number" &&
+        typeof item.horasNormais === "number" &&
+        typeof item.horasExtras === "number" &&
+        !!item.detalhe &&
+        typeof item.detalhe === "object",
+    );
+  return (
+    typeof draft.destino === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.destino) &&
+    previaValida &&
+    rascunhosValidos &&
+    !!draft.funcoes &&
+    typeof draft.funcoes === "object" &&
+    Array.isArray(draft.feriados) &&
+    (draft.editandoId === null || typeof draft.editandoId === "string") &&
+    !!draft.escolhas &&
+    typeof draft.escolhas === "object" &&
+    Object.values(draft.escolhas).every((item) => item === "civil" || item === "montagem")
+  );
+}
+
 export function CopiarDiaAnteriorDialog({
   obraId,
   obraNome,
@@ -63,6 +125,7 @@ export function CopiarDiaAnteriorDialog({
   obraNome: string;
 }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const hoje = dataLocalHoje();
   const [destino, setDestino] = useState(hoje);
@@ -74,6 +137,51 @@ export function CopiarDiaAnteriorDialog({
   const [escolhas, setEscolhas] = useState<Record<string, EspecialidadeAjudante>>({});
   const [carregando, setCarregando] = useState(false);
   const confirmacaoEmAndamento = useRef(false);
+  const draft = usePersistentDraft<CopiarDiaDraft>({
+    userId: user?.id,
+    flow: "copiar-dia-anterior",
+    context: obraId,
+    validate: isCopiarDiaDraft,
+  });
+  const {
+    clear: clearDraft,
+    persist: persistDraft,
+    recovered: draftRecovered,
+    restored: restoredDraft,
+  } = draft;
+
+  useEffect(() => {
+    if (!restoredDraft) return;
+    setDestino(restoredDraft.destino);
+    setPrevia(restoredDraft.previa);
+    setRascunhos(restoredDraft.rascunhos);
+    setFuncoes(restoredDraft.funcoes);
+    setFeriados(new Set(restoredDraft.feriados));
+    setEditandoId(restoredDraft.editandoId);
+    setEscolhas(restoredDraft.escolhas);
+  }, [restoredDraft]);
+
+  useEffect(() => {
+    persistDraft({
+      destino,
+      previa,
+      rascunhos,
+      funcoes,
+      feriados: [...feriados],
+      editandoId,
+      escolhas,
+    });
+  }, [destino, editandoId, escolhas, feriados, funcoes, persistDraft, previa, rascunhos]);
+
+  function resetForm() {
+    setDestino(hoje);
+    setPrevia(null);
+    setRascunhos({});
+    setFuncoes({});
+    setFeriados(new Set());
+    setEscolhas({});
+    setEditandoId(null);
+  }
 
   async function buscarPrevia() {
     setCarregando(true);
@@ -376,7 +484,8 @@ export function CopiarDiaAnteriorDialog({
         qc.invalidateQueries({ queryKey: ["registros"] }),
       ]);
       setOpen(false);
-      setPrevia(null);
+      clearDraft();
+      resetForm();
     } catch (error) {
       logErroCopiaDia("aplicacao", error);
       toast.error((error as { message?: string }).message ?? "Erro ao copiar equipe");
@@ -394,12 +503,6 @@ export function CopiarDiaAnteriorDialog({
       open={open}
       onOpenChange={(value) => {
         setOpen(value);
-        if (!value) {
-          setPrevia(null);
-          setRascunhos({});
-          setEscolhas({});
-          setEditandoId(null);
-        }
       }}
     >
       <DialogTrigger asChild>
@@ -413,6 +516,7 @@ export function CopiarDiaAnteriorDialog({
           <DialogTitle>Copiar dia anterior</DialogTitle>
           <DialogDescription>{obraNome}</DialogDescription>
         </DialogHeader>
+        {draftRecovered && <p className="text-xs text-muted-foreground">Rascunho recuperado</p>}
         <div className="space-y-4">
           <div>
             <label className="text-sm font-medium">Data destino</label>
@@ -662,6 +766,15 @@ export function CopiarDiaAnteriorDialog({
           )}
         </div>
         <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              clearDraft();
+              resetForm();
+            }}
+          >
+            Descartar rascunho
+          </Button>
           <Button variant="ghost" onClick={() => setOpen(false)}>
             Cancelar
           </Button>

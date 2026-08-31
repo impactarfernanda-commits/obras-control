@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePersistentDraft } from "@/hooks/use-persistent-draft";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -207,6 +208,30 @@ const schema = z
     }
   });
 type FormVals = z.infer<typeof schema>;
+
+function isNovaAlocacaoDraft(value: unknown): value is FormVals {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Partial<FormVals>;
+  return (
+    typeof draft.funcionario_id === "string" &&
+    typeof draft.obra_id === "string" &&
+    typeof draft.data === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.data) &&
+    typeof draft.data_fim === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.data_fim) &&
+    TIPOS_REGISTRO.includes(draft.tipo_registro as TipoRegistro) &&
+    (draft.falta_tipo === null ||
+      classificacoesFaltaValues.includes(draft.falta_tipo as FaltaTipo)) &&
+    typeof draft.hora_entrada === "string" &&
+    typeof draft.hora_saida === "string" &&
+    typeof draft.intervalo_minutos === "number" &&
+    typeof draft.observacoes === "string" &&
+    typeof draft.justificativa_extras === "string" &&
+    (draft.especialidade_ajudante === null ||
+      draft.especialidade_ajudante === "civil" ||
+      draft.especialidade_ajudante === "montagem")
+  );
+}
 type ErrorLike = { message?: string };
 
 function LocalReadError({ message, retry }: { message: string; retry: () => void }) {
@@ -784,6 +809,30 @@ function AlocacoesPage() {
     resolver: zodResolver(schema),
     defaultValues: defaultFormValues,
   });
+  const novaAlocacaoDraft = usePersistentDraft<FormVals>({
+    userId: user?.id,
+    flow: "nova-alocacao",
+    validate: isNovaAlocacaoDraft,
+  });
+  const {
+    clear: clearNovaAlocacaoDraft,
+    persist: persistNovaAlocacaoDraft,
+    recovered: novaAlocacaoDraftRecovered,
+    restored: restoredNovaAlocacaoDraft,
+  } = novaAlocacaoDraft;
+  useEffect(() => {
+    if (!restoredNovaAlocacaoDraft) return;
+    form.reset(restoredNovaAlocacaoDraft);
+    setTipoRegistroFiltro(restoredNovaAlocacaoDraft.tipo_registro);
+    setDataRegistroFiltro(restoredNovaAlocacaoDraft.data);
+    setDataFimRegistroFiltro(restoredNovaAlocacaoDraft.data_fim);
+  }, [form, restoredNovaAlocacaoDraft]);
+  useEffect(() => {
+    const subscription = form.watch((values) => {
+      if (isNovaAlocacaoDraft(values)) persistNovaAlocacaoDraft(values);
+    });
+    return () => subscription.unsubscribe();
+  }, [form, persistNovaAlocacaoDraft]);
   const watchData = form.watch("data");
   const watchFuncionarioId = form.watch("funcionario_id");
   const funcionarioSelecionado = funcionariosSelecionaveis.find(
@@ -1012,6 +1061,7 @@ function AlocacoesPage() {
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
       qc.invalidateQueries({ queryKey: ["registros"] });
+      clearNovaAlocacaoDraft();
       setOpen(false);
       form.reset(defaultFormValues);
       setTipoRegistroFiltro("horas");
@@ -1326,6 +1376,9 @@ function AlocacoesPage() {
                     descontado automaticamente. Fim de semana conta como hora extra.
                   </DialogDescription>
                 </DialogHeader>
+                {novaAlocacaoDraftRecovered && (
+                  <p className="text-xs text-muted-foreground">Rascunho recuperado</p>
+                )}
                 {funcionariosQuery.isError && (
                   <LocalReadError
                     message="Não foi possível carregar os funcionários."
@@ -1707,6 +1760,19 @@ function AlocacoesPage() {
                     />
 
                     <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          clearNovaAlocacaoDraft();
+                          form.reset(defaultFormValues);
+                          setTipoRegistroFiltro("horas");
+                          setDataRegistroFiltro(today);
+                          setDataFimRegistroFiltro(today);
+                        }}
+                      >
+                        Descartar rascunho
+                      </Button>
                       <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                         Cancelar
                       </Button>

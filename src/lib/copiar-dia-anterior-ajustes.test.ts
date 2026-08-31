@@ -111,8 +111,10 @@ test("Não copiar é estado local, restaurável e não cria exclusão ou supress
   assert.doesNotMatch(componente, /alocacoes_dia_exclusoes/);
 });
 
-test("cancelar ou fechar descarta rascunhos sem persistência", () => {
-  assert.match(componente, /if \(!value\) \{[\s\S]*setRascunhos\(\{\}\)/);
+test("cancelar ou fechar preserva o rascunho e descarte é explícito", () => {
+  assert.match(componente, /usePersistentDraft<CopiarDiaDraft>/);
+  assert.match(componente, /Descartar rascunho/);
+  assert.match(componente, /clearDraft\(\);[\s\S]*resetForm\(\)/);
   assert.match(componente, /<Button variant="ghost" onClick=\{\(\) => setOpen\(false\)\}>/);
   assert.equal((componente.match(/obras_copiar_jornadas_v2/g) ?? []).length, 1);
 });
