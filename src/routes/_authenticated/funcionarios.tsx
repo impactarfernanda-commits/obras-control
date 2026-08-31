@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { PageHeader } from "@/components/PageHeader";
+import { SupervisorCentroCustoDialog } from "@/components/SupervisorCentroCustoDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MARCO_INICIAL_REGIMES, vigenciaInicialOuMudanca } from "@/lib/regimes";
+import { categoriaEhSupervisor } from "@/lib/supervisor-cc";
 
 export const Route = createFileRoute("/_authenticated/funcionarios")({
   component: FuncionariosPage,
@@ -914,7 +916,17 @@ function FuncionariosPage() {
                         <TableCell>{f.categoria_mo}</TableCell>
                         <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
                         <TableCell className="text-sm">
-                          {cur?.nome ?? <span className="text-muted-foreground">—</span>}
+                          {categoriaEhSupervisor(f.categoria_mo) ? (
+                            <SupervisorCentroCustoDialog
+                              funcionario={f}
+                              obras={obras ?? []}
+                              podeTransferir={
+                                role === "coordenador" || role === "gerente" || role === "diretor"
+                              }
+                            />
+                          ) : (
+                            (cur?.nome ?? <span className="text-muted-foreground">—</span>)
+                          )}
                         </TableCell>
                         <TableCell className="text-sm">
                           {f.data_admissao

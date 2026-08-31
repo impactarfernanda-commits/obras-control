@@ -17,6 +17,12 @@ import {
   type AlocacaoReferencia,
   type RegimeVigencia,
 } from "./regimes.ts";
+import {
+  SUPERVISOR_CC_DATA_CORTE,
+  categoriaEhSupervisor,
+  ratearSupervisorPorVigencias,
+  type VigenciaCentroCusto,
+} from "./supervisor-cc.ts";
 
 export type TipoRelatorio = "MOD" | "MOI";
 
@@ -120,6 +126,7 @@ type Input = {
   vigenciasRegime?: readonly RegimeVigencia[];
   alocacoesReferenciaRegime?: readonly AlocacaoReferencia[];
   alocacoesReferenciaClassificacao?: readonly AlocacaoRelatorio[];
+  vigenciasCentroCusto?: readonly VigenciaCentroCusto[];
 };
 
 function chave(funcionarioId: string, obraId: string, data: string) {
@@ -213,6 +220,11 @@ export function consolidarCustosCentros(input: Input) {
       avisos.add("Ha alocacoes sem funcionario correspondente carregado no relatorio.");
       continue;
     }
+    if (
+      alocacao.data >= SUPERVISOR_CC_DATA_CORTE &&
+      categoriaEhSupervisor(funcionario.categoria_mo)
+    )
+      continue;
     const custo = input.custos.get(alocacao.funcionario_id);
     if (!custo || custo.total <= 0) {
       avisos.add("Ha alocacoes com funcionario sem custo mensal calculado.");
@@ -283,6 +295,51 @@ export function consolidarCustosCentros(input: Input) {
     linha.datas.add(alocacao.data);
     linha.horasNormais += apuracao.horasNormaisApuradas;
     linha.custoBase += custoBase;
+  }
+
+  if (
+    input.periodoInicial &&
+    input.periodoFinal &&
+    input.periodoFinal >= SUPERVISOR_CC_DATA_CORTE
+  ) {
+    const inicioNovaRegra =
+      input.periodoInicial < SUPERVISOR_CC_DATA_CORTE
+        ? SUPERVISOR_CC_DATA_CORTE
+        : input.periodoInicial;
+    for (const funcionario of input.funcionarios.filter((item) =>
+      categoriaEhSupervisor(item.categoria_mo),
+    )) {
+      const custo = input.custos.get(funcionario.id);
+      if (!custo || custo.total <= 0) continue;
+      const resultado = ratearSupervisorPorVigencias({
+        funcionarioId: funcionario.id,
+        competenciaInicio: inicioNovaRegra,
+        competenciaFim: input.periodoFinal,
+        dataAdmissao: funcionario.data_admissao,
+        dataDesligamento: funcionario.data_desligamento,
+        custoMensal: custo.total,
+        regime: null,
+        vigencias: input.vigenciasCentroCusto ?? [],
+      });
+      if (resultado.datasSemVigencia.length > 0)
+        avisos.add("Há Supervisores com lacuna de vigência de centro de custo no período ativo.");
+      for (const parcela of resultado.parcelas) {
+        const linha = obterLinha(parcela.obraId, funcionario, "MOI", null, false);
+        linha.custoBase += parcela.custoMensal;
+        for (let data = parcela.inicioEfetivo; data <= parcela.fimEfetivo;) {
+          linha.datas.add(data);
+          const vigente = regimeNaData([...(input.vigenciasRegime ?? [])], funcionario.id, data);
+          if (vigente?.regime === "alojado") linha.custoRegimeAlojado += 77;
+          else if (!vigente)
+            avisos.add("Regime não informado para Supervisor com vigência de centro de custo.");
+          else
+            avisos.add("Supervisor com regime Local requer revisão; refeição não foi presumida.");
+          const proxima = new Date(`${data}T00:00:00Z`);
+          proxima.setUTCDate(proxima.getUTCDate() + 1);
+          data = proxima.toISOString().slice(0, 10);
+        }
+      }
+    }
   }
 
   for (const registro of input.registros) {
@@ -364,7 +421,14 @@ export function consolidarCustosCentros(input: Input) {
         obraId: registro.obra_id,
         data: registro.data,
       }));
-    const vigencias = [...(input.vigenciasRegime ?? [])];
+    const vigencias = [...(input.vigenciasRegime ?? [])].filter((vigencia) => {
+      const funcionario = funcMap.get(vigencia.funcionarioId);
+      return !(
+        input.periodoInicial! >= SUPERVISOR_CC_DATA_CORTE &&
+        funcionario &&
+        categoriaEhSupervisor(funcionario.categoria_mo)
+      );
+    });
     const apuracao = apurarCustosRegime({
       vigencias,
       alocacoes: [...(input.alocacoesReferenciaRegime ?? [])],

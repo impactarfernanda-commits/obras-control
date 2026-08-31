@@ -20,6 +20,10 @@ import {
   type FechamentoCompetencia,
 } from "@/lib/competencias";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
+import {
+  SUPERVISOR_CC_DATA_CORTE,
+  supervisorPodeRegistrarTipoNoPeriodo,
+} from "@/lib/supervisor-cc";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
@@ -145,8 +149,15 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
     () =>
       (funcionarios ?? [])
         .filter((f) => funcionarioElegivelNoPeriodo(f, dataInicio, dataFim))
+        .filter((f) =>
+          supervisorPodeRegistrarTipoNoPeriodo({
+            categoria: f.categoria_mo,
+            tipoRegistro,
+            dataFim,
+          }),
+        )
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
-    [funcionarios, dataInicio, dataFim],
+    [funcionarios, dataInicio, dataFim, tipoRegistro],
   );
   useEffect(() => {
     if (funcionarioId && !funcionariosElegiveis.some((f) => f.id === funcionarioId)) {
@@ -591,6 +602,11 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Funcionário</Label>
+              {dataFim >= SUPERVISOR_CC_DATA_CORTE && !ausenciaPlanejada && (
+                <p className="text-xs text-muted-foreground">
+                  Supervisores não registram horas ou falta após 25/08/2026.
+                </p>
+              )}
               <FuncionarioSearchSelect
                 funcionarios={funcionariosElegiveis}
                 value={funcionarioId}

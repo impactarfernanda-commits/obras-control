@@ -55,6 +55,7 @@ import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
 import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
+import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
@@ -360,8 +361,21 @@ function RelatoriosPage() {
             : dataLimiteAnalise;
         const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
         const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
-        const diasComAlocacao = diasDisponiveis.filter((data) => datasAlocadas.has(data));
-        const diasSemAlocacao = diasDisponiveis.filter((data) => !datasAlocadas.has(data));
+        const vigenciasSupervisor = categoriaEhSupervisor(f.categoria_mo)
+          ? (relatorioSemAlocacao?.vigenciasCentroCusto ?? []).filter(
+              (vigencia) => vigencia.funcionario_id === f.id,
+            )
+          : [];
+        const coberto = (data: string) =>
+          datasAlocadas.has(data) ||
+          (data >= SUPERVISOR_CC_DATA_CORTE &&
+            vigenciasSupervisor.some(
+              (vigencia) =>
+                vigencia.vigencia_inicio <= data &&
+                (!vigencia.vigencia_fim || vigencia.vigencia_fim >= data),
+            ));
+        const diasComAlocacao = diasDisponiveis.filter(coberto);
+        const diasSemAlocacao = diasDisponiveis.filter((data) => !coberto(data));
         const admitidoNoPeriodo = Boolean(
           f.data_admissao && f.data_admissao >= start && f.data_admissao <= end,
         );
@@ -369,9 +383,12 @@ function RelatoriosPage() {
           f.data_desligamento && f.data_desligamento >= start && f.data_desligamento <= end,
         );
         const observacoes = [
-          diasComAlocacao.length === 0
-            ? "Sem nenhuma alocação registrada na competência."
-            : "Possui alocação parcial. Existem dias úteis sem lançamento.",
+          categoriaEhSupervisor(f.categoria_mo) &&
+          diasSemAlocacao.some((data) => data >= SUPERVISOR_CC_DATA_CORTE)
+            ? "Supervisor com ausência ou lacuna de vigência de centro de custo."
+            : diasComAlocacao.length === 0
+              ? "Sem nenhuma alocação registrada na competência."
+              : "Possui alocação parcial. Existem dias úteis sem lançamento.",
         ];
         if (admitidoNoPeriodo)
           observacoes.push(
@@ -425,6 +442,7 @@ function RelatoriosPage() {
     coberturaFilter,
     ultimoCcFilter,
     ultimaAlocacaoPorFuncionario,
+    relatorioSemAlocacao?.vigenciasCentroCusto,
   ]);
 
   const categoriasPendencias = useMemo(

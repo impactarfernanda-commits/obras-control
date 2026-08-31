@@ -69,6 +69,7 @@ import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
+import { categoriaEhSupervisor, supervisorPodeRegistrarTipoNoPeriodo } from "@/lib/supervisor-cc";
 import { AlocarPeriodoDialog } from "@/components/AlocarPeriodoDialog";
 import { CopiarDiaAnteriorDialog } from "@/components/CopiarDiaAnteriorDialog";
 import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
@@ -298,6 +299,9 @@ function AlocacoesPage() {
   const [editObservacoes, setEditObservacoes] = useState("");
   const [editEspecialidadeAjudante, setEditEspecialidadeAjudante] =
     useState<EspecialidadeAjudante | null>(null);
+  const [tipoRegistroFiltro, setTipoRegistroFiltro] = useState<TipoRegistro>("horas");
+  const [dataRegistroFiltro, setDataRegistroFiltro] = useState(dataLocalHoje);
+  const [dataFimRegistroFiltro, setDataFimRegistroFiltro] = useState(dataLocalHoje);
   const [obraFiltro, setObraFiltro] = useState<string>("all");
   const [alocacaoFeedback, setAlocacaoFeedback] = useState<MensagemAlocacaoConflito | null>(null);
   const now = new Date();
@@ -346,9 +350,19 @@ function AlocacoesPage() {
     () =>
       (funcionarios ?? [])
         .filter((f) => funcionarioElegivelNoPeriodo(f, startISO, endISO))
+        .filter((f) =>
+          supervisorPodeRegistrarTipoNoPeriodo({
+            categoria: f.categoria_mo,
+            tipoRegistro: tipoRegistroFiltro,
+            dataFim:
+              tipoRegistroFiltro === "ferias" || tipoRegistroFiltro === "folga_campo"
+                ? dataFimRegistroFiltro
+                : dataRegistroFiltro,
+          }),
+        )
         .slice()
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
-    [funcionarios, startISO, endISO],
+    [funcionarios, startISO, endISO, tipoRegistroFiltro, dataRegistroFiltro, dataFimRegistroFiltro],
   );
   const infoById = useMemo(() => {
     const m = new Map<
@@ -786,6 +800,27 @@ function AlocacoesPage() {
   }, [form, funcionarioSelecionadoExigeEspecialidade]);
   const watchTipoRegistro = form.watch("tipo_registro");
   const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: watchTipoRegistro });
+  const watchDataFim = form.watch("data_fim");
+  useEffect(() => {
+    const selecionado = (funcionarios ?? []).find((item) => item.id === watchFuncionarioId);
+    if (
+      selecionado &&
+      !supervisorPodeRegistrarTipoNoPeriodo({
+        categoria: selecionado.categoria_mo,
+        tipoRegistro: watchTipoRegistro,
+        dataFim: ausenciaPlanejada ? watchDataFim : watchData,
+      })
+    )
+      form.setValue("funcionario_id", "");
+  }, [
+    ausenciaPlanejada,
+    form,
+    funcionarios,
+    watchData,
+    watchDataFim,
+    watchFuncionarioId,
+    watchTipoRegistro,
+  ]);
   const watchEntrada = form.watch("hora_entrada");
   const watchSaida = form.watch("hora_saida");
   const watchIntervaloMinutos = form.watch("intervalo_minutos");
@@ -979,6 +1014,9 @@ function AlocacoesPage() {
       qc.invalidateQueries({ queryKey: ["registros"] });
       setOpen(false);
       form.reset(defaultFormValues);
+      setTipoRegistroFiltro("horas");
+      setDataRegistroFiltro(today);
+      setDataFimRegistroFiltro(today);
     },
     onError: (e: ErrorLike) => {
       if (isAlocacaoConflitoError(e)) {
@@ -1386,6 +1424,10 @@ function AlocacoesPage() {
                               type="date"
                               max={ausenciaPlanejada ? undefined : today}
                               {...field}
+                              onChange={(event) => {
+                                field.onChange(event);
+                                setDataRegistroFiltro(event.target.value);
+                              }}
                             />
                           </FormControl>
                           <FormMessage />
@@ -1402,6 +1444,20 @@ function AlocacoesPage() {
                             value={field.value}
                             onValueChange={(value: TipoRegistro) => {
                               field.onChange(value);
+                              setTipoRegistroFiltro(value);
+                              if (
+                                funcionarioSelecionado &&
+                                !supervisorPodeRegistrarTipoNoPeriodo({
+                                  categoria: funcionarioSelecionado.categoria_mo,
+                                  tipoRegistro: value,
+                                  dataFim:
+                                    value === "ferias" || value === "folga_campo"
+                                      ? form.getValues("data_fim")
+                                      : form.getValues("data"),
+                                })
+                              ) {
+                                form.setValue("funcionario_id", "");
+                              }
                               form.setValue("hora_entrada", "");
                               form.setValue("hora_saida", "");
                               form.setValue("justificativa_extras", "");
@@ -1614,7 +1670,15 @@ function AlocacoesPage() {
                             <FormItem>
                               <FormLabel>Até</FormLabel>
                               <FormControl>
-                                <Input type="date" min={watchData} {...field} />
+                                <Input
+                                  type="date"
+                                  min={watchData}
+                                  {...field}
+                                  onChange={(event) => {
+                                    field.onChange(event);
+                                    setDataFimRegistroFiltro(event.target.value);
+                                  }}
+                                />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -1749,8 +1813,34 @@ function AlocacoesPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="horas">Horas trabalhadas</SelectItem>
-                    <SelectItem value="falta">Falta</SelectItem>
+                    <SelectItem
+                      value="horas"
+                      disabled={
+                        !!alocacaoEmEdicao &&
+                        !supervisorPodeRegistrarTipoNoPeriodo({
+                          categoria: infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)
+                            ?.categoria,
+                          tipoRegistro: "horas",
+                          dataFim: alocacaoEmEdicao.data,
+                        })
+                      }
+                    >
+                      Horas trabalhadas
+                    </SelectItem>
+                    <SelectItem
+                      value="falta"
+                      disabled={
+                        !!alocacaoEmEdicao &&
+                        !supervisorPodeRegistrarTipoNoPeriodo({
+                          categoria: infoHistoricoById.get(alocacaoEmEdicao.funcionario_id)
+                            ?.categoria,
+                          tipoRegistro: "falta",
+                          dataFim: alocacaoEmEdicao.data,
+                        })
+                      }
+                    >
+                      Falta
+                    </SelectItem>
                     <SelectItem value="ferias">Férias</SelectItem>
                     <SelectItem value="folga_campo">Folga de campo</SelectItem>
                   </SelectContent>

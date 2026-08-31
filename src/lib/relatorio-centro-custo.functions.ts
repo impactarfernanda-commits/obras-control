@@ -18,6 +18,7 @@ import {
 } from "@/lib/relatorio-centro-custo";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import type { RegimeVigencia } from "@/lib/regimes";
+import type { VigenciaCentroCusto } from "@/lib/supervisor-cc";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 type FuncionarioInterno = {
@@ -68,6 +69,7 @@ export function montarRelatorioCentrosCusto(input: {
     data: string;
   }>;
   alocacoesReferenciaClassificacao?: AlocacaoRelatorio[];
+  vigenciasCentroCusto?: VigenciaCentroCusto[];
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
   const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
@@ -110,6 +112,7 @@ export function montarRelatorioCentrosCusto(input: {
     vigenciasRegime: input.vigenciasRegime,
     alocacoesReferenciaRegime: input.alocacoesReferenciaRegime,
     alocacoesReferenciaClassificacao: input.alocacoesReferenciaClassificacao,
+    vigenciasCentroCusto: input.vigenciasCentroCusto,
   });
   return {
     competencia: input.competencia,
@@ -149,6 +152,7 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
       detalhesRes,
       feriadosRes,
       regimes,
+      vigenciasCentroCusto,
       alocacoesReferenciaRegime,
     ] = await Promise.all([
       buscarTodasPaginas<FuncionarioInterno>((from, to) =>
@@ -231,6 +235,26 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
           .order("vigencia_inicio")
           .range(from, to),
       ),
+      buscarTodasPaginas<{
+        funcionario_id: string;
+        obra_id: string;
+        vigencia_inicio: string;
+        vigencia_fim: string | null;
+        origem: string;
+        observacao: string | null;
+      }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("funcionario_cc_vigencias" as never)
+            .select(
+              "funcionario_id,obra_id,vigencia_inicio,vigencia_fim,origem,observacao" as never,
+            )
+            .lte("vigencia_inicio" as never, periodo.end as never)
+            .or(`vigencia_fim.is.null,vigencia_fim.gte.${periodo.start}` as never)
+            .order("funcionario_id" as never)
+            .order("vigencia_inicio" as never)
+            .range(from, to) as never,
+      ),
       (async () => {
         const result = await supabaseAdmin.rpc("obras_control_alocacoes_referencia_regime", {
           p_inicio: periodo.start,
@@ -278,6 +302,14 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
         regime: vigencia.regime,
         vigenciaInicio: vigencia.vigencia_inicio,
         vigenciaFim: vigencia.vigencia_fim,
+      })),
+      vigenciasCentroCusto: vigenciasCentroCusto.map((vigencia) => ({
+        funcionarioId: vigencia.funcionario_id,
+        obraId: vigencia.obra_id,
+        vigenciaInicio: vigencia.vigencia_inicio,
+        vigenciaFim: vigencia.vigencia_fim,
+        origem: vigencia.origem,
+        observacao: vigencia.observacao,
       })),
       alocacoesReferenciaRegime: alocacoesReferenciaRegime.map((alocacao) => ({
         funcionarioId: alocacao.funcionario_id,

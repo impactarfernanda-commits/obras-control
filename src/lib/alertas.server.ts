@@ -33,7 +33,9 @@ function isoDate(d: Date) {
 // Retorna "YYYY-MM" da competência para uma data ISO.
 function payrollMonthKey(isoDay: string): string {
   const [yStr, mStr, dStr] = isoDay.split("-");
-  const y = Number(yStr), m = Number(mStr), day = Number(dStr);
+  const y = Number(yStr),
+    m = Number(mStr),
+    day = Number(dStr);
   const dt = new Date(y, m - 1 + (day >= 25 ? 1 : 0), 1);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -44,11 +46,9 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
   const hojeStr = isoDate(hoje);
 
   // Recipients: assistente, supervisor, coordenador, gerente, diretor
-  const { data: roleRows } = await admin
-    .from("user_roles")
-    .select("user_id, role");
+  const { data: roleRows } = await admin.from("user_roles").select("user_id, role");
   const recipients = Array.from(
-    new Set((roleRows ?? []).filter((r) => r.role !== null).map((r) => r.user_id as string))
+    new Set((roleRows ?? []).filter((r) => r.role !== null).map((r) => r.user_id as string)),
   );
   if (recipients.length === 0) return { created: 0, alerts: 0 };
 
@@ -59,7 +59,7 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
   desdeAlocacao.setDate(desdeAlocacao.getDate() - DEFAULTS.dias_sem_alocacao);
   const { data: funcAtivos } = await admin
     .from("funcionarios")
-    .select("id, nome")
+    .select("id, nome, categoria_mo")
     .eq("ativo", true);
 
   if (funcAtivos?.length) {
@@ -75,9 +75,22 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       .gte("data", isoDate(desdeAlocacao))
       .in("funcionario_id", ids);
     const comAtividade = new Set<string>([
-      ...((alocs ?? []).map((a) => a.funcionario_id as string)),
-      ...((regs ?? []).map((r) => r.funcionario_id as string)),
+      ...(alocs ?? []).map((a) => a.funcionario_id as string),
+      ...(regs ?? []).map((r) => r.funcionario_id as string),
     ]);
+    const { data: vigenciasSupervisor } =
+      hojeStr >= SUPERVISOR_CC_DATA_CORTE
+        ? await admin
+            .from("funcionario_cc_vigencias" as never)
+            .select("funcionario_id" as never)
+            .lte("vigencia_inicio" as never, hojeStr as never)
+            .or(`vigencia_fim.is.null,vigencia_fim.gte.${hojeStr}` as never)
+        : { data: [] };
+    const supervisoresComVigencia = new Set(
+      ((vigenciasSupervisor as unknown as Array<{ funcionario_id: string }> | null) ?? []).map(
+        (item) => item.funcionario_id,
+      ),
+    );
 
     // Histórico completo para identificar quem nunca foi alocado
     const { data: alocsAll } = await admin
@@ -89,11 +102,23 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       .select("funcionario_id")
       .in("funcionario_id", ids);
     const jaAlocado = new Set<string>([
-      ...((alocsAll ?? []).map((a) => a.funcionario_id as string)),
-      ...((regsAll ?? []).map((r) => r.funcionario_id as string)),
+      ...(alocsAll ?? []).map((a) => a.funcionario_id as string),
+      ...(regsAll ?? []).map((r) => r.funcionario_id as string),
     ]);
 
     for (const f of funcAtivos) {
+      if (hojeStr >= SUPERVISOR_CC_DATA_CORTE && categoriaEhSupervisor(f.categoria_mo)) {
+        if (!supervisoresComVigencia.has(f.id))
+          alerts.push({
+            tipo: "sem_alocacao",
+            titulo: `Supervisor sem vigência de CC: ${f.nome}`,
+            mensagem: `${f.nome} está ativo, mas não possui vigência de centro de custo na data atual.`,
+            severidade: "warning",
+            metadata: { funcionario_id: f.id, funcionario_nome: f.nome },
+            dedupe_key: `supervisor_sem_vigencia:${f.id}:${hojeStr}`,
+          });
+        continue;
+      }
       if (!jaAlocado.has(f.id)) {
         alerts.push({
           tipo: "nunca_alocado",
@@ -116,7 +141,6 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
     }
   }
 
-
   // === 2. Horas extras > 15h/semana ===
   const semanaIni = new Date(hoje);
   semanaIni.setDate(semanaIni.getDate() - 7);
@@ -126,7 +150,11 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
     .gte("data", isoDate(semanaIni));
   if (regSemana) {
     const acc = new Map<string, { total: number; nome: string }>();
-    for (const r of regSemana as Array<{ funcionario_id: string; horas_extras: number; funcionarios: Array<{ nome: string }> | null }>) {
+    for (const r of regSemana as Array<{
+      funcionario_id: string;
+      horas_extras: number;
+      funcionarios: Array<{ nome: string }> | null;
+    }>) {
       const cur = acc.get(r.funcionario_id) ?? { total: 0, nome: r.funcionarios?.[0]?.nome ?? "?" };
       cur.total += Number(r.horas_extras || 0);
       acc.set(r.funcionario_id, cur);
@@ -152,7 +180,12 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
   if (custos?.length) {
     const porObraMes = new Map<string, Map<string, number>>();
     const obraNome = new Map<string, string>();
-    for (const c of custos as Array<{ obra_id: string; valor: number; data: string; obras: Array<{ nome: string }> | null }>) {
+    for (const c of custos as Array<{
+      obra_id: string;
+      valor: number;
+      data: string;
+      obras: Array<{ nome: string }> | null;
+    }>) {
       const mes = payrollMonthKey(c.data);
       if (!porObraMes.has(c.obra_id)) porObraMes.set(c.obra_id, new Map());
       const m = porObraMes.get(c.obra_id)!;
@@ -190,19 +223,32 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
     .order("data", { ascending: true });
   if (ausencias) {
     const porFunc = new Map<string, { datas: string[]; nome: string }>();
-    for (const a of ausencias as Array<{ funcionario_id: string; data: string; funcionarios: Array<{ nome: string }> | null }>) {
-      const cur = porFunc.get(a.funcionario_id) ?? { datas: [], nome: a.funcionarios?.[0]?.nome ?? "?" };
+    for (const a of ausencias as Array<{
+      funcionario_id: string;
+      data: string;
+      funcionarios: Array<{ nome: string }> | null;
+    }>) {
+      const cur = porFunc.get(a.funcionario_id) ?? {
+        datas: [],
+        nome: a.funcionarios?.[0]?.nome ?? "?",
+      };
       cur.datas.push(a.data);
       porFunc.set(a.funcionario_id, cur);
     }
     for (const [fid, info] of porFunc) {
       // contar maior sequência consecutiva
-      let max = 1, cur = 1;
+      let max = 1,
+        cur = 1;
       for (let i = 1; i < info.datas.length; i++) {
         const prev = new Date(info.datas[i - 1]);
         const next = new Date(info.datas[i]);
         const diff = (next.getTime() - prev.getTime()) / 86400000;
-        if (diff === 1) { cur++; max = Math.max(max, cur); } else { cur = 1; }
+        if (diff === 1) {
+          cur++;
+          max = Math.max(max, cur);
+        } else {
+          cur = 1;
+        }
       }
       if (max > DEFAULTS.dias_ausencia) {
         alerts.push({
@@ -232,9 +278,7 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
     }
     for (const o of obras) {
       const ult = ultimoPorObra.get(o.id);
-      const diff = ult
-        ? Math.floor((hoje.getTime() - new Date(ult).getTime()) / 86400000)
-        : 999;
+      const diff = ult ? Math.floor((hoje.getTime() - new Date(ult).getTime()) / 86400000) : 999;
       if (diff > DEFAULTS.dias_sem_lancamento) {
         alerts.push({
           tipo: "obra_sem_lancamento",
@@ -262,7 +306,7 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       severidade: a.severidade,
       metadata: a.metadata ?? {},
       dedupe_key: `${uid}:${a.dedupe_key}`,
-    }))
+    })),
   );
 
   // upsert by dedupe_key
@@ -273,3 +317,4 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
 
   return { created: count ?? 0, alerts: alerts.length };
 }
+import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";

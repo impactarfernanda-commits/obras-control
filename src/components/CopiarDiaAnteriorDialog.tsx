@@ -19,6 +19,7 @@ import { calcularCompetencia } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import { exigeJustificativaExtras, justificativaExtrasValida } from "@/lib/extras-justificativa";
 import { categoriaEhAjudante, type EspecialidadeAjudante } from "@/lib/especialidade-ajudante";
+import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";
 import {
   especialidadeNovaAlocacao,
   funcionariosAjudantesSemEspecialidade,
@@ -163,62 +164,68 @@ export function CopiarDiaAnteriorDialog({
       setEditandoId(null);
       const previaResolvida: ResumoCopiaResolvido = {
         ...resumo,
-        itens: resumo.itens.map((item) => {
-          const ajudante = categoriaEhAjudante(categorias.get(item.funcionario_id));
-          const alocacaoOrigem = origens.get(item.funcionario_id);
-          const registroOrigem = registrosOrigem.get(item.funcionario_id);
-          if (item.status === "adicionar") {
-            const horaEntrada = alocacaoOrigem?.hora_entrada?.slice(0, 5) ?? "07:00";
-            const intervaloMinutos = alocacaoOrigem?.intervalo_padrao_minutos ?? 60;
-            const totalLegado =
-              Number(registroOrigem?.horas_normais ?? 0) +
-              Number(registroOrigem?.horas_extras ?? 0);
-            const minutosSaida =
-              (Number(horaEntrada.slice(0, 2)) * 60 +
-                Number(horaEntrada.slice(3, 5)) +
-                Math.round(totalLegado * 60) +
-                intervaloMinutos) %
-              1440;
-            const horaSaida =
-              alocacaoOrigem?.hora_saida?.slice(0, 5) ??
-              `${String(Math.floor(minutosSaida / 60)).padStart(2, "0")}:${String(minutosSaida % 60).padStart(2, "0")}`;
-            const detalhe = calcularJornadaDetalhada({
-              data: destino,
-              horaEntrada,
-              horaSaida,
-              intervaloMinutos,
-              funcao: categorias.get(item.funcionario_id),
-              feriados: feriadosPrevia,
-            });
-            rascunhosPrevia[item.funcionario_id] = {
-              funcionarioId: item.funcionario_id,
-              incluirNaCopia: true,
-              horaEntrada,
-              horaSaida,
-              intervaloMinutos,
-              horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
-              horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
-              justificativa: registroOrigem?.justificativa_extras ?? null,
-              observacoes: registroOrigem?.observacoes ?? null,
-              detalhe,
-              ajustada: false,
+        itens: resumo.itens
+          .filter(
+            (item) =>
+              destino < SUPERVISOR_CC_DATA_CORTE ||
+              !categoriaEhSupervisor(categorias.get(item.funcionario_id)),
+          )
+          .map((item) => {
+            const ajudante = categoriaEhAjudante(categorias.get(item.funcionario_id));
+            const alocacaoOrigem = origens.get(item.funcionario_id);
+            const registroOrigem = registrosOrigem.get(item.funcionario_id);
+            if (item.status === "adicionar") {
+              const horaEntrada = alocacaoOrigem?.hora_entrada?.slice(0, 5) ?? "07:00";
+              const intervaloMinutos = alocacaoOrigem?.intervalo_padrao_minutos ?? 60;
+              const totalLegado =
+                Number(registroOrigem?.horas_normais ?? 0) +
+                Number(registroOrigem?.horas_extras ?? 0);
+              const minutosSaida =
+                (Number(horaEntrada.slice(0, 2)) * 60 +
+                  Number(horaEntrada.slice(3, 5)) +
+                  Math.round(totalLegado * 60) +
+                  intervaloMinutos) %
+                1440;
+              const horaSaida =
+                alocacaoOrigem?.hora_saida?.slice(0, 5) ??
+                `${String(Math.floor(minutosSaida / 60)).padStart(2, "0")}:${String(minutosSaida % 60).padStart(2, "0")}`;
+              const detalhe = calcularJornadaDetalhada({
+                data: destino,
+                horaEntrada,
+                horaSaida,
+                intervaloMinutos,
+                funcao: categorias.get(item.funcionario_id),
+                feriados: feriadosPrevia,
+              });
+              rascunhosPrevia[item.funcionario_id] = {
+                funcionarioId: item.funcionario_id,
+                incluirNaCopia: true,
+                horaEntrada,
+                horaSaida,
+                intervaloMinutos,
+                horasNormais: (detalhe.minutosNormais + detalhe.minutosSemAdicionalHe) / 60,
+                horasExtras: (detalhe.minutosHe50 + detalhe.minutosHe100) / 60,
+                justificativa: registroOrigem?.justificativa_extras ?? null,
+                observacoes: registroOrigem?.observacoes ?? null,
+                detalhe,
+                ajustada: false,
+              };
+            }
+            return {
+              ...item,
+              ajudante,
+              resolucao: ajudante
+                ? resolverEspecialidadeAjudante({
+                    funcionarioId: item.funcionario_id,
+                    obraId,
+                    competencia: competenciaDestino.competencia,
+                    dataDestino: destino,
+                    especialidadeOrigem: alocacaoOrigem?.especialidade_ajudante,
+                    historico: historicoResult.data ?? [],
+                  })
+                : null,
             };
-          }
-          return {
-            ...item,
-            ajudante,
-            resolucao: ajudante
-              ? resolverEspecialidadeAjudante({
-                  funcionarioId: item.funcionario_id,
-                  obraId,
-                  competencia: competenciaDestino.competencia,
-                  dataDestino: destino,
-                  especialidadeOrigem: alocacaoOrigem?.especialidade_ajudante,
-                  historico: historicoResult.data ?? [],
-                })
-              : null,
-          };
-        }),
+          }),
       };
       setFuncoes(funcoesPrevia);
       setFeriados(feriadosPrevia);
