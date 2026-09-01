@@ -1,5 +1,9 @@
 export const SUPERVISOR_CC_DATA_CORTE = "2026-08-25";
 
+// Suspensao temporaria definida pela direcao. Manter a infraestrutura de vigencias
+// pronta para reativacao alterando somente este sinal.
+export const SUPERVISOR_CC_VIGENCIAS_ATIVAS = false;
+
 export function normalizarCategoriaFuncionario(valor: string | null | undefined) {
   return (valor ?? "")
     .normalize("NFD")
@@ -18,7 +22,11 @@ export function supervisorPodeRegistrarTipoNoPeriodo(input: {
   tipoRegistro: "horas" | "falta" | "ferias" | "folga_campo";
   dataFim: string;
 }) {
-  if (!categoriaEhSupervisor(input.categoria) || input.dataFim < SUPERVISOR_CC_DATA_CORTE)
+  if (
+    !SUPERVISOR_CC_VIGENCIAS_ATIVAS ||
+    !categoriaEhSupervisor(input.categoria) ||
+    input.dataFim < SUPERVISOR_CC_DATA_CORTE
+  )
     return true;
   return input.tipoRegistro === "ferias" || input.tipoRegistro === "folga_campo";
 }

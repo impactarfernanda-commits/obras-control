@@ -67,7 +67,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MARCO_INICIAL_REGIMES, vigenciaInicialOuMudanca } from "@/lib/regimes";
-import { categoriaEhSupervisor } from "@/lib/supervisor-cc";
+import { SUPERVISOR_CC_VIGENCIAS_ATIVAS, categoriaEhSupervisor } from "@/lib/supervisor-cc";
 
 export const Route = createFileRoute("/_authenticated/funcionarios")({
   component: FuncionariosPage,
@@ -916,7 +916,8 @@ function FuncionariosPage() {
                         <TableCell>{f.categoria_mo}</TableCell>
                         <TableCell>{tipo && <Badge variant="outline">{tipo}</Badge>}</TableCell>
                         <TableCell className="text-sm">
-                          {categoriaEhSupervisor(f.categoria_mo) ? (
+                          {SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
+                          categoriaEhSupervisor(f.categoria_mo) ? (
                             <SupervisorCentroCustoDialog
                               funcionario={f}
                               obras={obras ?? []}

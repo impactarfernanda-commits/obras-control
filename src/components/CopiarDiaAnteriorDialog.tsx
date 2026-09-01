@@ -21,7 +21,11 @@ import { calcularCompetencia } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import { exigeJustificativaExtras, justificativaExtrasValida } from "@/lib/extras-justificativa";
 import { categoriaEhAjudante, type EspecialidadeAjudante } from "@/lib/especialidade-ajudante";
-import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";
+import {
+  SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
+  categoriaEhSupervisor,
+} from "@/lib/supervisor-cc";
 import {
   especialidadeNovaAlocacao,
   funcionariosAjudantesSemEspecialidade,
@@ -275,6 +279,7 @@ export function CopiarDiaAnteriorDialog({
         itens: resumo.itens
           .filter(
             (item) =>
+              !SUPERVISOR_CC_VIGENCIAS_ATIVAS ||
               destino < SUPERVISOR_CC_DATA_CORTE ||
               !categoriaEhSupervisor(categorias.get(item.funcionario_id)),
           )

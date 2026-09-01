@@ -22,6 +22,7 @@ import {
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import {
   SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
   supervisorPodeRegistrarTipoNoPeriodo,
 } from "@/lib/supervisor-cc";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
@@ -680,11 +681,13 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Funcionário</Label>
-              {dataFim >= SUPERVISOR_CC_DATA_CORTE && !ausenciaPlanejada && (
-                <p className="text-xs text-muted-foreground">
-                  Supervisores não registram horas ou falta após 25/08/2026.
-                </p>
-              )}
+              {SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
+                dataFim >= SUPERVISOR_CC_DATA_CORTE &&
+                !ausenciaPlanejada && (
+                  <p className="text-xs text-muted-foreground">
+                    Supervisores não registram horas ou falta após 25/08/2026.
+                  </p>
+                )}
               <FuncionarioSearchSelect
                 funcionarios={funcionariosElegiveis}
                 value={funcionarioId}

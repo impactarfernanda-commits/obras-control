@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
   categoriaEhSupervisor,
   supervisorPodeRegistrarTipoNoPeriodo,
   ratearSupervisorPorVigencias,
 } from "./supervisor-cc.ts";
 import { consolidarCustosCentros } from "./relatorio-centro-custo.ts";
 
-test("Supervisor apos o corte registra somente ferias e folga de campo", () => {
-  for (const tipoRegistro of ["ferias", "folga_campo"] as const) {
+test("suspensao restaura todos os apontamentos de Supervisor apos o corte", () => {
+  assert.equal(SUPERVISOR_CC_VIGENCIAS_ATIVAS, false);
+  for (const tipoRegistro of ["horas", "falta", "ferias", "folga_campo"] as const) {
     assert.equal(
       supervisorPodeRegistrarTipoNoPeriodo({
         categoria: "Supervisor I",
@@ -17,16 +19,6 @@ test("Supervisor apos o corte registra somente ferias e folga de campo", () => {
         dataFim: "2026-08-25",
       }),
       true,
-    );
-  }
-  for (const tipoRegistro of ["horas", "falta"] as const) {
-    assert.equal(
-      supervisorPodeRegistrarTipoNoPeriodo({
-        categoria: "Supervisor I",
-        tipoRegistro,
-        dataFim: "2026-08-25",
-      }),
-      false,
     );
   }
 });
@@ -166,7 +158,7 @@ test("regime nao alojado nao recebe refeicao presumida", () => {
   assert.equal(resultado.parcelas[0].custoRefeicaoAlojado, 0);
 });
 
-test("relatorio usa vigencia como MOI e ignora alocacao diaria duplicada apos o corte", () => {
+test("relatorio suspenso ignora vigencia e volta a usar alocacao diaria do Supervisor", () => {
   const custo = {
     salario: 1000,
     encargos: 0,
@@ -211,8 +203,7 @@ test("relatorio usa vigencia como MOI e ignora alocacao diaria duplicada apos o 
     ],
   });
   assert.equal(resultado.centros.length, 1);
-  assert.equal(resultado.centros[0].id, "vigente");
-  assert.equal(resultado.centros[0].mod, 0);
-  assert.equal(resultado.centros[0].moi, 3100 + 31 * 77);
-  assert.equal(resultado.centros[0].linhas[0].custoBase, 3100);
+  assert.equal(resultado.centros[0].id, "diario");
+  assert.equal(resultado.centros[0].moi, 0);
+  assert.equal(resultado.centros[0].linhas[0].custoBase, 999);
 });

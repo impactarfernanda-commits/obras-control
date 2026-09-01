@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { SUPERVISOR_CC_VIGENCIAS_ATIVAS } from "@/lib/supervisor-cc";
 import {
   ultimasAlocacoesPorFuncionario,
   type AlocacaoHistorica,
@@ -124,22 +125,24 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
           .order("id", { ascending: true })
           .range(from, to),
       ),
-      buscarTodasPaginas<{
-        funcionario_id: string;
-        obra_id: string;
-        vigencia_inicio: string;
-        vigencia_fim: string | null;
-      }>(
-        (from, to) =>
-          supabaseAdmin
-            .from("funcionario_cc_vigencias" as never)
-            .select("funcionario_id,obra_id,vigencia_inicio,vigencia_fim" as never)
-            .lte("vigencia_inicio" as never, data.referencia as never)
-            .or(`vigencia_fim.is.null,vigencia_fim.gte.${data.inicio}` as never)
-            .order("funcionario_id" as never)
-            .order("vigencia_inicio" as never)
-            .range(from, to) as never,
-      ),
+      SUPERVISOR_CC_VIGENCIAS_ATIVAS
+        ? buscarTodasPaginas<{
+            funcionario_id: string;
+            obra_id: string;
+            vigencia_inicio: string;
+            vigencia_fim: string | null;
+          }>(
+            (from, to) =>
+              supabaseAdmin
+                .from("funcionario_cc_vigencias" as never)
+                .select("funcionario_id,obra_id,vigencia_inicio,vigencia_fim" as never)
+                .lte("vigencia_inicio" as never, data.referencia as never)
+                .or(`vigencia_fim.is.null,vigencia_fim.gte.${data.inicio}` as never)
+                .order("funcionario_id" as never)
+                .order("vigencia_inicio" as never)
+                .range(from, to) as never,
+          )
+        : Promise.resolve([]),
     ]);
     const cobertura = new Map<string, { funcionario_id: string; data: string }>();
     for (const item of [...alocacoes, ...ausenciasPlanejadas]) {

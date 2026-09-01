@@ -6,6 +6,13 @@ const migration = readFileSync(
   new URL("../../supabase/migrations/20260828190537_supervisor_cc_vigencias.sql", import.meta.url),
   "utf8",
 );
+const migrationSuspensao = readFileSync(
+  new URL(
+    "../../supabase/migrations/20260901083049_suspende_guard_supervisor_apontamento_diario.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const diagnostico = readFileSync(
   new URL("../../supabase/manual/diagnostico_previa_supervisores_cc_20260825.sql", import.meta.url),
   "utf8",
@@ -26,6 +33,23 @@ test("migration cria vigencia sem sobreposicao, RLS e grants explicitos", () => 
     /GRANT SELECT ON TABLE public\.funcionario_cc_vigencias TO authenticated/,
   );
   assert.doesNotMatch(migration, /GRANT (INSERT|UPDATE|DELETE)[^;]+authenticated/);
+});
+
+test("migration posterior versiona exatamente o guard temporariamente permissivo", () => {
+  assert.match(migrationSuspensao, /suspensao temporaria[\s\S]*definicao da direcao/i);
+  assert.match(
+    migrationSuspensao,
+    /CREATE OR REPLACE FUNCTION public\.guard_supervisor_sem_apontamento_diario\(\)\s+RETURNS trigger\s+LANGUAGE plpgsql\s+SECURITY DEFINER\s+SET search_path = pg_catalog, public/i,
+  );
+  assert.match(migrationSuspensao, /AS \$function\$\s*BEGIN\s*RETURN NEW;\s*END;\s*\$function\$;/i);
+  assert.doesNotMatch(
+    migrationSuspensao,
+    /\b(DROP|ALTER|DELETE|INSERT|UPDATE|TRUNCATE|CREATE\s+TRIGGER)\b/i,
+  );
+  assert.doesNotMatch(
+    migrationSuspensao,
+    /funcionario_cc_vigencias|transferir_supervisor_centro_custo/,
+  );
 });
 
 test("RPC autentica, autoriza, serializa, valida categoria e usa competencia fechada canonica", () => {
@@ -181,20 +205,25 @@ test("diagnostico de carga inicial e estritamente somente leitura", () => {
   assert.match(diagnostico, /DATE '2026-08-25'/);
 });
 
-test("interfaces filtram Supervisor por tipo de registro e oferecem transferencia", () => {
+test("infraestrutura permanece disponivel, mas a regra fica centralmente suspensa", () => {
   const arquivos = [
     "../components/AlocarPeriodoDialog.tsx",
     "../components/CopiarDiaAnteriorDialog.tsx",
     "../routes/_authenticated/alocacoes.tsx",
   ].map((arquivo) => readFileSync(new URL(arquivo, import.meta.url), "utf8"));
   assert.match(arquivos[0], /supervisorPodeRegistrarTipoNoPeriodo/);
+  assert.match(arquivos[0], /SUPERVISOR_CC_VIGENCIAS_ATIVAS/);
   assert.match(arquivos[1], /categoriaEhSupervisor/);
+  assert.match(arquivos[1], /SUPERVISOR_CC_VIGENCIAS_ATIVAS/);
   assert.match(arquivos[2], /supervisorPodeRegistrarTipoNoPeriodo/);
   const funcionarios = readFileSync(
     new URL("../routes/_authenticated/funcionarios.tsx", import.meta.url),
     "utf8",
   );
   assert.match(funcionarios, /SupervisorCentroCustoDialog/);
+  assert.match(funcionarios, /SUPERVISOR_CC_VIGENCIAS_ATIVAS/);
+  const regra = readFileSync(new URL("./supervisor-cc.ts", import.meta.url), "utf8");
+  assert.match(regra, /SUPERVISOR_CC_VIGENCIAS_ATIVAS = false/);
   const dialogo = readFileSync(
     new URL("../components/SupervisorCentroCustoDialog.tsx", import.meta.url),
     "utf8",

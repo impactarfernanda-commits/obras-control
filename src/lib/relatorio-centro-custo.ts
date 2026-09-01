@@ -19,6 +19,7 @@ import {
 } from "./regimes.ts";
 import {
   SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
   categoriaEhSupervisor,
   ratearSupervisorPorVigencias,
   type VigenciaCentroCusto,
@@ -221,6 +222,7 @@ export function consolidarCustosCentros(input: Input) {
       continue;
     }
     if (
+      SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
       alocacao.data >= SUPERVISOR_CC_DATA_CORTE &&
       categoriaEhSupervisor(funcionario.categoria_mo)
     )
@@ -298,6 +300,7 @@ export function consolidarCustosCentros(input: Input) {
   }
 
   if (
+    SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
     input.periodoInicial &&
     input.periodoFinal &&
     input.periodoFinal >= SUPERVISOR_CC_DATA_CORTE
@@ -424,6 +427,7 @@ export function consolidarCustosCentros(input: Input) {
     const vigencias = [...(input.vigenciasRegime ?? [])].filter((vigencia) => {
       const funcionario = funcMap.get(vigencia.funcionarioId);
       return !(
+        SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
         input.periodoInicial! >= SUPERVISOR_CC_DATA_CORTE &&
         funcionario &&
         categoriaEhSupervisor(funcionario.categoria_mo)

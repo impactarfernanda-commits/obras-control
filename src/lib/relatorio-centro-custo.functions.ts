@@ -11,6 +11,7 @@ import {
 import { tipoCategoria, type Categoria } from "@/lib/categorias-core";
 import { competenciaUsaSegmentacaoMod } from "@/lib/especialidade-ajudante";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { SUPERVISOR_CC_VIGENCIAS_ATIVAS } from "@/lib/supervisor-cc";
 import {
   consolidarCustosCentros,
   type AlocacaoRelatorio,
@@ -235,26 +236,28 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
           .order("vigencia_inicio")
           .range(from, to),
       ),
-      buscarTodasPaginas<{
-        funcionario_id: string;
-        obra_id: string;
-        vigencia_inicio: string;
-        vigencia_fim: string | null;
-        origem: string;
-        observacao: string | null;
-      }>(
-        (from, to) =>
-          supabaseAdmin
-            .from("funcionario_cc_vigencias" as never)
-            .select(
-              "funcionario_id,obra_id,vigencia_inicio,vigencia_fim,origem,observacao" as never,
-            )
-            .lte("vigencia_inicio" as never, periodo.end as never)
-            .or(`vigencia_fim.is.null,vigencia_fim.gte.${periodo.start}` as never)
-            .order("funcionario_id" as never)
-            .order("vigencia_inicio" as never)
-            .range(from, to) as never,
-      ),
+      SUPERVISOR_CC_VIGENCIAS_ATIVAS
+        ? buscarTodasPaginas<{
+            funcionario_id: string;
+            obra_id: string;
+            vigencia_inicio: string;
+            vigencia_fim: string | null;
+            origem: string;
+            observacao: string | null;
+          }>(
+            (from, to) =>
+              supabaseAdmin
+                .from("funcionario_cc_vigencias" as never)
+                .select(
+                  "funcionario_id,obra_id,vigencia_inicio,vigencia_fim,origem,observacao" as never,
+                )
+                .lte("vigencia_inicio" as never, periodo.end as never)
+                .or(`vigencia_fim.is.null,vigencia_fim.gte.${periodo.start}` as never)
+                .order("funcionario_id" as never)
+                .order("vigencia_inicio" as never)
+                .range(from, to) as never,
+          )
+        : Promise.resolve([]),
       (async () => {
         const result = await supabaseAdmin.rpc("obras_control_alocacoes_referencia_regime", {
           p_inicio: periodo.start,

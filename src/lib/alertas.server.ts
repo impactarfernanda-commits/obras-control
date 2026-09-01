@@ -79,7 +79,7 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
       ...(regs ?? []).map((r) => r.funcionario_id as string),
     ]);
     const { data: vigenciasSupervisor } =
-      hojeStr >= SUPERVISOR_CC_DATA_CORTE
+      SUPERVISOR_CC_VIGENCIAS_ATIVAS && hojeStr >= SUPERVISOR_CC_DATA_CORTE
         ? await admin
             .from("funcionario_cc_vigencias" as never)
             .select("funcionario_id" as never)
@@ -107,7 +107,11 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
     ]);
 
     for (const f of funcAtivos) {
-      if (hojeStr >= SUPERVISOR_CC_DATA_CORTE && categoriaEhSupervisor(f.categoria_mo)) {
+      if (
+        SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
+        hojeStr >= SUPERVISOR_CC_DATA_CORTE &&
+        categoriaEhSupervisor(f.categoria_mo)
+      ) {
         if (!supervisoresComVigencia.has(f.id))
           alerts.push({
             tipo: "sem_alocacao",
@@ -317,4 +321,8 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
 
   return { created: count ?? 0, alerts: alerts.length };
 }
-import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";
+import {
+  SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
+  categoriaEhSupervisor,
+} from "@/lib/supervisor-cc";

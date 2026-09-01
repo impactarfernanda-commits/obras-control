@@ -55,7 +55,11 @@ import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
 import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
-import { SUPERVISOR_CC_DATA_CORTE, categoriaEhSupervisor } from "@/lib/supervisor-cc";
+import {
+  SUPERVISOR_CC_DATA_CORTE,
+  SUPERVISOR_CC_VIGENCIAS_ATIVAS,
+  categoriaEhSupervisor,
+} from "@/lib/supervisor-cc";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
@@ -361,14 +365,16 @@ function RelatoriosPage() {
             : dataLimiteAnalise;
         const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
         const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
-        const vigenciasSupervisor = categoriaEhSupervisor(f.categoria_mo)
-          ? (relatorioSemAlocacao?.vigenciasCentroCusto ?? []).filter(
-              (vigencia) => vigencia.funcionario_id === f.id,
-            )
-          : [];
+        const vigenciasSupervisor =
+          SUPERVISOR_CC_VIGENCIAS_ATIVAS && categoriaEhSupervisor(f.categoria_mo)
+            ? (relatorioSemAlocacao?.vigenciasCentroCusto ?? []).filter(
+                (vigencia) => vigencia.funcionario_id === f.id,
+              )
+            : [];
         const coberto = (data: string) =>
           datasAlocadas.has(data) ||
-          (data >= SUPERVISOR_CC_DATA_CORTE &&
+          (SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
+            data >= SUPERVISOR_CC_DATA_CORTE &&
             vigenciasSupervisor.some(
               (vigencia) =>
                 vigencia.vigencia_inicio <= data &&
@@ -383,6 +389,7 @@ function RelatoriosPage() {
           f.data_desligamento && f.data_desligamento >= start && f.data_desligamento <= end,
         );
         const observacoes = [
+          SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
           categoriaEhSupervisor(f.categoria_mo) &&
           diasSemAlocacao.some((data) => data >= SUPERVISOR_CC_DATA_CORTE)
             ? "Supervisor com ausência ou lacuna de vigência de centro de custo."
