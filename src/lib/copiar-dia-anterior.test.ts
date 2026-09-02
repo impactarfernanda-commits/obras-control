@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ultimaDataAnterior } from "./copiar-dia-anterior.ts";
+import { diaAnterior, ultimaDataAnterior } from "./copiar-dia-anterior.ts";
 
 const componente = readFileSync(
   new URL("../components/CopiarDiaAnteriorDialog.tsx", import.meta.url),
@@ -19,8 +19,16 @@ test("encontra o último dia anterior e segunda pode usar sexta", () => {
   assert.equal(ultimaDataAnterior(["2026-08-07", "2026-08-08"], "2026-08-10"), "2026-08-08");
   assert.equal(ultimaDataAnterior(["2026-08-07"], "2026-08-10"), "2026-08-07");
 });
-test("origem é consultada somente na mesma obra", () =>
-  assert.match(componente, /eq\("obra_id", obraId\).*lt\("data", destino\)/s));
+test("sugere o dia anterior inclusive na virada do mês", () => {
+  assert.equal(diaAnterior("2026-09-02"), "2026-09-01");
+  assert.equal(diaAnterior("2026-09-01"), "2026-08-31");
+});
+test("origem escolhida alimenta a mesma RPC e consultas da obra", () => {
+  assert.match(componente, /p_data_origem: origem/);
+  assert.match(componente, /\.eq\("obra_id", obraId\)\s*\.eq\("data", origem\)/);
+  assert.match(componente, /Data de origem/);
+  assert.match(componente, /origem >= destino/);
+});
 test("confirmação grava jornadas e especialidades pela RPC atômica e invalida queries", () => {
   assert.equal((componente.match(/p_aplicar: false/g) ?? []).length, 1);
   assert.doesNotMatch(componente, /p_aplicar: true/);

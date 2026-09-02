@@ -37,6 +37,14 @@ export function ultimaDataAnterior(datas: readonly string[], destino: string) {
   return datas.filter((data) => data < destino).sort((a, b) => b.localeCompare(a))[0] ?? null;
 }
 
+export function diaAnterior(data: string) {
+  const anterior = new Date(`${data}T00:00:00`);
+  anterior.setDate(anterior.getDate() - 1);
+  return `${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}-${String(
+    anterior.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 export function formatarDataCopia(data: string) {
   return new Date(`${data}T00:00:00`).toLocaleDateString("pt-BR");
 }

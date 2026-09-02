@@ -12,6 +12,20 @@ export const CLASSIFICACOES_FALTA = [
 ] as const;
 
 export type FaltaTipo = (typeof CLASSIFICACOES_FALTA)[number]["value"];
+export type TipoRegistroPeriodo = TipoRegistro | Extract<FaltaTipo, "atestado" | "afastamento">;
+
+export function faltaPermitePeriodo(tipo: string | null | undefined) {
+  return tipo === "atestado" || tipo === "afastamento";
+}
+
+export function normalizarTipoRegistroPeriodo(tipo: TipoRegistroPeriodo): {
+  tipoRegistro: TipoRegistro;
+  faltaTipo: FaltaTipo | null;
+} {
+  return faltaPermitePeriodo(tipo)
+    ? { tipoRegistro: "falta", faltaTipo: tipo as FaltaTipo }
+    : { tipoRegistro: tipo as TipoRegistro, faltaTipo: null };
+}
 
 export const AVISO_FALTA_INTEGRAL =
   "Use esta opção somente para falta integral. Para ausência parcial, registre as horas efetivamente trabalhadas.";

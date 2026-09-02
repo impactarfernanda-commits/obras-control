@@ -16,6 +16,7 @@ import {
   buscarCompetenciasFechadasPorDatas,
   calcularCompetencia,
   formatarPeriodoCompetencia,
+  garantirCompetenciaAberta,
   mensagemErroCompetenciaFechada,
   type FechamentoCompetencia,
 } from "@/lib/competencias";
@@ -38,10 +39,13 @@ import {
 import { sugerirEspecialidadePeriodo } from "@/lib/resolver-especialidade-ajudante";
 import {
   enumerarDiasCorridos,
+  faltaPermitePeriodo,
   mensagemErroRegistro,
+  normalizarTipoRegistroPeriodo,
   registroEhAusenciaPlanejada,
+  rotuloFalta,
   rotuloTipoRegistro,
-  type TipoRegistro,
+  type TipoRegistroPeriodo,
 } from "@/lib/registro-falta";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -109,7 +113,7 @@ type AlocarPeriodoDraft = {
   funcionarioId: string;
   dataInicio: string;
   dataFim: string;
-  tipoRegistro: TipoRegistro;
+  tipoRegistro: TipoRegistroPeriodo;
   especialidadeAjudante: EspecialidadeAjudante | null;
   modo: "pular" | "sobrescrever";
 };
@@ -123,7 +127,9 @@ function isAlocarPeriodoDraft(value: unknown): value is AlocarPeriodoDraft {
     /^\d{4}-\d{2}-\d{2}$/.test(draft.dataInicio) &&
     typeof draft.dataFim === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(draft.dataFim) &&
-    ["horas", "falta", "ferias", "folga_campo"].includes(draft.tipoRegistro ?? "") &&
+    ["horas", "ferias", "folga_campo", "atestado", "afastamento"].includes(
+      draft.tipoRegistro ?? "",
+    ) &&
     (draft.especialidadeAjudante === null ||
       draft.especialidadeAjudante === "civil" ||
       draft.especialidadeAjudante === "montagem") &&
@@ -139,11 +145,14 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const [funcionarioId, setFuncionarioId] = useState<string>("");
   const [dataInicio, setDataInicio] = useState<string>(today);
   const [dataFim, setDataFim] = useState<string>(today);
-  const [tipoRegistro, setTipoRegistro] = useState<TipoRegistro>("horas");
+  const [tipoRegistro, setTipoRegistro] = useState<TipoRegistroPeriodo>("horas");
   const [especialidadeAjudante, setEspecialidadeAjudante] = useState<EspecialidadeAjudante | null>(
     null,
   );
   const ausenciaPlanejada = registroEhAusenciaPlanejada({ tipo_registro: tipoRegistro });
+  const faltaPeriodo = faltaPermitePeriodo(tipoRegistro);
+  const ausenciaPorPeriodo = ausenciaPlanejada || faltaPeriodo;
+  const tipoRegistroNormalizado = normalizarTipoRegistroPeriodo(tipoRegistro).tipoRegistro;
   const [step, setStep] = useState<"form" | "conflitos">("form");
   const [conflitosAloc, setConflitosAloc] = useState<Set<string>>(new Set());
   const [conflitosReg, setConflitosReg] = useState<Set<string>>(new Set());
@@ -215,12 +224,12 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         .filter((f) =>
           supervisorPodeRegistrarTipoNoPeriodo({
             categoria: f.categoria_mo,
-            tipoRegistro,
+            tipoRegistro: tipoRegistroNormalizado,
             dataFim,
           }),
         )
         .sort((a, b) => Number(b.ativo) - Number(a.ativo) || a.nome.localeCompare(b.nome)),
-    [funcionarios, dataInicio, dataFim, tipoRegistro],
+    [funcionarios, dataInicio, dataFim, tipoRegistroNormalizado],
   );
   useEffect(() => {
     if (
@@ -238,13 +247,14 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   const funcionarioEhAjudante = categoriaEhAjudante(funcSelecionado?.categoria_mo);
 
   const dias = useMemo(() => {
-    const all = ausenciaPlanejada
+    const all = ausenciaPorPeriodo
       ? enumerarDiasCorridos(dataInicio, dataFim)
       : enumerarDiasUteis(dataInicio, dataFim);
     const limite = funcSelecionado?.data_desligamento ?? null;
     return limite ? all.filter((d) => d <= limite) : all;
-  }, [ausenciaPlanejada, dataInicio, dataFim, funcSelecionado]);
+  }, [ausenciaPorPeriodo, dataInicio, dataFim, funcSelecionado]);
   const periodoExigeEspecialidade =
+    !ausenciaPorPeriodo &&
     funcionarioEhAjudante &&
     dias.some((data) => competenciaUsaSegmentacaoMod(calcularCompetencia(data).competencia));
   const competenciasPeriodo = useMemo(
@@ -309,11 +319,11 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   ]);
   const diasExcluidosPorDesligamento = useMemo(() => {
     if (!funcSelecionado?.data_desligamento) return 0;
-    const diasIntervalo = ausenciaPlanejada
+    const diasIntervalo = ausenciaPorPeriodo
       ? enumerarDiasCorridos(dataInicio, dataFim)
       : enumerarDiasUteis(dataInicio, dataFim);
     return diasIntervalo.filter((d) => d > funcSelecionado.data_desligamento!).length;
-  }, [ausenciaPlanejada, dataInicio, dataFim, funcSelecionado]);
+  }, [ausenciaPorPeriodo, dataInicio, dataFim, funcSelecionado]);
   const totalDiasIntervalo = useMemo(() => {
     if (!dataInicio || !dataFim) return 0;
     const s = new Date(dataInicio + "T00:00:00");
@@ -487,7 +497,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
       );
       const datasBloqueadasOutraObra = new Set(conflitosExternos.map((c) => c.data));
       const diasAlvo =
-        modoAtual === "sobrescrever"
+        modoAtual === "sobrescrever" && !faltaPeriodo
           ? dias.filter(
               (d) => !datasBloqueadasCompetencia.has(d) && !datasBloqueadasOutraObra.has(d),
             )
@@ -503,6 +513,101 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         toast.info("Nada a alocar — todos os dias já estavam ocupados.");
         setSalvando(false);
         completeAndClose();
+        return;
+      }
+
+      if (faltaPeriodo) {
+        const { tipoRegistro: tipoNormalizado, faltaTipo } =
+          normalizarTipoRegistroPeriodo(tipoRegistro);
+        const [alocacoesConcorrentes, registrosConcorrentes] = await Promise.all([
+          supabase
+            .from("alocacoes")
+            .select("data")
+            .eq("funcionario_id", funcionarioId)
+            .in("data", diasAlvo),
+          supabase
+            .from("registros_horas")
+            .select("data")
+            .eq("funcionario_id", funcionarioId)
+            .in("data", diasAlvo),
+        ]);
+        if (alocacoesConcorrentes.error) throw alocacoesConcorrentes.error;
+        if (registrosConcorrentes.error) throw registrosConcorrentes.error;
+        const ocupadosConcorrentes = new Set([
+          ...(alocacoesConcorrentes.data ?? []).map((item) => item.data),
+          ...(registrosConcorrentes.data ?? []).map((item) => item.data),
+        ]);
+        const datasParaRegistrar = diasAlvo.filter((data) => !ocupadosConcorrentes.has(data));
+        const falhas: Array<{ data: string; mensagem: string }> = [];
+        let registrados = 0;
+
+        for (const data of datasParaRegistrar) {
+          try {
+            await garantirCompetenciaAberta(supabase, data);
+            const conflito = await buscarConflitosAlocacao({
+              supabase,
+              funcionarioId,
+              obraId,
+              datas: [data],
+            });
+            if (conflito.length > 0) throw new Error(TITULO_CONFLITO_ALOCACAO);
+            const { error: alocacaoErro } = await supabase.from("alocacoes").upsert(
+              [
+                {
+                  funcionario_id: funcionarioId,
+                  obra_id: obraId,
+                  data,
+                  created_by: user?.id ?? null,
+                },
+              ],
+              { onConflict: "funcionario_id,obra_id,data", ignoreDuplicates: true },
+            );
+            if (alocacaoErro) throw alocacaoErro;
+            const { error: registroErro } = await supabase.rpc("obras_salvar_registro_horas", {
+              p_id: null,
+              p_funcionario_id: funcionarioId,
+              p_obra_id: obraId,
+              p_data: data,
+              p_tipo_registro: tipoNormalizado,
+              p_falta_tipo: faltaTipo,
+              p_horas_normais: 0,
+              p_horas_extras: 0,
+              p_justificativa_extras: null,
+              p_observacoes: null,
+            });
+            if (registroErro) throw new Error(mensagemErroRegistro(registroErro));
+            registrados += 1;
+          } catch (error) {
+            falhas.push({
+              data,
+              mensagem: (error as PostgrestErrorLike)?.message ?? "conflito ao registrar",
+            });
+          }
+        }
+
+        const pulados = dias.length - datasParaRegistrar.length;
+        const rotulo = rotuloFalta(faltaTipo);
+        const resumo = `${registrados} de ${dias.length} ${dias.length === 1 ? "dia registrado" : "dias registrados"}`;
+        if (falhas.length > 0) {
+          const amostra = falhas
+            .slice(0, 3)
+            .map(({ data }) => new Date(`${data}T00:00:00`).toLocaleDateString("pt-BR"))
+            .join(", ");
+          toast.warning(`${rotulo}: ${resumo}`, {
+            description: `${pulados} já estavam ocupados e ${falhas.length} falharam (${amostra}${falhas.length > 3 ? ", ..." : ""}). Os lançamentos existentes foram preservados.`,
+            duration: 10000,
+          });
+        } else {
+          toast.success(
+            `${rotulo}: ${resumo}${pulados > 0 ? `; ${pulados} ${pulados === 1 ? "dia pulado" : "dias pulados"}` : ""}.`,
+          );
+        }
+        qc.invalidateQueries({ queryKey: ["alocacoes-mes"] });
+        qc.invalidateQueries({ queryKey: ["registros-mes"] });
+        qc.invalidateQueries({ queryKey: ["aloc-week", obraId] });
+        qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
+        if (falhas.length === 0) completeAndClose();
+        else await verificar();
         return;
       }
 
@@ -662,7 +767,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         <DialogHeader>
           <DialogTitle>Alocar período em {obraNome}</DialogTitle>
           <DialogDescription>
-            {ausenciaPlanejada
+            {ausenciaPorPeriodo
               ? "Registra todos os dias corridos do período, sem lançar horas."
               : "Cria alocações para todos os dias úteis (seg–sex) e lança horas padrão."}
           </DialogDescription>
@@ -683,7 +788,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               <Label>Funcionário</Label>
               {SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
                 dataFim >= SUPERVISOR_CC_DATA_CORTE &&
-                !ausenciaPlanejada && (
+                !ausenciaPorPeriodo && (
                   <p className="text-xs text-muted-foreground">
                     Supervisores não registram horas ou falta após 25/08/2026.
                   </p>
@@ -730,16 +835,15 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               <Label>Tipo de registro</Label>
               <Select
                 value={tipoRegistro}
-                onValueChange={(value: TipoRegistro) => setTipoRegistro(value)}
+                onValueChange={(value: TipoRegistroPeriodo) => setTipoRegistro(value)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="horas">Horas trabalhadas</SelectItem>
-                  <SelectItem value="falta" disabled>
-                    Falta (use Nova alocação)
-                  </SelectItem>
+                  <SelectItem value="atestado">Atestado</SelectItem>
+                  <SelectItem value="afastamento">Afastamento</SelectItem>
                   <SelectItem value="ferias">Férias</SelectItem>
                   <SelectItem value="folga_campo">Folga de campo</SelectItem>
                 </SelectContent>
@@ -778,7 +882,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
               ) : (
                 <>
                   <strong>{dias.length}</strong>{" "}
-                  {ausenciaPlanejada
+                  {ausenciaPorPeriodo
                     ? dias.length === 1
                       ? "dia corrido"
                       : "dias corridos"
@@ -786,7 +890,9 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                       ? "dia útil"
                       : "dias úteis"}{" "}
                   no intervalo
-                  {ausenciaPlanejada ? " (inclui fins de semana)." : " (fins de semana ignorados)."}
+                  {ausenciaPorPeriodo
+                    ? " (inclui fins de semana)."
+                    : " (fins de semana ignorados)."}
                   {funcSelecionado?.data_desligamento && (
                     <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                       Desligamento em{" "}
@@ -832,7 +938,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                 }
               >
                 {(verificando || salvando) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {ausenciaPlanejada ? "Registrar período" : "Verificar e alocar"}
+                {ausenciaPorPeriodo ? "Registrar período" : "Verificar e alocar"}
               </Button>
             </DialogFooter>
           </div>
@@ -888,22 +994,24 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
                     </div>
                   </div>
                 </label>
-                <label className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-accent">
-                  <input
-                    type="radio"
-                    className="mt-0.5"
-                    checked={modo === "sobrescrever"}
-                    onChange={() => setModo("sobrescrever")}
-                  />
-                  <div>
-                    <div className="font-medium">Sobrescrever</div>
-                    <div className="text-xs text-muted-foreground">
-                      Substitui horas existentes deste centro de custo pelas horas padrão. Dias em
-                      competência fechada ou outro centro de custo serão pulados (
-                      {diasDisponiveisParaSobrescrever} possíveis).
+                {!faltaPeriodo && (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-accent">
+                    <input
+                      type="radio"
+                      className="mt-0.5"
+                      checked={modo === "sobrescrever"}
+                      onChange={() => setModo("sobrescrever")}
+                    />
+                    <div>
+                      <div className="font-medium">Sobrescrever</div>
+                      <div className="text-xs text-muted-foreground">
+                        Substitui horas existentes deste centro de custo pelas horas padrão. Dias em
+                        competência fechada ou outro centro de custo serão pulados (
+                        {diasDisponiveisParaSobrescrever} possíveis).
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                )}
               </div>
             </div>
 

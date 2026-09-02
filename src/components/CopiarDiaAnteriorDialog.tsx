@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
   formatarDataCopia,
+  diaAnterior,
   itensSelecionadosCopia,
   logErroCopiaDia,
   totalNaoCopiar,
@@ -63,6 +64,7 @@ type ResumoCopiaResolvido = Omit<ResumoCopiaDia, "itens"> & {
 
 type CopiarDiaDraft = {
   destino: string;
+  origem?: string;
   previa: ResumoCopiaResolvido | null;
   rascunhos: Record<string, JornadaCopiaRascunho>;
   funcoes: Record<string, string | null>;
@@ -109,6 +111,8 @@ function isCopiarDiaDraft(value: unknown): value is CopiarDiaDraft {
   return (
     typeof draft.destino === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(draft.destino) &&
+    (draft.origem === undefined ||
+      (typeof draft.origem === "string" && /^\d{4}-\d{2}-\d{2}$/.test(draft.origem))) &&
     previaValida &&
     rascunhosValidos &&
     !!draft.funcoes &&
@@ -133,6 +137,7 @@ export function CopiarDiaAnteriorDialog({
   const [open, setOpen] = useState(false);
   const hoje = dataLocalHoje();
   const [destino, setDestino] = useState(hoje);
+  const [origem, setOrigem] = useState(diaAnterior(hoje));
   const [previa, setPrevia] = useState<ResumoCopiaResolvido | null>(null);
   const [rascunhos, setRascunhos] = useState<Record<string, JornadaCopiaRascunho>>({});
   const [funcoes, setFuncoes] = useState<Record<string, string | null>>({});
@@ -157,6 +162,11 @@ export function CopiarDiaAnteriorDialog({
   useEffect(() => {
     if (!restoredDraft) return;
     setDestino(restoredDraft.destino);
+    setOrigem(
+      restoredDraft.origem ??
+        restoredDraft.previa?.origem_data ??
+        diaAnterior(restoredDraft.destino),
+    );
     setPrevia(restoredDraft.previa);
     setRascunhos(restoredDraft.rascunhos);
     setFuncoes(restoredDraft.funcoes);
@@ -168,6 +178,7 @@ export function CopiarDiaAnteriorDialog({
   useEffect(() => {
     persistDraft({
       destino,
+      origem,
       previa,
       rascunhos,
       funcoes,
@@ -175,10 +186,11 @@ export function CopiarDiaAnteriorDialog({
       editandoId,
       escolhas,
     });
-  }, [destino, editandoId, escolhas, feriados, funcoes, persistDraft, previa, rascunhos]);
+  }, [destino, editandoId, escolhas, feriados, funcoes, origem, persistDraft, previa, rascunhos]);
 
   function resetForm() {
     setDestino(hoje);
+    setOrigem(diaAnterior(hoje));
     setPrevia(null);
     setRascunhos({});
     setFuncoes({});
@@ -192,19 +204,8 @@ export function CopiarDiaAnteriorDialog({
     setPrevia(null);
     try {
       validarDataLancamento(destino, "alocacao");
-      const { data: origem, error: origemErro } = await supabase
-        .from("alocacoes")
-        .select("data")
-        .eq("obra_id", obraId)
-        .lt("data", destino)
-        .order("data", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (origemErro) throw origemErro;
-      if (!origem) {
-        toast.info("Não há alocações anteriores desta obra para copiar.");
-        return;
-      }
+      if (!origem || origem >= destino)
+        throw new Error("A data de origem deve ser anterior à data de destino.");
       const competenciaDestino = calcularCompetencia(destino);
       const [
         resumoResult,
@@ -218,7 +219,7 @@ export function CopiarDiaAnteriorDialog({
           "obras_copiar_dia_anterior" as never,
           {
             p_obra_id: obraId,
-            p_data_origem: origem.data,
+            p_data_origem: origem,
             p_data_destino: destino,
             p_aplicar: false,
           } as never,
@@ -229,12 +230,12 @@ export function CopiarDiaAnteriorDialog({
             "funcionario_id, obra_id, data, especialidade_ajudante, hora_entrada, hora_saida, intervalo_padrao_minutos",
           )
           .eq("obra_id", obraId)
-          .eq("data", origem.data),
+          .eq("data", origem),
         supabase
           .from("registros_horas")
           .select("funcionario_id,horas_normais,horas_extras,justificativa_extras,observacoes")
           .eq("obra_id", obraId)
-          .eq("data", origem.data)
+          .eq("data", origem)
           .eq("tipo_registro", "horas"),
         supabase
           .from("alocacoes")
@@ -513,32 +514,50 @@ export function CopiarDiaAnteriorDialog({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className={ALOCACAO_ACTION_BUTTON_CLASS}>
           <Copy className="mr-2 h-4 w-4" />
-          Copiar dia anterior
+          Copiar equipe de outra data
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Copiar dia anterior</DialogTitle>
+          <DialogTitle>Copiar equipe de outra data</DialogTitle>
           <DialogDescription>{obraNome}</DialogDescription>
         </DialogHeader>
         {draftRecovered && <p className="text-xs text-muted-foreground">Rascunho recuperado</p>}
         <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">Data destino</label>
-            <Input
-              type="date"
-              max={hoje}
-              value={destino}
-              onChange={(e) => {
-                setDestino(e.target.value);
-                setPrevia(null);
-                setRascunhos({});
-                setEditandoId(null);
-              }}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">Data de origem</label>
+              <Input
+                type="date"
+                max={diaAnterior(destino)}
+                value={origem}
+                onChange={(e) => {
+                  setOrigem(e.target.value);
+                  setPrevia(null);
+                  setRascunhos({});
+                  setEditandoId(null);
+                }}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Data de destino</label>
+              <Input
+                type="date"
+                max={hoje}
+                value={destino}
+                onChange={(e) => {
+                  const proximoDestino = e.target.value;
+                  setDestino(proximoDestino);
+                  setOrigem(diaAnterior(proximoDestino));
+                  setPrevia(null);
+                  setRascunhos({});
+                  setEditandoId(null);
+                }}
+              />
+            </div>
           </div>
           {!previa ? (
-            <Button onClick={buscarPrevia} disabled={!destino || carregando}>
+            <Button onClick={buscarPrevia} disabled={!origem || !destino || carregando}>
               {carregando ? "Buscando..." : "Ver prévia"}
             </Button>
           ) : (
