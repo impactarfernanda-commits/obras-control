@@ -116,6 +116,56 @@ test("troca de CC do Alojado ocorre somente na data da nova alocacao", () => {
   assert.equal(resultado.centros.find((centro) => centro.id === "230")!.custoRegimeAlojado, 77);
 });
 
+test("alocacao carregada no relatorio evita refeicao Alojado zerada se a referencia auxiliar faltar", () => {
+  const resultado = consolidarCustosCentros({
+    funcionarios: [funcionarios[0]],
+    obras: new Map([["236", "OBRA"]]),
+    custos: new Map([
+      [
+        "amaro",
+        {
+          salario: 0,
+          encargos: 0,
+          prov13: 0,
+          provAvisoPrevio: 0,
+          provFerias: 0,
+          beneficios: 0,
+          seguroVida: 0,
+          total: 1,
+        },
+      ],
+    ]),
+    alocacoes: [
+      { funcionario_id: "amaro", obra_id: "236", data: "2026-07-25", tipo_mao_obra: "montagem" },
+    ],
+    registros: [],
+    vigenciasRegime: [
+      {
+        funcionarioId: "amaro",
+        regime: "alojado",
+        vigenciaInicio: "2026-07-25",
+        vigenciaFim: null,
+      },
+    ],
+    alocacoesReferenciaRegime: [],
+    periodoInicial: "2026-07-25",
+    periodoFinal: "2026-08-24",
+    diasUteis: 22,
+    resolverTipo: () => "MOD",
+    calcularCustoBase: () => 0,
+    horasNormaisPadrao: () => 0,
+  });
+
+  const centro = resultado.centros[0];
+  assert.equal(centro.linhas[0].dias, 0);
+  assert.equal(centro.linhas[0].custoRegimeAlojado, 31 * 77);
+  assert.equal(centro.custoRegimeAlojado, 31 * 77);
+  assert.equal(
+    centro.linhas.reduce((total, linha) => total + linha.custoRegimeAlojado, 0),
+    centro.custoRegimeAlojado,
+  );
+});
+
 function consolidarAjudante(input: {
   referencias: Array<{
     funcionario_id: string;

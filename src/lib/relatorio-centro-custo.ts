@@ -433,9 +433,30 @@ export function consolidarCustosCentros(input: Input) {
         categoriaEhSupervisor(funcionario.categoria_mo)
       );
     });
+    const referenciasRegime = new Map<string, AlocacaoReferencia>();
+    for (const referencia of input.alocacoesReferenciaRegime ?? []) {
+      referenciasRegime.set(
+        chave(referencia.funcionarioId, referencia.obraId, referencia.data),
+        referencia,
+      );
+    }
+    // A RPC acrescenta a referência histórica anterior à competência. As alocações
+    // do próprio relatório são a fonte canônica do período e não podem ficar de fora
+    // da apuração de refeição caso a fonte auxiliar retorne um conjunto incompleto.
+    for (const alocacao of input.alocacoes) {
+      const referencia = {
+        funcionarioId: alocacao.funcionario_id,
+        obraId: alocacao.obra_id,
+        data: alocacao.data,
+      };
+      referenciasRegime.set(
+        chave(referencia.funcionarioId, referencia.obraId, referencia.data),
+        referencia,
+      );
+    }
     const apuracao = apurarCustosRegime({
       vigencias,
-      alocacoes: [...(input.alocacoesReferenciaRegime ?? [])],
+      alocacoes: [...referenciasRegime.values()],
       diasTrabalhados,
       inicio: input.periodoInicial,
       fim: input.periodoFinal,
