@@ -37,7 +37,13 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileSpreadsheet } f
 import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
-import { dataLocalISO, datasUteisNoIntervalo, diaUtilAnterior } from "@/lib/relatorio-sem-alocacao";
+import {
+  dataLimitePendencias,
+  dataLocalISO,
+  datasUteisNoIntervalo,
+  diaUtilAnterior,
+  type VisaoPendencias,
+} from "@/lib/relatorio-sem-alocacao";
 import { useCategorias } from "@/lib/categorias";
 import { tipoCategoria } from "@/lib/categorias-core";
 import { fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
@@ -121,6 +127,7 @@ function RelatoriosPage() {
   const [pendenciaFilter, setPendenciaFilter] = useState<
     "all" | "ativos" | "admitidos" | "desligados"
   >("all");
+  const [visaoPendencias, setVisaoPendencias] = useState<VisaoPendencias>("para-tratar");
   const [categoriaFilter, setCategoriaFilter] = useState("all");
   const [coberturaFilter, setCoberturaFilter] = useState<"all" | "zero" | "parcial">("all");
   const [ultimoCcFilter, setUltimoCcFilter] = useState("all");
@@ -153,9 +160,8 @@ function RelatoriosPage() {
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);
-  const ontem = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  const ontemISO = dataLocalISO(ontem);
-  const dataLimiteAnalise = end < ontemISO ? end : ontemISO;
+  const hojeISO = dataLocalISO(today);
+  const dataLimiteAnalise = dataLimitePendencias(hojeISO, end, visaoPendencias);
   const competenciaSemDiasVencidos = dataLimiteAnalise < start;
 
   const { data: alocacoes, isLoading: la } = useQuery({
@@ -930,7 +936,7 @@ function RelatoriosPage() {
                     <p>
                       {competenciaSemDiasVencidos
                         ? "Esta competência ainda não possui dias vencidos para análise."
-                        : `Análise de pendências até ${dataLimiteLabel} · ${semAlocacao.length} pendência(s)`}
+                        : `Análise de pendências até ${dataLimiteLabel} (${visaoPendencias === "para-tratar" ? "Para tratar — 1 dia de tolerância" : "Todas — inclui o dia anterior"}) · ${semAlocacao.length} pendência(s)`}
                     </p>
                   </div>
                 </div>
@@ -944,6 +950,18 @@ function RelatoriosPage() {
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Select
+                  value={visaoPendencias}
+                  onValueChange={(v) => setVisaoPendencias(v as VisaoPendencias)}
+                >
+                  <SelectTrigger className="w-[210px]" aria-label="Visão das pendências">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="para-tratar">Para tratar</SelectItem>
+                    <SelectItem value="todas">Todas</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select
                   value={pendenciaFilter}
                   onValueChange={(v) => setPendenciaFilter(v as typeof pendenciaFilter)}

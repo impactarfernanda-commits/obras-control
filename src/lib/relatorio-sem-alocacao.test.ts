@@ -2,12 +2,47 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ultimasAlocacoesPorFuncionario } from "./relatorio-sem-alocacao.ts";
+import {
+  dataLimitePendencias,
+  filtrarDatasPendentes,
+  ultimasAlocacoesPorFuncionario,
+} from "./relatorio-sem-alocacao.ts";
 
 const servidor = readFileSync("src/lib/relatorio-sem-alocacao.functions.ts", "utf8");
 const tela = readFileSync("src/routes/_authenticated/relatorios.tsx", "utf8");
 const navegacao = readFileSync("src/lib/navigation.ts", "utf8");
 const financeiro = readFileSync("src/lib/relatorio-centro-custo.functions.ts", "utf8");
+
+test("Para tratar exclui ontem e inclui anteontem", () => {
+  assert.equal(dataLimitePendencias("2026-09-04", "2026-09-24", "para-tratar"), "2026-09-02");
+  assert.deepEqual(
+    filtrarDatasPendentes(["2026-09-02", "2026-09-03"], "2026-09-04", "para-tratar"),
+    ["2026-09-02"],
+  );
+});
+
+test("funcionário com pendência antiga e ontem permanece somente com a antiga", () => {
+  const pendenciasDoFuncionario = ["2026-08-28", "2026-09-03"];
+  assert.deepEqual(filtrarDatasPendentes(pendenciasDoFuncionario, "2026-09-04", "para-tratar"), [
+    "2026-08-28",
+  ]);
+});
+
+test("Todas mantém o corte anterior e inclui ontem", () => {
+  assert.equal(dataLimitePendencias("2026-09-04", "2026-09-24", "todas"), "2026-09-03");
+  assert.deepEqual(filtrarDatasPendentes(["2026-09-02", "2026-09-03"], "2026-09-04", "todas"), [
+    "2026-09-02",
+    "2026-09-03",
+  ]);
+});
+
+test("contador e Excel usam a coleção filtrada pela visão", () => {
+  assert.match(tela, /dataLimitePendencias\(hojeISO, end, visaoPendencias\)/);
+  assert.match(tela, /semAlocacao\.length} pendência\(s\)/);
+  const exportacao = tela.match(/function exportarSemAlocacao\(\) \{([\s\S]*?)\n {2}\}/)?.[1] ?? "";
+  assert.match(exportacao, /semAlocacao\.map/);
+  assert.match(exportacao, /dataLimiteAnalise/);
+});
 
 test("último CC usa a alocação válida mais recente até a data de referência", () => {
   const ultimas = ultimasAlocacoesPorFuncionario(

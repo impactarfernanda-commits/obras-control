@@ -25,6 +25,31 @@ export function diaUtilAnterior(dataISO: string) {
   return dataLocalISO(data);
 }
 
+export type VisaoPendencias = "para-tratar" | "todas";
+
+function subtrairDias(dataISO: string, dias: number) {
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  return dataLocalISO(new Date(ano, mes - 1, dia - dias));
+}
+
+export function dataLimitePendencias(
+  hojeISO: string,
+  fimCompetenciaISO: string,
+  visao: VisaoPendencias,
+) {
+  const limiteTolerancia = subtrairDias(hojeISO, visao === "para-tratar" ? 2 : 1);
+  return fimCompetenciaISO < limiteTolerancia ? fimCompetenciaISO : limiteTolerancia;
+}
+
+export function filtrarDatasPendentes(
+  datas: readonly string[],
+  hojeISO: string,
+  visao: VisaoPendencias,
+) {
+  const limite = dataLimitePendencias(hojeISO, "9999-12-31", visao);
+  return datas.filter((data) => data <= limite);
+}
+
 export type AlocacaoHistorica = {
   funcionario_id: string;
   obra_id: string;
