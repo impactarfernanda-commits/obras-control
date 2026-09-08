@@ -4,7 +4,11 @@ export function dataLocalISO(data: Date) {
   ).padStart(2, "0")}`;
 }
 
-export function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
+export function datasUteisNoIntervalo(
+  inicioISO: string,
+  fimISO: string,
+  feriados?: ReadonlySet<string>,
+) {
   if (inicioISO > fimISO) return [];
   const datas: string[] = [];
   for (
@@ -12,15 +16,16 @@ export function datasUteisNoIntervalo(inicioISO: string, fimISO: string) {
     data <= new Date(fimISO + "T00:00:00");
     data = new Date(data.getFullYear(), data.getMonth(), data.getDate() + 1)
   ) {
-    if (data.getDay() !== 0 && data.getDay() !== 6) datas.push(dataLocalISO(data));
+    const iso = dataLocalISO(data);
+    if (data.getDay() !== 0 && data.getDay() !== 6 && !feriados?.has(iso)) datas.push(iso);
   }
   return datas;
 }
 
-export function diaUtilAnterior(dataISO: string) {
+export function diaUtilAnterior(dataISO: string, feriados?: ReadonlySet<string>) {
   const [ano, mes, dia] = dataISO.split("-").map(Number);
   let data = new Date(ano, mes - 1, dia - 1);
-  while (data.getDay() === 0 || data.getDay() === 6)
+  while (data.getDay() === 0 || data.getDay() === 6 || feriados?.has(dataLocalISO(data)))
     data = new Date(data.getFullYear(), data.getMonth(), data.getDate() - 1);
   return dataLocalISO(data);
 }

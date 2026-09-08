@@ -8,6 +8,36 @@ export type Database = {
   };
   public: {
     Tables: {
+      feriados_obras_control: {
+        Row: {
+          data: string;
+          descricao: string;
+          ativo: boolean;
+          criado_em: string;
+          criado_por: string | null;
+          atualizado_em: string;
+          atualizado_por: string | null;
+        };
+        Insert: {
+          data: string;
+          descricao: string;
+          ativo?: boolean;
+          criado_em?: string;
+          criado_por?: string | null;
+          atualizado_em?: string;
+          atualizado_por?: string | null;
+        };
+        Update: {
+          data?: string;
+          descricao?: string;
+          ativo?: boolean;
+          criado_em?: string;
+          criado_por?: string | null;
+          atualizado_em?: string;
+          atualizado_por?: string | null;
+        };
+        Relationships: [];
+      };
       alocacoes: {
         Row: {
           created_at: string;
@@ -426,6 +456,7 @@ export type Database = {
       };
       registros_horas: {
         Row: {
+          ausencia_periodo_id: string | null;
           ausencia: boolean;
           created_at: string;
           created_by: string | null;
@@ -444,6 +475,7 @@ export type Database = {
           updated_by: string | null;
         };
         Insert: {
+          ausencia_periodo_id?: string | null;
           ausencia?: boolean;
           created_at?: string;
           created_by?: string | null;
@@ -462,6 +494,7 @@ export type Database = {
           updated_by?: string | null;
         };
         Update: {
+          ausencia_periodo_id?: string | null;
           ausencia?: boolean;
           created_at?: string;
           created_by?: string | null;
@@ -634,6 +667,23 @@ export type Database = {
           p_tipo_registro: string;
         };
         Returns: number;
+      };
+      obras_excluir_ausencia_planejada: {
+        Args: { p_registro_id: string };
+        Returns: Json;
+      };
+      obras_obter_ausencia_planejada_periodo: {
+        Args: { p_registro_id: string };
+        Returns: Json;
+      };
+      obras_editar_ausencia_planejada_periodo: {
+        Args: {
+          p_registro_id: string;
+          p_data_inicio: string;
+          p_data_fim: string;
+          p_observacoes?: string | null;
+        };
+        Returns: Json;
       };
       obras_salvar_registro_horas: {
         Args: {

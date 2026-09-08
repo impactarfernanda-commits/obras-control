@@ -6,12 +6,59 @@ import {
   dataLimitePendencias,
   filtrarDatasPendentes,
   ultimasAlocacoesPorFuncionario,
+  datasUteisNoIntervalo,
+  diaUtilAnterior,
 } from "./relatorio-sem-alocacao.ts";
 
 const servidor = readFileSync("src/lib/relatorio-sem-alocacao.functions.ts", "utf8");
 const tela = readFileSync("src/routes/_authenticated/relatorios.tsx", "utf8");
 const navegacao = readFileSync("src/lib/navigation.ts", "utf8");
 const financeiro = readFileSync("src/lib/relatorio-centro-custo.functions.ts", "utf8");
+
+test("dias úteis excluem 07/09 ativo, mas preservam segunda comum e feriado não informado", () => {
+  const feriados = new Set(["2026-09-07"]);
+  assert.deepEqual(datasUteisNoIntervalo("2026-09-04", "2026-09-08", feriados), [
+    "2026-09-04",
+    "2026-09-08",
+  ]);
+  assert.deepEqual(datasUteisNoIntervalo("2026-09-14", "2026-09-14", feriados), ["2026-09-14"]);
+  assert.deepEqual(datasUteisNoIntervalo("2026-09-07", "2026-09-07"), ["2026-09-07"]);
+  assert.deepEqual(datasUteisNoIntervalo("2026-09-07", "2026-09-07", new Set()), ["2026-09-07"]);
+});
+
+test("pendências diminuem na coleção de dias disponíveis sem filtrar só a apresentação", () => {
+  const alocadas = new Set(["2026-09-08"]);
+  const semFeriados = datasUteisNoIntervalo("2026-09-04", "2026-09-09").filter(
+    (data) => !alocadas.has(data),
+  );
+  const datasSemAlocacao = datasUteisNoIntervalo(
+    "2026-09-04",
+    "2026-09-09",
+    new Set(["2026-09-07"]),
+  ).filter((data) => !alocadas.has(data));
+  assert.equal(datasSemAlocacao.length, semFeriados.length - 1);
+  assert.deepEqual(datasSemAlocacao, ["2026-09-04", "2026-09-09"]);
+  assert.match(tela, /datasUteisNoIntervalo\(inicio, fim, feriadosSemAlocacao\)/);
+  assert.match(tela, /diasSemAlocacao: diasSemAlocacao.length/);
+  assert.match(tela, /datasSemAlocacao: diasSemAlocacao/);
+  assert.match(tela, /semAlocacao\.map/);
+});
+
+test("dia útil anterior ao desligamento pula feriado e fim de semana", () => {
+  assert.equal(diaUtilAnterior("2026-09-08", new Set(["2026-09-07"])), "2026-09-04");
+  assert.equal(diaUtilAnterior("2026-09-08"), "2026-09-07");
+  assert.equal(diaUtilAnterior("2026-09-09", new Set(["2026-09-07", "2026-09-08"])), "2026-09-04");
+  assert.match(tela, /diaUtilAnterior\(f.data_desligamento, feriadosSemAlocacao\)/);
+});
+
+test("servidor retorna somente feriados ativos do intervalo analisado", () => {
+  assert.match(
+    servidor,
+    /\.from\("feriados_obras_control"\)\s+\.select\("data"\)\s+\.eq\("ativo", true\)\s+\.gte\("data", data.inicio\)\s+\.lte\("data", data.referencia\)/,
+  );
+  assert.match(servidor, /feriados: feriados.map/);
+  assert.match(tela, /new Set\(relatorioSemAlocacao\?\.feriados \?\? \[\]\)/);
+});
 
 test("Para tratar exclui ontem e inclui anteontem", () => {
   assert.equal(dataLimitePendencias("2026-09-04", "2026-09-24", "para-tratar"), "2026-09-02");

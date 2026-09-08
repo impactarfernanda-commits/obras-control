@@ -346,6 +346,11 @@ function RelatoriosPage() {
     return s;
   }, [alocacoes, registros]);
 
+  const feriadosSemAlocacao = useMemo(
+    () => new Set(relatorioSemAlocacao?.feriados ?? []),
+    [relatorioSemAlocacao?.feriados],
+  );
+
   const semAlocacao = useMemo(() => {
     if (competenciaSemDiasVencidos) return [];
     const alocacoesPorFuncionario = new Map<string, Set<string>>();
@@ -363,13 +368,13 @@ function RelatoriosPage() {
         const ultimaAlocacao = ultimaAlocacaoPorFuncionario.get(f.id) ?? null;
         const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
         const fimAnteriorAoDesligamento = f.data_desligamento
-          ? diaUtilAnterior(f.data_desligamento)
+          ? diaUtilAnterior(f.data_desligamento, feriadosSemAlocacao)
           : dataLimiteAnalise;
         const fim =
           fimAnteriorAoDesligamento < dataLimiteAnalise
             ? fimAnteriorAoDesligamento
             : dataLimiteAnalise;
-        const diasDisponiveis = datasUteisNoIntervalo(inicio, fim);
+        const diasDisponiveis = datasUteisNoIntervalo(inicio, fim, feriadosSemAlocacao);
         const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
         const vigenciasSupervisor =
           SUPERVISOR_CC_VIGENCIAS_ATIVAS && categoriaEhSupervisor(f.categoria_mo)
@@ -445,6 +450,7 @@ function RelatoriosPage() {
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [
     alocacoesSemAlocacao,
+    feriadosSemAlocacao,
     funcionariosSemAlocacao,
     start,
     end,

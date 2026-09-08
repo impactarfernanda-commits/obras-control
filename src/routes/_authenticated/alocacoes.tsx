@@ -67,6 +67,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { RegistrosGrid } from "@/components/RegistrosGrid";
+import { AusenciaPlanejadaAcoes } from "@/components/AusenciaPlanejadaAcoes";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
@@ -678,6 +679,7 @@ function AlocacoesPage() {
       if (h) {
         const composicao = comporHorasParaVisualizacao({
           data: a.data,
+          feriado: feriados.has(a.data),
           horasNormais: h.hn,
           horasExtras: h.he,
           detalhe: h.detalhe,
@@ -740,7 +742,7 @@ function AlocacoesPage() {
     return Array.from(out.entries())
       .map(([id, v]) => ({ id, ...v }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [alocacoes, registros, horasMap, infoHistoricoById, obras]);
+  }, [alocacoes, registros, horasMap, infoHistoricoById, obras, feriados]);
 
   const competenciaDays = useMemo(() => {
     const days: string[] = [];
@@ -761,6 +763,7 @@ function AlocacoesPage() {
           const composicao = h
             ? comporHorasParaVisualizacao({
                 data: a.data,
+                feriado: feriados.has(a.data),
                 horasNormais: h.hn,
                 horasExtras: h.he,
                 detalhe: h.detalhe,
@@ -1062,6 +1065,7 @@ function AlocacoesPage() {
       qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
       qc.invalidateQueries({ queryKey: ["registros"] });
       clearNovaAlocacaoDraft();
+      qc.invalidateQueries({ queryKey: ["registros-horas-detalhes"] });
       setOpen(false);
       form.reset(defaultFormValues);
       setTipoRegistroFiltro("horas");
@@ -1286,6 +1290,7 @@ function AlocacoesPage() {
       qc.invalidateQueries({ queryKey: ["alocacoes-current"] });
       qc.invalidateQueries({ queryKey: ["registros"] });
       qc.invalidateQueries({ queryKey: ["registros-week"] });
+      qc.invalidateQueries({ queryKey: ["registros-horas-detalhes"] });
     },
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao editar as horas da alocação"),
   });
@@ -2404,6 +2409,7 @@ function AlocacoesPage() {
                                             const composicaoHoras = h
                                               ? comporHorasParaVisualizacao({
                                                   data: a.data,
+                                                  feriado: feriados.has(a.data),
                                                   horasNormais: h.hn,
                                                   horasExtras: h.he,
                                                   detalhe: h.detalhe,
@@ -2539,6 +2545,27 @@ function AlocacoesPage() {
                                                   )}
                                                 </div>
                                                 <div className="flex flex-shrink-0 items-center gap-1">
+                                                  {a.registroOnly &&
+                                                    h &&
+                                                    registroEhAusenciaPlanejada({
+                                                      tipo_registro: h.tipoRegistro,
+                                                    }) && (
+                                                      <AusenciaPlanejadaAcoes
+                                                        registro={{
+                                                          id: h.id,
+                                                          funcionario_id: a.funcionario_id,
+                                                          obra_id: a.obra_id,
+                                                          data: a.data,
+                                                          tipo_registro: h.tipoRegistro,
+                                                          observacoes: h.observacoes,
+                                                          created_by: h.createdBy,
+                                                        }}
+                                                        nome={
+                                                          infoHistoricoById.get(a.funcionario_id)
+                                                            ?.nome ?? "Funcionário"
+                                                        }
+                                                      />
+                                                    )}
                                                   {podeEditar && !a.registroOnly && (
                                                     <Button
                                                       size="sm"

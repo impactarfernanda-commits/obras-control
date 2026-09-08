@@ -23,6 +23,7 @@ export type FuncionarioSemAlocacaoDTO = {
 };
 
 export type RelatorioSemAlocacaoDTO = {
+  feriados: string[];
   funcionarios: FuncionarioSemAlocacaoDTO[];
   alocacoes: Array<{ funcionario_id: string; data: string }>;
   ultimasAlocacoes: Array<{
@@ -78,6 +79,7 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
       historicoAlocacoes,
       obras,
       vigenciasCentroCusto,
+      feriados,
     ] = await Promise.all([
       buscarTodasPaginas<FuncionarioSemAlocacaoDTO>((from, to) =>
         supabaseAdmin
@@ -143,6 +145,16 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
                 .range(from, to) as never,
           )
         : Promise.resolve([]),
+      buscarTodasPaginas<{ data: string }>((from, to) =>
+        supabaseAdmin
+          .from("feriados_obras_control")
+          .select("data")
+          .eq("ativo", true)
+          .gte("data", data.inicio)
+          .lte("data", data.referencia)
+          .order("data", { ascending: true })
+          .range(from, to),
+      ),
     ]);
     const cobertura = new Map<string, { funcionario_id: string; data: string }>();
     for (const item of [...alocacoes, ...ausenciasPlanejadas]) {
@@ -157,6 +169,7 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
       }),
     );
     return {
+      feriados: feriados.map((feriado) => feriado.data),
       funcionarios,
       alocacoes: Array.from(cobertura.values()),
       ultimasAlocacoes,
