@@ -769,21 +769,12 @@ function AlocacoesPage() {
                 detalhe: h.detalhe,
               })
             : null;
-          const situacao = !h
-            ? "Alocado — sem apontamento"
-            : h.tipoRegistro === "falta"
-              ? `${rotuloTipoRegistro(h.tipoRegistro)} — ${rotuloFalta(h.faltaTipo)}`
-              : rotuloTipoRegistro(h.tipoRegistro);
-
           return {
             funcionario: infoHistoricoById.get(a.funcionario_id)?.nome ?? "—",
             funcao: infoHistoricoById.get(a.funcionario_id)?.categoria ?? "Sem função",
-            especialidadeAjudante: a.especialidade_ajudante,
-            situacao,
-            horasNormais: composicao?.horasNormaisApuradas ?? 0,
-            horasExtra50: composicao?.horasExtra50Apuradas ?? 0,
-            horasExtra100: composicao?.horasExtra100Apuradas ?? 0,
-            totalHoras: composicao?.total ?? 0,
+            tipoRegistro: h?.tipoRegistro ?? "horas",
+            faltaTipo: h?.faltaTipo,
+            trabalhoEfetivo: composicao?.total ?? 0,
             observacoes: h?.observacoes,
           };
         }),
