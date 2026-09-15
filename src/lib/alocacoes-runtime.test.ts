@@ -32,6 +32,7 @@ const sourceVite = readFileSync(new URL("../../vite.config.ts", import.meta.url)
 const expectedNavigation = [
   ["Funcionários", "/funcionarios"],
   ["Centros de custo", "/obras"],
+  ["Responsáveis das Obras", "/responsaveis-obras"],
   ["Alocações", "/alocacoes"],
   ["Relatórios", "/relatorios"],
   ["Planejamento HH e Custos", "/planejamento-hh"],
@@ -76,6 +77,7 @@ test("ordem e permissões da navegação permanecem restritas", () => {
   assert.deepEqual(APP_NAVIGATION_ITEMS, [
     { title: "Funcionários", url: "/funcionarios", minLevel: 1 },
     { title: "Centros de custo", url: "/obras", minLevel: 1 },
+    { title: "Responsáveis das Obras", url: "/responsaveis-obras", minLevel: 1 },
     { title: "Alocações", url: "/alocacoes", minLevel: 1 },
     {
       title: "Relatórios",

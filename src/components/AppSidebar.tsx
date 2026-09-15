@@ -8,6 +8,7 @@ import {
   LogOut,
   ShieldCheck,
   House,
+  UserRoundCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -42,6 +43,7 @@ type Item = {
 const icons = {
   "/funcionarios": Users,
   "/obras": Building2,
+  "/responsaveis-obras": UserRoundCheck,
   "/alocacoes": CalendarRange,
   "/relatorios": BarChart3,
   "/planejamento-hh": BarChart3,

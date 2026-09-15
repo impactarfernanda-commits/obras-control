@@ -418,6 +418,84 @@ export type Database = {
         };
         Relationships: [];
       };
+      obra_responsabilidade_cargos: {
+        Row: {
+          cargo_id: string;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          obra_id: string;
+        };
+        Insert: {
+          cargo_id: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          obra_id: string;
+        };
+        Update: {
+          cargo_id?: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          obra_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "obra_responsabilidade_cargos_cargo_id_fkey";
+            columns: ["cargo_id"];
+            isOneToOne: false;
+            referencedRelation: "responsaveis_cargos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "obra_responsabilidade_cargos_obra_id_fkey";
+            columns: ["obra_id"];
+            isOneToOne: false;
+            referencedRelation: "obras";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      obra_responsabilidade_pessoas: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          obra_cargo_id: string;
+          pessoa_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          obra_cargo_id: string;
+          pessoa_id: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          obra_cargo_id?: string;
+          pessoa_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "obra_responsabilidade_pessoas_obra_cargo_id_fkey";
+            columns: ["obra_cargo_id"];
+            isOneToOne: false;
+            referencedRelation: "obra_responsabilidade_cargos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "obra_responsabilidade_pessoas_pessoa_id_fkey";
+            columns: ["pessoa_id"];
+            isOneToOne: false;
+            referencedRelation: "responsaveis_pessoas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       obras: {
         Row: {
           created_at: string;
@@ -453,6 +531,77 @@ export type Database = {
           tipo_centro_custo?: string | null;
         };
         Relationships: [];
+      };
+      responsaveis_cargos: {
+        Row: {
+          ativo: boolean;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          nome: string;
+          ordem: number;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          ativo?: boolean;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          nome: string;
+          ordem?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          ativo?: boolean;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          nome?: string;
+          ordem?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      responsaveis_pessoas: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          funcionario_id: string | null;
+          id: string;
+          nome_manual: string | null;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          funcionario_id?: string | null;
+          id?: string;
+          nome_manual?: string | null;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          funcionario_id?: string | null;
+          id?: string;
+          nome_manual?: string | null;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "responsaveis_pessoas_funcionario_id_fkey";
+            columns: ["funcionario_id"];
+            isOneToOne: true;
+            referencedRelation: "funcionarios";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       registros_horas: {
         Row: {
@@ -653,6 +802,36 @@ export type Database = {
       };
     };
     Functions: {
+      obras_control_responsaveis_lista: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          obra_id: string;
+          obra_nome: string;
+          obra_status: string;
+          obra_cargo_id: string | null;
+          cargo_id: string | null;
+          cargo_nome: string | null;
+          cargo_ordem: number | null;
+          vinculo_id: string | null;
+          pessoa_id: string | null;
+          pessoa_nome: string | null;
+          pessoa_tipo: string | null;
+          funcionario_id: string | null;
+          total_obras_pessoa: number;
+          compartilhado: boolean;
+        }[];
+      };
+      obras_control_responsaveis_pessoas_opcoes: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          opcao_id: string;
+          pessoa_id: string | null;
+          funcionario_id: string | null;
+          nome: string;
+          tipo: string;
+          detalhe: string | null;
+        }[];
+      };
       obras_criar_centro_custo: {
         Args: { p_codigo: string; p_descricao: string };
         Returns: string;

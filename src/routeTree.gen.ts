@@ -14,6 +14,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SsoCallbackRouteImport } from './routes/sso.callback'
+import { Route as AuthenticatedResponsaveisObrasRouteImport } from './routes/_authenticated/responsaveis-obras'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as AuthenticatedRegistrosRouteImport } from './routes/_authenticated/registros'
 import { Route as AuthenticatedPlanejamentoHhRouteImport } from './routes/_authenticated/planejamento-hh'
@@ -52,6 +53,12 @@ const SsoCallbackRoute = SsoCallbackRouteImport.update({
   path: '/sso/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedResponsaveisObrasRoute =
+  AuthenticatedResponsaveisObrasRouteImport.update({
+    id: '/responsaveis-obras',
+    path: '/responsaveis-obras',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRelatoriosRoute = AuthenticatedRelatoriosRouteImport.update({
   id: '/relatorios',
   path: '/relatorios',
@@ -139,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/responsaveis-obras': typeof AuthenticatedResponsaveisObrasRoute
   '/sso/callback': typeof SsoCallbackRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
@@ -158,6 +166,7 @@ export interface FileRoutesByTo {
   '/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/registros': typeof AuthenticatedRegistrosRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/responsaveis-obras': typeof AuthenticatedResponsaveisObrasRoute
   '/sso/callback': typeof SsoCallbackRoute
   '/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
@@ -179,6 +188,7 @@ export interface FileRoutesById {
   '/_authenticated/planejamento-hh': typeof AuthenticatedPlanejamentoHhRoute
   '/_authenticated/registros': typeof AuthenticatedRegistrosRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
+  '/_authenticated/responsaveis-obras': typeof AuthenticatedResponsaveisObrasRoute
   '/sso/callback': typeof SsoCallbackRoute
   '/_authenticated/admin/usuarios': typeof AuthenticatedAdminUsuariosRoute
   '/api/public/hooks/check-alerts': typeof ApiPublicHooksCheckAlertsRoute
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/planejamento-hh'
     | '/registros'
     | '/relatorios'
+    | '/responsaveis-obras'
     | '/sso/callback'
     | '/admin/usuarios'
     | '/api/public/hooks/check-alerts'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/planejamento-hh'
     | '/registros'
     | '/relatorios'
+    | '/responsaveis-obras'
     | '/sso/callback'
     | '/admin/usuarios'
     | '/api/public/hooks/check-alerts'
@@ -239,6 +251,7 @@ export interface FileRouteTypes {
     | '/_authenticated/planejamento-hh'
     | '/_authenticated/registros'
     | '/_authenticated/relatorios'
+    | '/_authenticated/responsaveis-obras'
     | '/sso/callback'
     | '/_authenticated/admin/usuarios'
     | '/api/public/hooks/check-alerts'
@@ -289,6 +302,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/sso/callback'
       preLoaderRoute: typeof SsoCallbackRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/responsaveis-obras': {
+      id: '/_authenticated/responsaveis-obras'
+      path: '/responsaveis-obras'
+      fullPath: '/responsaveis-obras'
+      preLoaderRoute: typeof AuthenticatedResponsaveisObrasRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/relatorios': {
       id: '/_authenticated/relatorios'
@@ -396,6 +416,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPlanejamentoHhRoute: typeof AuthenticatedPlanejamentoHhRoute
   AuthenticatedRegistrosRoute: typeof AuthenticatedRegistrosRoute
   AuthenticatedRelatoriosRoute: typeof AuthenticatedRelatoriosRoute
+  AuthenticatedResponsaveisObrasRoute: typeof AuthenticatedResponsaveisObrasRoute
   AuthenticatedAdminUsuariosRoute: typeof AuthenticatedAdminUsuariosRoute
 }
 
@@ -411,6 +432,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPlanejamentoHhRoute: AuthenticatedPlanejamentoHhRoute,
   AuthenticatedRegistrosRoute: AuthenticatedRegistrosRoute,
   AuthenticatedRelatoriosRoute: AuthenticatedRelatoriosRoute,
+  AuthenticatedResponsaveisObrasRoute: AuthenticatedResponsaveisObrasRoute,
   AuthenticatedAdminUsuariosRoute: AuthenticatedAdminUsuariosRoute,
 }
 
