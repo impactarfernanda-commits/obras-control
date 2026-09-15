@@ -71,6 +71,8 @@ export type LinhaComposicaoCentro = {
   horasNoturnasRemuneraveis: number;
   custoBase: number;
   custoHE: number;
+  remuneracaoHE: number;
+  encargosProvisoesHE: number;
   custoAdicionalNoturno: number;
   regime: "Local" | "Alojado" | "Local / Alojado" | "Não informado";
   custoRegimeLocal: number;
@@ -206,6 +208,8 @@ export function consolidarCustosCentros(input: Input) {
       horasNoturnasRemuneraveis: 0,
       custoBase: 0,
       custoHE: 0,
+      remuneracaoHE: 0,
+      encargosProvisoesHE: 0,
       custoAdicionalNoturno: 0,
       custoRegimeLocal: 0,
       custoRegimeAlojado: 0,
@@ -401,13 +405,16 @@ export function consolidarCustosCentros(input: Input) {
         custoDetalhado.remuneracao > 0 ? custoDetalhado.custoTotal / custoDetalhado.remuneracao : 0;
       linha.custoHE +=
         (custoDetalhado.remuneracao50 + custoDetalhado.remuneracao100) * fatorReflexos;
+      linha.remuneracaoHE += custoDetalhado.remuneracao50 + custoDetalhado.remuneracao100;
       linha.custoAdicionalNoturno += custoDetalhado.adicionalNoturno * fatorReflexos;
     } else {
-      linha.custoHE += calcularCustoHorasExtras(
+      const custoExtras = calcularCustoHorasExtras(
         custo,
         [{ data: registro.data, horasExtras: horasExtrasApuradas }],
         input.feriados,
-      ).custoTotal;
+      );
+      linha.custoHE += custoExtras.custoTotal;
+      linha.remuneracaoHE += custoExtras.remuneracao;
     }
   }
 
@@ -518,6 +525,8 @@ export function consolidarCustosCentros(input: Input) {
       horasNoturnasRemuneraveis: linha.horasNoturnasRemuneraveis,
       custoBase: linha.custoBase,
       custoHE: linha.custoHE,
+      remuneracaoHE: linha.remuneracaoHE,
+      encargosProvisoesHE: linha.custoHE - linha.remuneracaoHE,
       custoAdicionalNoturno: linha.custoAdicionalNoturno,
       regime: (() => {
         const regimes = new Set(

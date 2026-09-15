@@ -67,6 +67,7 @@ import {
   categoriaEhSupervisor,
 } from "@/lib/supervisor-cc";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
+import { consolidarCustoFuncionario } from "@/lib/relatorio-funcionario";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -522,6 +523,11 @@ function RelatoriosPage() {
   const funcionarioDetalhe =
     ativos.find((funcionario) => funcionario.id === funcionarioDetalheId) ?? null;
   const custoDetalhe = funcionarioDetalhe ? custoPorFunc.get(funcionarioDetalhe.id) : null;
+  const custoConsolidadoDetalhe = funcionarioDetalhe
+    ? consolidarCustoFuncionario(obrasComCusto, funcionarioDetalhe.id)
+    : null;
+  const valorCustoDetalhe = (valor: number | undefined) =>
+    loadingCentros ? "Carregando…" : relatorioCentros ? fmtBRL(valor ?? 0) : "Indisponível";
   const horasExtrasDetalhe = funcionarioDetalhe
     ? horasExtrasPorFunc.get(funcionarioDetalhe.id)
     : null;
@@ -1303,22 +1309,19 @@ function RelatoriosPage() {
                   ["HE 50%", formatarHorasDecimais(horasExtrasDetalhe.horas50)],
                   ["HE 100%", formatarHorasDecimais(horasExtrasDetalhe.horas100)],
                   ["Total de horas", formatarHorasDecimais(resumoHorasDetalhe.total)],
-                  ["Custo mensal base", fmtBRL(custoDetalhe.total)],
-                  ["Remuneração das HE", fmtBRL(horasExtrasDetalhe.remuneracao)],
+                  ["Custo mensal base", valorCustoDetalhe(custoConsolidadoDetalhe?.custoBase)],
+                  ["Remuneração das HE", valorCustoDetalhe(custoConsolidadoDetalhe?.remuneracaoHE)],
                   [
                     "Encargos e provisões das HE",
-                    fmtBRL(
-                      horasExtrasDetalhe.encargos +
-                        horasExtrasDetalhe.provisao13 +
-                        horasExtrasDetalhe.provisaoAviso +
-                        horasExtrasDetalhe.provisaoFerias,
-                    ),
+                    valorCustoDetalhe(custoConsolidadoDetalhe?.encargosProvisoesHE),
                   ],
-                  ["Custo total das HE", fmtBRL(horasExtrasDetalhe.custoTotal)],
+                  ["Custo total das HE", valorCustoDetalhe(custoConsolidadoDetalhe?.custoHE)],
                   [
-                    "Custo total na competência",
-                    fmtBRL(custoDetalhe.total + horasExtrasDetalhe.custoTotal),
+                    "Adicional noturno + reflexos",
+                    valorCustoDetalhe(custoConsolidadoDetalhe?.custoAdicionalNoturno),
                   ],
+                  ["Custo de refeição", valorCustoDetalhe(custoConsolidadoDetalhe?.custoRefeicao)],
+                  ["Custo total na competência", valorCustoDetalhe(custoConsolidadoDetalhe?.total)],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">{label}</div>

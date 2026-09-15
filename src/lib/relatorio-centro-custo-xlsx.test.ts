@@ -42,6 +42,8 @@ const input: CostCenterWorkbookInput = {
         horasNoturnasRemuneraveis: 0,
         custoBase: 192.75,
         custoHE: 7.5,
+        remuneracaoHE: 5,
+        encargosProvisoesHE: 2.5,
         custoAdicionalNoturno: 0,
         regime: "Local",
         custoRegimeLocal: 45,
