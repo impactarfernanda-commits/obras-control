@@ -3,7 +3,8 @@ import type { CalculoJornada } from "./jornada-horas";
 export type ItemCopiaDia = {
   funcionario_id: string;
   nome: string;
-  status: "adicionar" | "copiado" | "ja_existente" | "inelegivel" | "excluido_destino";
+  status:
+    "adicionar" | "copiado" | "ja_existente" | "inelegivel" | "excluido_destino" | "nao_copiavel";
   motivo: string | null;
 };
 
@@ -30,6 +31,7 @@ export type ResumoCopiaDia = {
   total_inelegiveis: number;
   total_suprimidos: number;
   total_adicionar: number;
+  total_nao_copiaveis?: number;
   itens: ItemCopiaDia[];
 };
 

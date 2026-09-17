@@ -102,11 +102,12 @@ const ck = (f: string, o: string, d: string): CellKey => `${f}|${o}|${d}`;
 type Props = {
   obraId: string;
   categorias: Categoria[] | undefined;
+  onAddRegistro?: (funcionarioId: string, obraId: string, data: string) => void;
   /** Permite controlar a semana de fora (opcional). */
   initialWeekStart?: Date;
 };
 
-export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
+export function RegistrosGrid({ obraId, categorias, initialWeekStart, onAddRegistro }: Props) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState<Date>(() =>
@@ -338,6 +339,10 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
 
   const saveCell = useCallback(
     async (key: CellKey, r: Registro) => {
+      if (!r.id) {
+        toast.error("Nenhum lançamento nesta data. Use Adicionar lançamento.");
+        return;
+      }
       setSaving((s) => ({ ...s, [key]: "saving" }));
       setGridFeedback(null);
       try {
@@ -685,6 +690,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart }: Props) {
                             status={saving[key] ?? "idle"}
                             onChange={(patch) => updateCell(key, patch, registroComEspecialidade)}
                             onSave={() => void saveCell(key, registroComEspecialidade)}
+                            onAdd={() => onAddRegistro?.(f.id, obraId, dateStr)}
                           />
                         )}
                       </td>
@@ -712,6 +718,7 @@ function DayCell({
   status,
   onChange,
   onSave,
+  onAdd,
 }: {
   registro: Registro;
   alocado: boolean;
@@ -720,6 +727,7 @@ function DayCell({
   status: "idle" | "dirty" | "saving" | "saved" | "error";
   onChange: (patch: Partial<Registro>) => void;
   onSave: () => void;
+  onAdd: () => void;
 }) {
   const composicao = comporHorasParaVisualizacao({
     data: registro.data,
@@ -809,207 +817,228 @@ function DayCell({
           })}
         </div>
 
-        {registro.tipo_registro === "horas" && composicao.linhas.length > 0 && (
-          <div className="rounded-md border bg-muted/20 p-2">
-            <div className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">
-              Apuração para exibição
-            </div>
-            {composicao.linhas.map((linha) => (
-              <div key={linha.tipo} className={cn("text-xs font-medium", corTextoHora(linha.tipo))}>
-                {linha.texto}
-              </div>
-            ))}
+        {!registro.id ? (
+          <div className="space-y-3 border-t pt-3">
+            <p className="font-medium">Nenhum lançamento nesta data</p>
+            <p className="text-sm text-muted-foreground">
+              Não existe um registro para editar. Escolha o tipo no formulário de criação.
+            </p>
+            <Button type="button" className="w-full" onClick={onAdd}>
+              Adicionar lançamento
+            </Button>
           </div>
-        )}
+        ) : (
+          <>
+            {registro.tipo_registro === "horas" && composicao.linhas.length > 0 && (
+              <div className="rounded-md border bg-muted/20 p-2">
+                <div className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">
+                  Apuração para exibição
+                </div>
+                {composicao.linhas.map((linha) => (
+                  <div
+                    key={linha.tipo}
+                    className={cn("text-xs font-medium", corTextoHora(linha.tipo))}
+                  >
+                    {linha.texto}
+                  </div>
+                ))}
+              </div>
+            )}
 
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Tipo de registro</label>
-          <Select
-            value={registro.tipo_registro}
-            onValueChange={(value: TipoRegistro) => {
-              if (value === "horas") {
-                onChange({
-                  tipo_registro: "horas",
-                  ausencia: false,
-                  falta_tipo: null,
-                  motivo_ausencia: null,
-                });
-                return;
-              }
-              onChange({
-                tipo_registro: value,
-                ausencia: true,
-                horas_normais: 0,
-                horas_extras: 0,
-                justificativa_extras: null,
-                falta_tipo: null,
-                motivo_ausencia: value === "ferias" || value === "folga_campo" ? value : null,
-              });
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="horas">Horas trabalhadas</SelectItem>
-              <SelectItem value="falta">Falta</SelectItem>
-              <SelectItem value="ferias">Férias</SelectItem>
-              <SelectItem value="folga_campo">Folga de campo</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {registroEhFalta(registro) ? (
-          <div className="space-y-2">
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Classificação da falta *</label>
+              <label className="text-xs text-muted-foreground">Tipo de registro</label>
               <Select
-                value={registro.falta_tipo ?? ""}
-                onValueChange={(value: FaltaTipo) => onChange({ falta_tipo: value })}
+                value={registro.tipo_registro}
+                onValueChange={(value: TipoRegistro) => {
+                  if (value === "horas") {
+                    onChange({
+                      tipo_registro: "horas",
+                      ausencia: false,
+                      falta_tipo: null,
+                      motivo_ausencia: null,
+                    });
+                    return;
+                  }
+                  onChange({
+                    tipo_registro: value,
+                    ausencia: true,
+                    horas_normais: 0,
+                    horas_extras: 0,
+                    justificativa_extras: null,
+                    falta_tipo: null,
+                    motivo_ausencia: value === "ferias" || value === "folga_campo" ? value : null,
+                  });
+                }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CLASSIFICACOES_FALTA.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="horas">Horas trabalhadas</SelectItem>
+                  <SelectItem value="falta">Falta</SelectItem>
+                  <SelectItem value="ferias">Férias</SelectItem>
+                  <SelectItem value="folga_campo">Folga de campo</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-amber-700 dark:text-amber-400">{AVISO_FALTA_INTEGRAL}</p>
-          </div>
-        ) : registroEhAusenciaPlanejada(registro) ? (
-          <Alert>
-            <AlertDescription>
-              {rotuloTipoRegistro(registro.tipo_registro)} — nenhuma hora é lançada.
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <>
-            {deveSolicitarEspecialidade && (
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Classificação do ajudante *</label>
-                <Select
-                  value={registro.especialidade_ajudante ?? ""}
-                  onValueChange={(value: EspecialidadeAjudante) =>
-                    onChange({ especialidade_ajudante: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione Civil ou Montagem" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="civil">Civil</SelectItem>
-                    <SelectItem value="montagem">Montagem</SelectItem>
-                  </SelectContent>
-                </Select>
-                {!registro.especialidade_ajudante && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Necessária para esta alocação sem classificação.
+
+            {registroEhFalta(registro) ? (
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Classificação da falta *</label>
+                  <Select
+                    value={registro.falta_tipo ?? ""}
+                    onValueChange={(value: FaltaTipo) => onChange({ falta_tipo: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CLASSIFICACOES_FALTA.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-amber-700 dark:text-amber-400">{AVISO_FALTA_INTEGRAL}</p>
+              </div>
+            ) : registroEhAusenciaPlanejada(registro) ? (
+              <Alert>
+                <AlertDescription>
+                  {rotuloTipoRegistro(registro.tipo_registro)} — nenhuma hora é lançada.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                {deveSolicitarEspecialidade && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">
+                      Classificação do ajudante *
+                    </label>
+                    <Select
+                      value={registro.especialidade_ajudante ?? ""}
+                      onValueChange={(value: EspecialidadeAjudante) =>
+                        onChange({ especialidade_ajudante: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione Civil ou Montagem" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="civil">Civil</SelectItem>
+                        <SelectItem value="montagem">Montagem</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!registro.especialidade_ajudante && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Necessária para esta alocação sem classificação.
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="text-[10px] font-medium uppercase text-muted-foreground">
+                  Valores brutos do lançamento
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Horas normais (máx 9)</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={9}
+                      step={0.5}
+                      value={registro.horas_normais}
+                      onChange={(e) =>
+                        onChange({
+                          horas_normais: Math.max(0, Math.min(9, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Horas extras</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={7}
+                      step={0.5}
+                      value={registro.horas_extras}
+                      onChange={(e) =>
+                        onChange({
+                          horas_extras: Math.max(0, Math.min(16, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+
+                {invalidExtras && (
+                  <p className="text-xs text-rose-600">
+                    Só é possível registrar horas extras se as normais atingirem 9h.
                   </p>
                 )}
-              </div>
-            )}
-            <div className="text-[10px] font-medium uppercase text-muted-foreground">
-              Valores brutos do lançamento
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Horas normais (máx 9)</label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={9}
-                  step={0.5}
-                  value={registro.horas_normais}
-                  onChange={(e) =>
-                    onChange({
-                      horas_normais: Math.max(0, Math.min(9, Number(e.target.value) || 0)),
-                    })
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Horas extras</label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={7}
-                  step={0.5}
-                  value={registro.horas_extras}
-                  onChange={(e) =>
-                    onChange({
-                      horas_extras: Math.max(0, Math.min(16, Number(e.target.value) || 0)),
-                    })
-                  }
-                />
-              </div>
-            </div>
+                {overflow && (
+                  <p className="text-xs text-rose-600">Total diário não pode ultrapassar 16h.</p>
+                )}
 
-            {invalidExtras && (
-              <p className="text-xs text-rose-600">
-                Só é possível registrar horas extras se as normais atingirem 9h.
-              </p>
-            )}
-            {overflow && (
-              <p className="text-xs text-rose-600">Total diário não pode ultrapassar 16h.</p>
+                {registro.horas_extras > 2 && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">
+                      Justificativa das horas extras *
+                    </label>
+                    <Textarea
+                      rows={2}
+                      value={registro.justificativa_extras ?? ""}
+                      onChange={(e) => onChange({ justificativa_extras: e.target.value })}
+                      placeholder="Obrigatória quando extras > 2h"
+                    />
+                    {needsJust && (
+                      <p className="text-xs text-rose-600">Justificativa obrigatória.</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
-            {registro.horas_extras > 2 && (
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
-                  Justificativa das horas extras *
-                </label>
-                <Textarea
-                  rows={2}
-                  value={registro.justificativa_extras ?? ""}
-                  onChange={(e) => onChange({ justificativa_extras: e.target.value })}
-                  placeholder="Obrigatória quando extras > 2h"
-                />
-                {needsJust && <p className="text-xs text-rose-600">Justificativa obrigatória.</p>}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Observações</label>
+              <Textarea
+                rows={2}
+                value={registro.observacoes ?? ""}
+                onChange={(e) => onChange({ observacoes: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2 border-t pt-3">
+              <Button
+                type="button"
+                className="w-full"
+                disabled={status !== "dirty" && status !== "error"}
+                onClick={onSave}
+              >
+                {status === "saving" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                {status === "saving" ? "Salvando..." : "Salvar alterações"}
+              </Button>
+              <div className="text-xs text-muted-foreground">
+                {status === "dirty"
+                  ? "Alterações pendentes de confirmação"
+                  : status === "saving"
+                    ? "Salvando alterações..."
+                    : status === "saved"
+                      ? "Alterações salvas"
+                      : status === "error"
+                        ? "Revise os dados e tente salvar novamente"
+                        : "Altere os campos e confirme para salvar"}
               </div>
-            )}
+            </div>
           </>
         )}
-
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Observações</label>
-          <Textarea
-            rows={2}
-            value={registro.observacoes ?? ""}
-            onChange={(e) => onChange({ observacoes: e.target.value })}
-          />
-        </div>
-
-        <div className="space-y-2 border-t pt-3">
-          <Button
-            type="button"
-            className="w-full"
-            disabled={status !== "dirty" && status !== "error"}
-            onClick={onSave}
-          >
-            {status === "saving" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4" />
-            )}
-            {status === "saving" ? "Salvando..." : "Salvar alterações"}
-          </Button>
-          <div className="text-xs text-muted-foreground">
-            {status === "dirty"
-              ? "Alterações pendentes de confirmação"
-              : status === "saving"
-                ? "Salvando alterações..."
-                : status === "saved"
-                  ? "Alterações salvas"
-                  : status === "error"
-                    ? "Revise os dados e tente salvar novamente"
-                    : "Altere os campos e confirme para salvar"}
-          </div>
-        </div>
       </PopoverContent>
     </Popover>
   );

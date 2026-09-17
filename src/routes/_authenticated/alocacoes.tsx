@@ -1464,27 +1464,6 @@ function AlocacoesPage() {
                     />
                     <FormField
                       control={form.control}
-                      name="data"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{ausenciaPlanejada ? "De" : "Data"}</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="date"
-                              max={ausenciaPlanejada ? undefined : today}
-                              {...field}
-                              onChange={(event) => {
-                                field.onChange(event);
-                                setDataRegistroFiltro(event.target.value);
-                              }}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
                       name="tipo_registro"
                       render={({ field }) => (
                         <FormItem>
@@ -1535,6 +1514,55 @@ function AlocacoesPage() {
                         </FormItem>
                       )}
                     />
+                    <div className={ausenciaPlanejada ? "space-y-2" : ""}>
+                      {ausenciaPlanejada && <p className="text-sm font-medium">Período</p>}
+                      <div className={ausenciaPlanejada ? "grid gap-3 sm:grid-cols-2" : ""}>
+                        <FormField
+                          control={form.control}
+                          name="data"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{ausenciaPlanejada ? "De" : "Data"}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="date"
+                                  max={ausenciaPlanejada ? undefined : today}
+                                  {...field}
+                                  onChange={(event) => {
+                                    field.onChange(event);
+                                    setDataRegistroFiltro(event.target.value);
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        {ausenciaPlanejada && (
+                          <FormField
+                            control={form.control}
+                            name="data_fim"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Até</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="date"
+                                    min={watchData}
+                                    {...field}
+                                    onChange={(event) => {
+                                      field.onChange(event);
+                                      setDataFimRegistroFiltro(event.target.value);
+                                    }}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
+                      </div>
+                    </div>
                     {watchTipoRegistro === "horas" ? (
                       <>
                         <div className="grid grid-cols-2 gap-3">
@@ -1712,27 +1740,6 @@ function AlocacoesPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <FormField
-                          control={form.control}
-                          name="data_fim"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Até</FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="date"
-                                  min={watchData}
-                                  {...field}
-                                  onChange={(event) => {
-                                    field.onChange(event);
-                                    setDataFimRegistroFiltro(event.target.value);
-                                  }}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
                         <Alert>
                           <AlertDescription>
                             Todos os dias corridos do período serão registrados, incluindo sábados e
@@ -2612,6 +2619,14 @@ function AlocacoesPage() {
                         obraId={obra.id}
                         categorias={categorias}
                         initialWeekStart={semanaInicial}
+                        onAddRegistro={(funcionarioId, obraId, data) => {
+                          form.setValue("funcionario_id", funcionarioId);
+                          form.setValue("obra_id", obraId);
+                          form.setValue("data", data);
+                          form.setValue("data_fim", data);
+                          form.setValue("tipo_registro", "horas");
+                          setOpen(true);
+                        }}
                       />
                     </TabsContent>
                   </Tabs>

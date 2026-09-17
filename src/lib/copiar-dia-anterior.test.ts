@@ -41,18 +41,18 @@ test("confirmação grava jornadas e especialidades pela RPC atômica e invalida
 });
 test("copia revalida destino, delega concorrência à RPC e bloqueia clique duplicado", () => {
   assert.match(componente, /confirmacaoEmAndamento\.current/);
-  assert.match(componente, /\.in\("funcionario_id", ids\)/);
-  assert.match(componente, /const ocupados = new Set/);
-  assert.match(componente, /const alvos = candidatos\.filter/);
+  assert.match(componente, /const itens = candidatos\.map/);
+  assert.doesNotMatch(componente, /const alvos = candidatos\.filter/);
   const v2 = readFileSync(
-    new URL(
-      "../../supabase/migrations/20260819120000_jornadas_virada_adicional_noturno.sql",
-      import.meta.url,
-    ),
+    new URL("../../supabase/migrations/20260917120000_copia_somente_jornadas.sql", import.meta.url),
     "utf8",
   );
-  assert.match(v2, /alocacoes_funcionario_data_unique|unique_violation/);
+  assert.match(v2, /unique_violation/);
   assert.match(v2, /v_preservados := v_preservados \+ 1/);
+  assert.match(
+    v2,
+    /FROM public\.registros_horas r\s+WHERE r\.funcionario_id = v_funcionario_id AND r\.data = v_data/,
+  );
 });
 test("RPC é invoker, transacional e não amplia execução", () => {
   assert.match(migration, /SECURITY INVOKER/);

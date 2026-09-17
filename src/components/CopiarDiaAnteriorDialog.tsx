@@ -20,6 +20,8 @@ import { usePersistentDraft } from "@/hooks/use-persistent-draft";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularCompetencia } from "@/lib/competencias";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
+import { jornadaOrigemCopiavel } from "@/lib/jornada-copiavel";
+import { rotuloFalta, rotuloTipoRegistro } from "@/lib/registro-falta";
 import { exigeJustificativaExtras, justificativaExtrasValida } from "@/lib/extras-justificativa";
 import { categoriaEhAjudante, type EspecialidadeAjudante } from "@/lib/especialidade-ajudante";
 import {
@@ -233,10 +235,10 @@ export function CopiarDiaAnteriorDialog({
           .eq("data", origem),
         supabase
           .from("registros_horas")
-          .select("funcionario_id,horas_normais,horas_extras,justificativa_extras,observacoes")
-          .eq("obra_id", obraId)
-          .eq("data", origem)
-          .eq("tipo_registro", "horas"),
+          .select(
+            "funcionario_id,obra_id,tipo_registro,falta_tipo,ausencia,motivo_ausencia,horas_normais,horas_extras,justificativa_extras,observacoes",
+          )
+          .eq("data", origem),
         supabase
           .from("alocacoes")
           .select("funcionario_id, obra_id, data, especialidade_ajudante")
@@ -266,8 +268,37 @@ export function CopiarDiaAnteriorDialog({
         (origemResult.data ?? []).map((alocacao) => [alocacao.funcionario_id, alocacao]),
       );
       const registrosOrigem = new Map(
-        (registrosOrigemResult.data ?? []).map((registro) => [registro.funcionario_id, registro]),
+        (registrosOrigemResult.data ?? [])
+          .filter((registro) => registro.tipo_registro === "horas" && registro.obra_id === obraId)
+          .map((registro) => [registro.funcionario_id, registro]),
       );
+      const registrosPorFuncionario = new Map<
+        string,
+        NonNullable<typeof registrosOrigemResult.data>
+      >();
+      for (const registro of registrosOrigemResult.data ?? []) {
+        const atuais = registrosPorFuncionario.get(registro.funcionario_id) ?? [];
+        atuais.push(registro);
+        registrosPorFuncionario.set(registro.funcionario_id, atuais);
+      }
+      const ausenciasOrigem = new Map(
+        (registrosOrigemResult.data ?? [])
+          .filter((registro) => registro.tipo_registro !== "horas")
+          .map((registro) => [registro.funcionario_id, registro]),
+      );
+      const itensClassificados = resumo.itens.map((item) => {
+        if (item.status !== "adicionar") return item;
+        if (
+          !jornadaOrigemCopiavel(
+            registrosPorFuncionario.get(item.funcionario_id) ?? [],
+            obraId,
+            origens.has(item.funcionario_id),
+          )
+        ) {
+          return { ...item, status: "nao_copiavel" as const };
+        }
+        return item;
+      });
       const feriadosPrevia = new Set(
         (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
       );
@@ -277,7 +308,9 @@ export function CopiarDiaAnteriorDialog({
       setEditandoId(null);
       const previaResolvida: ResumoCopiaResolvido = {
         ...resumo,
-        itens: resumo.itens
+        total_nao_copiaveis: itensClassificados.filter((item) => item.status === "nao_copiavel")
+          .length,
+        itens: itensClassificados
           .filter(
             (item) =>
               !SUPERVISOR_CC_VIGENCIAS_ATIVAS ||
@@ -327,6 +360,17 @@ export function CopiarDiaAnteriorDialog({
             }
             return {
               ...item,
+              motivo:
+                item.status === "nao_copiavel"
+                  ? (() => {
+                      const ausencia = ausenciasOrigem.get(item.funcionario_id);
+                      return ausencia
+                        ? ausencia.tipo_registro === "falta"
+                          ? rotuloFalta(ausencia.falta_tipo)
+                          : rotuloTipoRegistro(ausencia.tipo_registro)
+                        : "Sem jornada copiável";
+                    })()
+                  : item.motivo,
               ajudante,
               resolucao: ajudante
                 ? resolverEspecialidadeAjudante({
@@ -407,29 +451,7 @@ export function CopiarDiaAnteriorDialog({
     setCarregando(true);
     try {
       validarDataLancamento(previa.destino_data, "alocacao");
-      const ids = candidatos.map(({ funcionario_id }) => funcionario_id);
-      const [alocacoesDestino, registrosDestino] = await Promise.all([
-        supabase
-          .from("alocacoes")
-          .select("funcionario_id")
-          .eq("obra_id", obraId)
-          .eq("data", previa.destino_data)
-          .in("funcionario_id", ids),
-        supabase
-          .from("registros_horas")
-          .select("funcionario_id")
-          .eq("obra_id", obraId)
-          .eq("data", previa.destino_data)
-          .in("funcionario_id", ids),
-      ]);
-      for (const resultado of [alocacoesDestino, registrosDestino])
-        if (resultado.error) throw resultado.error;
-      const ocupados = new Set([
-        ...(alocacoesDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
-        ...(registrosDestino.data ?? []).map(({ funcionario_id }) => funcionario_id),
-      ]);
-      const alvos = candidatos.filter(({ funcionario_id }) => !ocupados.has(funcionario_id));
-      const itens = alvos.map((item) => {
+      const itens = candidatos.map((item) => {
         const rascunho = rascunhos[item.funcionario_id];
         if (!rascunho) throw new Error(`${item.nome}: jornada da prévia não encontrada.`);
         const { detalhe } = rascunho;
@@ -448,6 +470,7 @@ export function CopiarDiaAnteriorDialog({
           funcionarioId: item.funcionario_id,
           obraId,
           data: previa.destino_data,
+          origemData: previa.origem_data,
           horaEntrada: rascunho.horaEntrada,
           horaSaida: rascunho.horaSaida,
           intervaloMinutos: rascunho.intervaloMinutos,
@@ -464,25 +487,28 @@ export function CopiarDiaAnteriorDialog({
           detalhe,
         };
       });
-      let resultadoCopia = { processados: 0, preservados: 0 };
+      let resultadoCopia = { processados: 0, preservados: 0, nao_copiaveis: 0 };
       if (itens.length > 0) {
         const { data, error } = await supabase.rpc(
           "obras_copiar_jornadas_v2" as never,
           { p_itens: itens } as never,
         );
         if (error) throw error;
-        resultadoCopia = data as unknown as { processados: number; preservados: number };
+        resultadoCopia = data as unknown as {
+          processados: number;
+          preservados: number;
+          nao_copiaveis: number;
+        };
       }
       const totalCopiados = Number(resultadoCopia.processados ?? 0);
+      const preservados = Number(resultadoCopia.preservados ?? 0);
+      const recusados = Number(resultadoCopia.nao_copiaveis ?? 0);
+      const resumoExecucao = `Execução: ${totalCopiados} copiados, ${preservados} preservados e ${recusados} recusados pela RPC.`;
       if (totalCopiados === 0)
-        toast.info("Nenhum funcionário para copiar. A equipe do dia já está atualizada.");
-      else
-        toast.success(
-          `${totalCopiados} funcionários copiados de ${formatarDataCopia(previa.origem_data)} para ${formatarDataCopia(previa.destino_data)}.` +
-            (resultadoCopia.preservados > 0
-              ? ` ${resultadoCopia.preservados} já existentes foram preservados.`
-              : ""),
+        toast.info(
+          itens.length === 0 ? "Nenhum item foi enviado à RPC. Confira a prévia." : resumoExecucao,
         );
+      else toast.success(resumoExecucao);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["alocacoes-mes"] }),
         qc.invalidateQueries({ queryKey: ["registros-mes"] }),
@@ -602,6 +628,12 @@ export function CopiarDiaAnteriorDialog({
                   .
                 </p>
               )}
+              {(previa.total_nao_copiaveis ?? 0) > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {previa.total_nao_copiaveis} funcionários não serão copiados por ausência ou falta
+                  de jornada. Lance ausências diretamente no formulário, com o período correto.
+                </p>
+              )}
               <ul className="max-h-96 divide-y overflow-y-auto rounded border">
                 {previa.itens.map((item) => {
                   const rascunho = rascunhos[item.funcionario_id];
@@ -665,7 +697,9 @@ export function CopiarDiaAnteriorDialog({
                               ? "Excluído no destino — não será recriado"
                               : item.status === "inelegivel"
                                 ? item.motivo || "Não será copiado — desligado/inelegível"
-                                : "Já existe no destino"}
+                                : item.status === "nao_copiavel"
+                                  ? `Não será copiado — ${item.motivo}`
+                                  : "Já existe no destino"}
                         </Badge>
                       </div>
                       {item.status === "adicionar" && rascunho && (
