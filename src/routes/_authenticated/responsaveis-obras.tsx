@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BriefcaseBusiness, Eye, Loader2, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { BriefcaseBusiness, Loader2, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/PageHeader";
@@ -11,7 +11,7 @@ import {
 } from "@/components/ResponsavelPessoaSearchSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -43,12 +43,16 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import {
   agruparResponsaveis,
-  excluirCadastroResponsavel,
   filtrarObrasResponsaveis,
+  excluirCadastroResponsavel,
+  montarHierarquiaResponsaveis,
   normalizarBuscaResponsaveis,
+  obrasExibidasResponsaveis,
   podeGerenciarResponsaveis,
   pessoasSemelhantes,
-  type ObraComResponsaveis,
+  resumirVinculosLote,
+  selecionarCcsColados,
+  vincularResponsavelEmLote,
   type ResponsavelObraRow,
   type CadastroResponsavelExclusao,
 } from "@/lib/responsaveis-obras";
@@ -99,6 +103,27 @@ function ResponsaveisObrasPage() {
   const [pessoasOpen, setPessoasOpen] = useState(false);
   const [pessoasSearch, setPessoasSearch] = useState("");
   const [exclusao, setExclusao] = useState<CadastroResponsavelExclusao | null>(null);
+  const [loteOpen, setLoteOpen] = useState(false);
+  const [lotePessoaOpcaoId, setLotePessoaOpcaoId] = useState("");
+  const [loteCargoId, setLoteCargoId] = useState("");
+  const [loteSelecionados, setLoteSelecionados] = useState<string[]>([]);
+  const [loteBusca, setLoteBusca] = useState("");
+  const [loteCodigos, setLoteCodigos] = useState("");
+  const [loteNaoEncontrados, setLoteNaoEncontrados] = useState<string[]>([]);
+  const [loteConfirmacao, setLoteConfirmacao] = useState<{
+    obraIds: string[];
+    pessoaId: string | null;
+    opcaoId: string;
+    cargoId: string;
+    novos: number;
+    existentes: number;
+  } | null>(null);
+  const [loteResultado, setLoteResultado] = useState<{
+    criados: number;
+    existentes: number;
+    falhas: Array<{ obraId: string; erro: string }>;
+  } | null>(null);
+  const [manualTarget, setManualTarget] = useState<"single" | "batch">("single");
 
   const {
     data: rows = [],
@@ -136,12 +161,159 @@ function ResponsaveisObrasPage() {
   });
 
   const obras = useMemo(() => agruparResponsaveis(rows), [rows]);
-  const filtered = useMemo(
-    () => filtrarObrasResponsaveis(obras, search, mostrarFinalizadas),
+  const obrasElegiveis = useMemo(
+    () => obrasExibidasResponsaveis(obras, mostrarFinalizadas),
+    [obras, mostrarFinalizadas],
+  );
+  const obrasLoteFiltradas = useMemo(
+    () => filtrarObrasResponsaveis(obrasElegiveis, loteBusca, true),
+    [obrasElegiveis, loteBusca],
+  );
+  const idsElegiveis = new Set(obrasElegiveis.map((obra) => obra.id));
+  const idsLoteEfetivos = loteSelecionados.filter((id) => idsElegiveis.has(id));
+  const hierarquia = useMemo(
+    () => montarHierarquiaResponsaveis(obras, search, mostrarFinalizadas),
     [obras, search, mostrarFinalizadas],
   );
+  const semResultados =
+    hierarquia.gerentes.length === 0 &&
+    hierarquia.coordenadoresDiretos.length === 0 &&
+    hierarquia.semGestor.length === 0;
   const selected = obras.find((obra) => obra.id === selectedId) ?? null;
   const semelhantes = useMemo(() => pessoasSemelhantes(pessoas, manualNome), [pessoas, manualNome]);
+
+  function selecionarCodigosLote() {
+    const { ids, naoEncontrados } = selecionarCcsColados(obrasElegiveis, loteCodigos);
+    setLoteSelecionados((atual) => [
+      ...new Set([...atual.filter((id) => idsElegiveis.has(id)), ...ids]),
+    ]);
+    setLoteNaoEncontrados(naoEncontrados);
+  }
+
+  async function garantirPessoaLote(opcao: OpcaoPessoaResponsavel): Promise<string> {
+    if (opcao.pessoa_id) return opcao.pessoa_id;
+    if (!opcao.funcionario_id) throw new Error("Pessoa não identificada.");
+    const { data, error: insertError } = await supabase
+      .from("responsaveis_pessoas")
+      .insert({ funcionario_id: opcao.funcionario_id, created_by: user?.id ?? null })
+      .select("id")
+      .single();
+    if (!insertError) return data.id;
+    if (insertError.code !== "23505") throw insertError;
+    const { data: existente, error } = await supabase
+      .from("responsaveis_pessoas")
+      .select("id")
+      .eq("funcionario_id", opcao.funcionario_id)
+      .single();
+    if (error) throw error;
+    return existente.id;
+  }
+
+  async function prepararLote() {
+    try {
+      if (!canManage) throw new Error("Sem permissão para vincular responsáveis.");
+      const opcao = pessoas.find((item) => item.opcao_id === lotePessoaOpcaoId);
+      if (!opcao || !loteCargoId || idsLoteEfetivos.length === 0) {
+        throw new Error("Selecione pessoa, cargo e ao menos um centro de custo.");
+      }
+      const obraIds = [...idsLoteEfetivos];
+      const { data: cargosDaObra, error: cargoError } = await supabase
+        .from("obra_responsabilidade_cargos")
+        .select("id,obra_id")
+        .eq("cargo_id", loteCargoId)
+        .in("obra_id", obraIds);
+      if (cargoError) throw cargoError;
+      const pessoaId = opcao.pessoa_id;
+      const existentes = new Set<string>();
+      if (pessoaId && cargosDaObra.length) {
+        const { data: vinculos, error: vinculoError } = await supabase
+          .from("obra_responsabilidade_pessoas")
+          .select("obra_cargo_id")
+          .eq("pessoa_id", pessoaId)
+          .in(
+            "obra_cargo_id",
+            cargosDaObra.map((item) => item.id),
+          );
+        if (vinculoError) throw vinculoError;
+        const cargoIds = new Set(vinculos.map((item) => item.obra_cargo_id));
+        cargosDaObra.forEach((item) => {
+          if (cargoIds.has(item.id)) existentes.add(item.obra_id);
+        });
+      }
+      setLoteConfirmacao({
+        obraIds,
+        pessoaId,
+        opcaoId: opcao.opcao_id,
+        cargoId: loteCargoId,
+        ...resumirVinculosLote(obraIds, existentes),
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível preparar o lote.");
+    }
+  }
+
+  const loteMutation = useMutation({
+    mutationFn: async (plano: NonNullable<typeof loteConfirmacao>) => {
+      if (!canManage) throw new Error("Sem permissão para vincular responsáveis.");
+      const opcao = pessoas.find((item) => item.opcao_id === plano.opcaoId);
+      if (!opcao || !cargos.some((cargo) => cargo.id === plano.cargoId && cargo.ativo)) {
+        throw new Error("Pessoa ou cargo ativo não encontrado. Atualize a página.");
+      }
+      const pessoaId = await garantirPessoaLote(opcao);
+      return vincularResponsavelEmLote(role, plano.obraIds, async (obraId) => {
+        const { data: found, error: findError } = await supabase
+          .from("obra_responsabilidade_cargos")
+          .select("id")
+          .eq("obra_id", obraId)
+          .eq("cargo_id", plano.cargoId)
+          .maybeSingle();
+        if (findError) throw findError;
+        let obraCargoId = found?.id;
+        if (!obraCargoId) {
+          const { data: created, error: createError } = await supabase
+            .from("obra_responsabilidade_cargos")
+            .insert({ obra_id: obraId, cargo_id: plano.cargoId, created_by: user?.id ?? null })
+            .select("id")
+            .single();
+          if (createError && createError.code !== "23505") throw createError;
+          if (createError) {
+            const { data: concurrent, error: concurrentError } = await supabase
+              .from("obra_responsabilidade_cargos")
+              .select("id")
+              .eq("obra_id", obraId)
+              .eq("cargo_id", plano.cargoId)
+              .single();
+            if (concurrentError) throw concurrentError;
+            obraCargoId = concurrent.id;
+          } else obraCargoId = created.id;
+        }
+        const { data: existing, error: existingError } = await supabase
+          .from("obra_responsabilidade_pessoas")
+          .select("id")
+          .eq("obra_cargo_id", obraCargoId)
+          .eq("pessoa_id", pessoaId)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (existing) return "existente";
+        const { error: linkError } = await supabase.from("obra_responsabilidade_pessoas").insert({
+          obra_cargo_id: obraCargoId,
+          pessoa_id: pessoaId,
+          created_by: user?.id ?? null,
+        });
+        if (linkError?.code === "23505") return "existente";
+        if (linkError) throw linkError;
+        return "criado";
+      });
+    },
+    onSuccess: (resultado) => {
+      setLoteResultado(resultado);
+      setLoteConfirmacao(null);
+      invalidateAll();
+      if (resultado.falhas.length) toast.warning("Lote concluído com falhas. Confira o resultado.");
+      else toast.success("Vínculos em lote concluídos.");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
   function invalidateAll() {
     queryClient.invalidateQueries({ queryKey: ["responsaveis-obras"] });
@@ -258,7 +430,8 @@ function ResponsaveisObrasPage() {
     onSuccess: ({ id, nome }) => {
       toast.success("Pessoa cadastrada");
       invalidateAll();
-      setPessoaOpcaoId(`manual:${id}`);
+      if (manualTarget === "batch") setLotePessoaOpcaoId(`manual:${id}`);
+      else setPessoaOpcaoId(`manual:${id}`);
       setManualOpen(false);
       setManualNome("");
       queryClient.setQueryData<OpcaoPessoaResponsavel[]>(
@@ -378,6 +551,15 @@ function ResponsaveisObrasPage() {
                 <Users className="mr-2 h-4 w-4" />
                 Pessoas manuais
               </Button>
+              <Button
+                onClick={() => {
+                  setLoteResultado(null);
+                  setLoteOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Vincular em lote
+              </Button>
             </div>
           ) : undefined
         }
@@ -416,54 +598,111 @@ function ResponsaveisObrasPage() {
             de usar esta tela.
           </CardContent>
         </Card>
-      ) : filtered.length === 0 ? (
+      ) : semResultados ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
             Nenhuma obra encontrada.
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((obra) => {
-            const destaques = obra.cargos.filter((cargo) =>
-              ["Gerente de Obras", "Coordenador"].includes(cargo.nome),
-            );
-            return (
-              <Card key={obra.id} className="flex flex-col">
-                <CardHeader>
-                  <CardTitle className="text-lg">{obra.nome}</CardTitle>
-                  <span className="text-sm text-muted-foreground">{obra.status}</span>
-                </CardHeader>
-                <CardContent className="flex-1 space-y-2 text-sm">
-                  {destaques.flatMap((cargo) =>
-                    cargo.pessoas.map((pessoa) => (
-                      <p key={pessoa.vinculoId}>
-                        <span className="font-medium">{cargo.nome}:</span> {pessoa.nome}
-                      </p>
-                    )),
-                  )}
-                  {destaques.every((cargo) => cargo.pessoas.length === 0) && (
-                    <p className="text-muted-foreground">Sem destaques definidos.</p>
-                  )}
-                  <div className="flex items-center gap-2 pt-2 text-muted-foreground">
-                    <Users className="h-4 w-4" />
-                    {obra.totalDefinidos}{" "}
-                    {obra.totalDefinidos === 1 ? "responsável definido" : "responsáveis definidos"}
-                  </div>
-                </CardContent>
-                <CardFooter>
+        <div className="space-y-8">
+          <section aria-label="Direção de Obras" className="mx-auto max-w-xl text-center">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Direção de Obras
+            </p>
+            <Card>
+              <CardContent className="space-y-2 p-5">
+                {hierarquia.diretores.length ? (
+                  hierarquia.diretores.map((diretor) => (
+                    <div key={diretor.pessoaId}>
+                      <p className="text-lg font-semibold">{diretor.nome}</p>
+                      <p className="text-sm text-muted-foreground">Diretor de Obras</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Diretor de Obras não definido nos CCs exibidos.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
+          {hierarquia.gerentes.length > 0 && (
+            <section aria-label="Gerentes de Obras">
+              <h2 className="mb-4 text-lg font-semibold">Gerentes de Obras</h2>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {hierarquia.gerentes.map((gerente) => (
+                  <Card key={gerente.pessoaId}>
+                    <CardHeader>
+                      <CardTitle className="text-lg">{gerente.nome}</CardTitle>
+                      <p className="text-sm text-muted-foreground">Gerente de Obras</p>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {gerente.obras.map((obra) => (
+                        <Button
+                          key={obra.id}
+                          variant="outline"
+                          className="h-auto w-full justify-start whitespace-normal py-2 text-left"
+                          onClick={() => setSelectedId(obra.id)}
+                        >
+                          {obra.nome}
+                        </Button>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {hierarquia.coordenadoresDiretos.length > 0 && (
+            <section aria-label="Coordenadores com gestão direta">
+              <h2 className="mb-4 text-lg font-semibold">Coordenadores com gestão direta</h2>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {hierarquia.coordenadoresDiretos.map((coordenador) => (
+                  <Card key={coordenador.pessoaId}>
+                    <CardHeader>
+                      <CardTitle className="text-lg">{coordenador.nome}</CardTitle>
+                      <p className="text-sm text-muted-foreground">Coordenador de Obras</p>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {coordenador.obras.map((obra) => (
+                        <Button
+                          key={obra.id}
+                          variant="outline"
+                          className="h-auto w-full justify-start whitespace-normal py-2 text-left"
+                          onClick={() => setSelectedId(obra.id)}
+                        >
+                          {obra.nome}
+                        </Button>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {hierarquia.semGestor.length > 0 && (
+            <section aria-label="Centros de custo sem gerente ou coordenador definido">
+              <h2 className="mb-4 text-lg font-semibold">
+                CCs sem gerente ou coordenador definido
+              </h2>
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {hierarquia.semGestor.map((obra) => (
                   <Button
+                    key={obra.id}
                     variant="outline"
-                    className="w-full"
+                    className="h-auto justify-start whitespace-normal py-3 text-left"
                     onClick={() => setSelectedId(obra.id)}
                   >
-                    <Eye className="mr-2 h-4 w-4" />
-                    Ver responsáveis
+                    {obra.nome}
                   </Button>
-                </CardFooter>
-              </Card>
-            );
-          })}
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
@@ -589,6 +828,7 @@ function ResponsaveisObrasPage() {
                 value={pessoaOpcaoId}
                 onValueChange={setPessoaOpcaoId}
                 onAddManual={(termo) => {
+                  setManualTarget("single");
                   setManualNome(termo);
                   setManualOpen(true);
                 }}
@@ -604,6 +844,196 @@ function ResponsaveisObrasPage() {
               onClick={() => addMutation.mutate()}
             >
               {addMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={canManage && loteOpen} onOpenChange={setLoteOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Vincular em lote</DialogTitle>
+            <DialogDescription>
+              Adicione uma pessoa a vários centros de custo sem substituir os responsáveis atuais.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Pessoa</Label>
+              <ResponsavelPessoaSearchSelect
+                pessoas={pessoas}
+                value={lotePessoaOpcaoId}
+                onValueChange={setLotePessoaOpcaoId}
+                onAddManual={(termo) => {
+                  setManualTarget("batch");
+                  setManualNome(termo);
+                  setManualOpen(true);
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Cargo</Label>
+              <Select value={loteCargoId} onValueChange={setLoteCargoId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um cargo ativo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cargos
+                    .filter((cargo) => cargo.ativo)
+                    .map((cargo) => (
+                      <SelectItem key={cargo.id} value={cargo.id}>
+                        {cargo.nome}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lote-busca">Centros de custo</Label>
+              <Input
+                id="lote-busca"
+                value={loteBusca}
+                onChange={(event) => setLoteBusca(event.target.value)}
+                placeholder="Buscar CC ou obra"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setLoteSelecionados((atual) => [
+                      ...new Set([
+                        ...atual.filter((id) => idsElegiveis.has(id)),
+                        ...obrasLoteFiltradas.map((obra) => obra.id),
+                      ]),
+                    ])
+                  }
+                >
+                  Selecionar todos{loteBusca ? " da busca" : ""}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setLoteSelecionados([])}
+                >
+                  Limpar seleção
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {idsLoteEfetivos.length} selecionados
+                </span>
+              </div>
+              <div className="max-h-52 space-y-1 overflow-y-auto rounded-md border p-2">
+                {obrasLoteFiltradas.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">Nenhum CC encontrado.</p>
+                )}
+                {obrasLoteFiltradas.map((obra) => (
+                  <label
+                    key={obra.id}
+                    className="flex cursor-pointer items-center gap-3 rounded p-2 hover:bg-accent"
+                  >
+                    <Checkbox
+                      checked={idsLoteEfetivos.includes(obra.id)}
+                      onCheckedChange={(checked) =>
+                        setLoteSelecionados((atual) =>
+                          checked
+                            ? [...new Set([...atual, obra.id])]
+                            : atual.filter((id) => id !== obra.id),
+                        )
+                      }
+                    />
+                    <span className="text-sm">{obra.nome}</span>
+                    {obra.status === "Concluída" && <Badge variant="outline">Concluída</Badge>}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lote-codigos">Colar códigos dos CCs</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="lote-codigos"
+                  value={loteCodigos}
+                  onChange={(event) => setLoteCodigos(event.target.value)}
+                  placeholder="150, 173, 217, 230"
+                />
+                <Button type="button" variant="outline" onClick={selecionarCodigosLote}>
+                  Marcar CCs
+                </Button>
+              </div>
+              {loteNaoEncontrados.length > 0 && (
+                <p className="text-sm text-destructive">
+                  Códigos não encontrados entre os CCs exibidos: {loteNaoEncontrados.join(", ")}
+                </p>
+              )}
+            </div>
+            {loteResultado && (
+              <div role="status" className="space-y-1 rounded-md border p-3 text-sm">
+                <p>
+                  {loteResultado.criados} vínculos criados; {loteResultado.existentes} já
+                  existentes/preservados; {loteResultado.falhas.length} falhas.
+                </p>
+                {loteResultado.falhas.map((falha) => (
+                  <p key={falha.obraId} className="text-destructive">
+                    {obras.find((obra) => obra.id === falha.obraId)?.nome ?? falha.obraId}:{" "}
+                    {falha.erro}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setLoteOpen(false)}>
+              Fechar
+            </Button>
+            <Button
+              disabled={
+                !lotePessoaOpcaoId ||
+                !loteCargoId ||
+                !idsLoteEfetivos.length ||
+                loteMutation.isPending
+              }
+              onClick={prepararLote}
+            >
+              Revisar vínculos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(loteConfirmacao)}
+        onOpenChange={(open) => !open && setLoteConfirmacao(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirmar vinculação em lote</DialogTitle>
+            <DialogDescription>
+              Os vínculos existentes e outras pessoas serão preservados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1 text-sm">
+            <p>Pessoa: {pessoas.find((p) => p.opcao_id === loteConfirmacao?.opcaoId)?.nome}</p>
+            <p>Cargo: {cargos.find((c) => c.id === loteConfirmacao?.cargoId)?.nome}</p>
+            <p>{loteConfirmacao?.obraIds.length} centros de custo selecionados</p>
+            <p>{loteConfirmacao?.novos} novos vínculos</p>
+            <p>{loteConfirmacao?.existentes} já existentes</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={loteMutation.isPending}
+              onClick={() => setLoteConfirmacao(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={loteMutation.isPending || !loteConfirmacao}
+              onClick={() => loteConfirmacao && loteMutation.mutate(loteConfirmacao)}
+            >
+              {loteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirmar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -636,7 +1066,8 @@ function ResponsaveisObrasPage() {
                     type="button"
                     className="block w-full rounded px-2 py-1 text-left hover:bg-accent"
                     onClick={() => {
-                      setPessoaOpcaoId(pessoa.opcao_id);
+                      if (manualTarget === "batch") setLotePessoaOpcaoId(pessoa.opcao_id);
+                      else setPessoaOpcaoId(pessoa.opcao_id);
                       setManualOpen(false);
                     }}
                   >

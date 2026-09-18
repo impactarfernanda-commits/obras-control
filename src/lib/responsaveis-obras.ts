@@ -21,6 +21,90 @@ export function podeGerenciarResponsaveis(role: string | null | undefined): bool
   return role === "gerente" || role === "diretor";
 }
 
+export function codigoCcResponsaveis(nome: string): string | null {
+  return nome.match(/^\s*(?:CC\s*)?(\d+(?:\.\d+)*)\s*(?:-|–|—|$)/i)?.[1] ?? null;
+}
+
+export function consolidarDesdobramentosResponsaveis(
+  obras: readonly ObraComResponsaveis[],
+): ObraComResponsaveis[] {
+  const codigos = new Set(obras.map((obra) => codigoCcResponsaveis(obra.nome)).filter(Boolean));
+  return obras.filter((obra) => {
+    const codigo = codigoCcResponsaveis(obra.nome);
+    if (!codigo?.includes(".")) return true;
+    return !codigos.has(codigo.split(".")[0]);
+  });
+}
+
+export function obrasExibidasResponsaveis(
+  obras: readonly ObraComResponsaveis[],
+  mostrarFinalizadas = false,
+): ObraComResponsaveis[] {
+  return consolidarDesdobramentosResponsaveis(
+    filtrarObrasResponsaveis(obras, "", mostrarFinalizadas),
+  );
+}
+
+export function selecionarCcsColados(
+  obras: readonly ObraComResponsaveis[],
+  texto: string,
+): { ids: string[]; naoEncontrados: string[] } {
+  const codigos = [
+    ...new Set(
+      texto
+        .split(/[\s,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const porCodigo = new Map(obras.map((obra) => [codigoCcResponsaveis(obra.nome), obra.id]));
+  return {
+    ids: codigos.map((codigo) => porCodigo.get(codigo)).filter((id): id is string => !!id),
+    naoEncontrados: codigos.filter((codigo) => !porCodigo.has(codigo)),
+  };
+}
+
+export function resumirVinculosLote(
+  obraIds: readonly string[],
+  existentes: ReadonlySet<string>,
+): { novos: number; existentes: number } {
+  return {
+    novos: obraIds.filter((id) => !existentes.has(id)).length,
+    existentes: obraIds.filter((id) => existentes.has(id)).length,
+  };
+}
+
+export async function vincularResponsavelEmLote(
+  role: string | null | undefined,
+  obraIds: readonly string[],
+  vincular: (obraId: string) => Promise<"criado" | "existente">,
+): Promise<{
+  criados: number;
+  existentes: number;
+  falhas: Array<{ obraId: string; erro: string }>;
+}> {
+  if (!podeGerenciarResponsaveis(role))
+    throw new Error("Sem permissão para vincular responsáveis.");
+  const resultado = {
+    criados: 0,
+    existentes: 0,
+    falhas: [] as Array<{ obraId: string; erro: string }>,
+  };
+  for (const obraId of new Set(obraIds)) {
+    try {
+      const estado = await vincular(obraId);
+      if (estado === "criado") resultado.criados += 1;
+      else resultado.existentes += 1;
+    } catch (error) {
+      resultado.falhas.push({
+        obraId,
+        erro: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return resultado;
+}
+
 export type CadastroResponsavelExclusao =
   | { tipo: "cargo"; id: string; nome: string }
   | { tipo: "pessoa"; id: string; nome: string; funcionario_id: string | null };
@@ -76,6 +160,68 @@ export type ObraComResponsaveis = {
   cargos: CargoDaObra[];
   totalDefinidos: number;
 };
+
+export type BlocoHierarquia = { pessoaId: string; nome: string; obras: ObraComResponsaveis[] };
+
+export function montarHierarquiaResponsaveis(
+  obras: readonly ObraComResponsaveis[],
+  busca: string,
+  mostrarFinalizadas = false,
+): {
+  diretores: BlocoHierarquia[];
+  gerentes: BlocoHierarquia[];
+  coordenadoresDiretos: BlocoHierarquia[];
+  semGestor: ObraComResponsaveis[];
+} {
+  const exibidas = obrasExibidasResponsaveis(obras, mostrarFinalizadas);
+  const termo = normalizarBuscaResponsaveis(busca);
+  const obrasCompativeis = new Set(
+    filtrarObrasResponsaveis(exibidas, busca, true).map((obra) => obra.id),
+  );
+  const porCargo = (
+    nomeCargo: string,
+    elegivel: (obra: ObraComResponsaveis) => boolean,
+    ignorarBusca = false,
+  ) => {
+    const blocos = new Map<string, BlocoHierarquia>();
+    for (const obra of exibidas) {
+      if (!elegivel(obra)) continue;
+      for (const cargo of obra.cargos.filter((item) => item.nome === nomeCargo)) {
+        for (const pessoa of cargo.pessoas) {
+          const bloco = blocos.get(pessoa.pessoaId) ?? {
+            pessoaId: pessoa.pessoaId,
+            nome: pessoa.nome,
+            obras: [],
+          };
+          bloco.obras.push(obra);
+          blocos.set(pessoa.pessoaId, bloco);
+        }
+      }
+    }
+    return [...blocos.values()]
+      .map((bloco) => ({
+        ...bloco,
+        obras:
+          ignorarBusca || (termo && normalizarBuscaResponsaveis(bloco.nome).includes(termo))
+            ? bloco.obras
+            : bloco.obras.filter((obra) => obrasCompativeis.has(obra.id)),
+      }))
+      .filter((bloco) => bloco.obras.length > 0)
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  };
+  const temGerente = (obra: ObraComResponsaveis) =>
+    obra.cargos.some((cargo) => cargo.nome === "Gerente de Obras" && cargo.pessoas.length > 0);
+  const temCoordenadorDireto = (obra: ObraComResponsaveis) =>
+    !temGerente(obra) &&
+    obra.cargos.some((cargo) => cargo.nome === "Coordenador" && cargo.pessoas.length > 0);
+  const gerentes = porCargo("Gerente de Obras", temGerente);
+  const coordenadoresDiretos = porCargo("Coordenador", temCoordenadorDireto);
+  const semGestor = exibidas.filter(
+    (obra) => !temGerente(obra) && !temCoordenadorDireto(obra) && obrasCompativeis.has(obra.id),
+  );
+  const diretores = porCargo("Diretor de Obras", () => true, true);
+  return { diretores, gerentes, coordenadoresDiretos, semGestor };
+}
 
 export function normalizarBuscaResponsaveis(valor: string): string {
   return valor

@@ -4,10 +4,17 @@ import test from "node:test";
 
 import {
   agruparResponsaveis,
+  codigoCcResponsaveis,
+  consolidarDesdobramentosResponsaveis,
   excluirCadastroResponsavel,
   filtrarObrasResponsaveis,
+  montarHierarquiaResponsaveis,
+  obrasExibidasResponsaveis,
   pessoasSemelhantes,
   podeGerenciarResponsaveis,
+  resumirVinculosLote,
+  selecionarCcsColados,
+  vincularResponsavelEmLote,
   type ResponsavelObraRow,
 } from "./responsaveis-obras.ts";
 
@@ -27,6 +34,208 @@ const base: ResponsavelObraRow = {
   total_obras_pessoa: 0,
   compartilhado: false,
 };
+
+test("lote reconhece códigos exatos, marca encontrados e informa ausentes", () => {
+  const obras = agruparResponsaveis([
+    { ...base, obra_id: "a", obra_nome: "150 - Obra A", obra_cargo_id: null },
+    { ...base, obra_id: "b", obra_nome: "173 - Obra B", obra_cargo_id: null },
+  ]);
+  assert.equal(codigoCcResponsaveis("150 - Obra A"), "150");
+  assert.equal(codigoCcResponsaveis("CC 230 - Obra C"), "230");
+  assert.deepEqual(selecionarCcsColados(obras, "150, 173; 150\n999"), {
+    ids: ["a", "b"],
+    naoEncontrados: ["999"],
+  });
+  assert.deepEqual(resumirVinculosLote(["a", "b"], new Set(["a"])), {
+    novos: 1,
+    existentes: 1,
+  });
+});
+
+test("visão e lote consolidam desdobramentos somente quando o principal está disponível", () => {
+  const registro = (id: string, status = "Em andamento"): ResponsavelObraRow => ({
+    ...base,
+    obra_id: id,
+    obra_nome: `${id} - Obra ${id}`,
+    obra_status: status,
+    obra_cargo_id: null,
+  });
+  const obras = agruparResponsaveis([
+    registro("237"),
+    registro("237.1"),
+    registro("237.3"),
+    registro("236"),
+    registro("236.1"),
+    registro("236.2"),
+    registro("300.1"),
+    registro("400"),
+    registro("500", "Concluída"),
+    registro("500.1"),
+  ]);
+  const ids = (lista: readonly { id: string }[]) => lista.map((obra) => obra.id);
+  assert.deepEqual(ids(consolidarDesdobramentosResponsaveis(obras)), [
+    "236",
+    "237",
+    "300.1",
+    "400",
+    "500", // ordenação lexical do agrupamento
+  ]);
+  const padrao = obrasExibidasResponsaveis(obras);
+  assert.deepEqual(ids(padrao), ["236", "237", "300.1", "400", "500.1"]);
+  assert.deepEqual(ids(obrasExibidasResponsaveis(obras, true)), [
+    "236",
+    "237",
+    "300.1",
+    "400",
+    "500",
+  ]);
+  assert.deepEqual(ids(montarHierarquiaResponsaveis(obras, "").semGestor), ids(padrao));
+  assert.deepEqual(ids(montarHierarquiaResponsaveis(obras, "237.3").semGestor), []);
+  assert.deepEqual(selecionarCcsColados(padrao, "237, 237.3, 300.1"), {
+    ids: ["237", "300.1"],
+    naoEncontrados: ["237.3"],
+  });
+  const tela = readFileSync("src/routes/_authenticated/responsaveis-obras.tsx", "utf8");
+  assert.match(tela, /obrasExibidasResponsaveis\(obras, mostrarFinalizadas\)/);
+  assert.match(tela, /selecionarCcsColados\(obrasElegiveis, loteCodigos\)/);
+});
+
+test("consolidação vale nos cards de gerência e coordenação", () => {
+  const vinculo = (id: string, cargo: string, pessoa: string): ResponsavelObraRow => ({
+    ...base,
+    obra_id: id,
+    obra_nome: `${id} - Obra ${id}`,
+    obra_cargo_id: `${id}-${cargo}`,
+    cargo_nome: cargo,
+    vinculo_id: `${id}-${pessoa}`,
+    pessoa_id: pessoa,
+    pessoa_nome: pessoa,
+  });
+  const visao = montarHierarquiaResponsaveis(
+    agruparResponsaveis([
+      vinculo("237", "Gerente de Obras", "Gerente"),
+      vinculo("237.1", "Gerente de Obras", "Gerente"),
+      vinculo("236", "Coordenador", "Coordenador"),
+      vinculo("236.2", "Coordenador", "Coordenador"),
+    ]),
+    "",
+  );
+  assert.deepEqual(
+    visao.gerentes[0].obras.map((obra) => obra.id),
+    ["237"],
+  );
+  assert.deepEqual(
+    visao.coordenadoresDiretos[0].obras.map((obra) => obra.id),
+    ["236"],
+  );
+});
+
+test("lote preserva vínculos existentes, deduplica CC e reporta falhas sem interromper", async () => {
+  const chamadas: string[] = [];
+  const resultado = await vincularResponsavelEmLote("diretor", ["a", "a", "b", "c"], async (id) => {
+    chamadas.push(id);
+    if (id === "b") return "existente";
+    if (id === "c") throw new Error("Falha de RLS");
+    return "criado";
+  });
+  assert.deepEqual(chamadas, ["a", "b", "c"]);
+  assert.deepEqual(resultado, {
+    criados: 1,
+    existentes: 1,
+    falhas: [{ obraId: "c", erro: "Falha de RLS" }],
+  });
+  await assert.rejects(
+    () => vincularResponsavelEmLote("assistente", ["a"], async () => "criado"),
+    /Sem permissão/,
+  );
+});
+
+test("hierarquia usa vínculos por identidade, separa gerentes e coordenadores diretos", () => {
+  const vinculo = (
+    obra: string,
+    cargo: string,
+    pessoa: string,
+    id: string,
+  ): ResponsavelObraRow => ({
+    ...base,
+    obra_id: obra,
+    obra_nome: `CC ${obra}`,
+    obra_cargo_id: `${obra}-${cargo}`,
+    cargo_id: cargo,
+    cargo_nome: cargo,
+    vinculo_id: `${obra}-${cargo}-${id}`,
+    pessoa_id: id,
+    pessoa_nome: pessoa,
+  });
+  const obras = agruparResponsaveis([
+    vinculo("150", "Diretor de Obras", "Sue", "d"),
+    vinculo("150", "Gerente de Obras", "Higor", "g"),
+    vinculo("150", "Coordenador", "Marcelo", "c"),
+    vinculo("230", "Gerente de Obras", "Higor", "g"),
+    vinculo("247", "Coordenador", "Marcelo", "c"),
+    { ...base, obra_id: "250", obra_nome: "CC 250", obra_cargo_id: null },
+  ]);
+  const visao = montarHierarquiaResponsaveis(obras, "");
+  assert.deepEqual(
+    visao.diretores.map((p) => p.nome),
+    ["Sue"],
+  );
+  assert.deepEqual(
+    visao.gerentes[0].obras.map((o) => o.id),
+    ["150", "230"],
+  );
+  assert.deepEqual(
+    visao.coordenadoresDiretos[0].obras.map((o) => o.id),
+    ["247"],
+  );
+  assert.deepEqual(
+    visao.semGestor.map((o) => o.id),
+    ["250"],
+  );
+  assert.deepEqual(
+    montarHierarquiaResponsaveis(obras, "230").gerentes[0].obras.map((o) => o.id),
+    ["230"],
+  );
+  assert.deepEqual(
+    montarHierarquiaResponsaveis(obras, "Higor").gerentes[0].obras.map((o) => o.id),
+    ["150", "230"],
+  );
+  assert.deepEqual(
+    montarHierarquiaResponsaveis(obras, "Marcelo").coordenadoresDiretos[0].obras.map((o) => o.id),
+    ["247"],
+  );
+});
+
+test("hierarquia respeita Concluída e promove coordenador quando gerente deixa de estar definido", () => {
+  const rows: ResponsavelObraRow[] = [
+    {
+      ...base,
+      obra_id: "1",
+      obra_nome: "CC 1",
+      obra_status: "Concluída",
+      cargo_nome: "Gerente de Obras",
+      vinculo_id: "v1",
+      pessoa_id: "g",
+      pessoa_nome: "Gerente",
+    },
+    { ...base, obra_id: "2", obra_nome: "CC 2", cargo_nome: "Gerente de Obras" },
+    {
+      ...base,
+      obra_id: "2",
+      obra_nome: "CC 2",
+      obra_cargo_id: "oc-2",
+      cargo_nome: "Coordenador",
+      vinculo_id: "v2",
+      pessoa_id: "c",
+      pessoa_nome: "Coordenador",
+    },
+  ];
+  const obras = agruparResponsaveis(rows);
+  assert.equal(montarHierarquiaResponsaveis(obras, "").gerentes.length, 0);
+  assert.equal(montarHierarquiaResponsaveis(obras, "").coordenadoresDiretos[0].obras[0].id, "2");
+  assert.equal(montarHierarquiaResponsaveis(obras, "", true).gerentes[0].obras[0].id, "1");
+  assert.equal(montarHierarquiaResponsaveis(obras, "1").gerentes.length, 0);
+});
 
 test("oculta apenas Concluída por padrão e mostra todas ao ativar finalizadas", () => {
   const obras = agruparResponsaveis(
