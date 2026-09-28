@@ -21,6 +21,28 @@ export function podeGerenciarResponsaveis(role: string | null | undefined): bool
   return role === "gerente" || role === "diretor";
 }
 
+const CATEGORIAS_FUNCIONARIO_RESPONSAVEL = new Set([
+  "SUPERVISOR I",
+  "SUPERVISOR II",
+  "SUPERVISOR III",
+  "ASSISTENTE DE ENGENHARIA",
+  "ASSISTENTE DE ENGENHARIA II",
+  "ASSISTENTE ADMINISTRATIVO OBRAS",
+  "TECNICO DE SEGURANCA DO TRABALHO",
+]);
+
+export function filtrarOpcoesPessoasResponsaveis<
+  T extends { tipo: string; funcionario_id: string | null; detalhe: string | null },
+>(opcoes: readonly T[]): T[] {
+  return opcoes.filter((opcao) =>
+    opcao.tipo === "manual" && opcao.funcionario_id === null
+      ? true
+      : opcao.tipo === "funcionario" &&
+        opcao.funcionario_id !== null &&
+        CATEGORIAS_FUNCIONARIO_RESPONSAVEL.has(opcao.detalhe ?? ""),
+  );
+}
+
 export function codigoCcResponsaveis(nome: string): string | null {
   return nome.match(/^\s*(?:CC\s*)?(\d+(?:\.\d+)*)\s*(?:-|–|—|$)/i)?.[1] ?? null;
 }
@@ -229,6 +251,23 @@ export function normalizarBuscaResponsaveis(valor: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("pt-BR")
     .trim();
+}
+
+const PARTICULAS_NOME = new Set(["da", "de", "do", "das", "dos", "e"]);
+
+export function formatarNomeResponsavel(nome: string): string {
+  const limpo = nome.trim().replace(/\s+/g, " ");
+  if (!limpo || limpo !== limpo.toLocaleUpperCase("pt-BR")) return limpo;
+  const palavras = limpo.toLocaleLowerCase("pt-BR").split(" ");
+  return palavras
+    .map((palavra, indice) => {
+      if (indice > 0 && PARTICULAS_NOME.has(palavra)) return palavra;
+      return palavra
+        .split("-")
+        .map((parte) => parte.charAt(0).toLocaleUpperCase("pt-BR") + parte.slice(1))
+        .join("-");
+    })
+    .join(" ");
 }
 
 export function agruparResponsaveis(rows: readonly ResponsavelObraRow[]): ObraComResponsaveis[] {

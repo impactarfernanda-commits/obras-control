@@ -10,7 +10,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { normalizarBuscaResponsaveis } from "@/lib/responsaveis-obras";
+import { formatarNomeResponsavel, normalizarBuscaResponsaveis } from "@/lib/responsaveis-obras";
 import { cn } from "@/lib/utils";
 
 export type OpcaoPessoaResponsavel = {
@@ -61,7 +61,9 @@ export function ResponsavelPessoaSearchSelect({
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
-          <span className="truncate">{selecionada?.nome ?? "Selecione uma pessoa"}</span>
+          <span className="truncate">
+            {selecionada ? formatarNomeResponsavel(selecionada.nome) : "Selecione uma pessoa"}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -87,7 +89,7 @@ export function ResponsavelPessoaSearchSelect({
                 <Check
                   className={cn("h-4 w-4", value === pessoa.opcao_id ? "opacity-100" : "opacity-0")}
                 />
-                <span className="min-w-0 truncate">{pessoa.nome}</span>
+                <span className="min-w-0 truncate">{formatarNomeResponsavel(pessoa.nome)}</span>
               </CommandItem>
             ))}
             <CommandItem

@@ -45,6 +45,8 @@ import {
   agruparResponsaveis,
   filtrarObrasResponsaveis,
   excluirCadastroResponsavel,
+  filtrarOpcoesPessoasResponsaveis,
+  formatarNomeResponsavel,
   montarHierarquiaResponsaveis,
   normalizarBuscaResponsaveis,
   obrasExibidasResponsaveis,
@@ -156,7 +158,7 @@ function ResponsaveisObrasPage() {
         "obras_control_responsaveis_pessoas_opcoes",
       );
       if (queryError) throw queryError;
-      return data as OpcaoPessoaResponsavel[];
+      return filtrarOpcoesPessoasResponsaveis(data as OpcaoPessoaResponsavel[]);
     },
   });
 
@@ -615,7 +617,9 @@ function ResponsaveisObrasPage() {
                 {hierarquia.diretores.length ? (
                   hierarquia.diretores.map((diretor) => (
                     <div key={diretor.pessoaId}>
-                      <p className="text-lg font-semibold">{diretor.nome}</p>
+                      <p className="text-lg font-semibold">
+                        {formatarNomeResponsavel(diretor.nome)}
+                      </p>
                       <p className="text-sm text-muted-foreground">Diretor de Obras</p>
                     </div>
                   ))
@@ -635,7 +639,9 @@ function ResponsaveisObrasPage() {
                 {hierarquia.gerentes.map((gerente) => (
                   <Card key={gerente.pessoaId}>
                     <CardHeader>
-                      <CardTitle className="text-lg">{gerente.nome}</CardTitle>
+                      <CardTitle className="text-lg">
+                        {formatarNomeResponsavel(gerente.nome)}
+                      </CardTitle>
                       <p className="text-sm text-muted-foreground">Gerente de Obras</p>
                     </CardHeader>
                     <CardContent className="space-y-2">
@@ -663,7 +669,9 @@ function ResponsaveisObrasPage() {
                 {hierarquia.coordenadoresDiretos.map((coordenador) => (
                   <Card key={coordenador.pessoaId}>
                     <CardHeader>
-                      <CardTitle className="text-lg">{coordenador.nome}</CardTitle>
+                      <CardTitle className="text-lg">
+                        {formatarNomeResponsavel(coordenador.nome)}
+                      </CardTitle>
                       <p className="text-sm text-muted-foreground">Coordenador de Obras</p>
                     </CardHeader>
                     <CardContent className="space-y-2">
@@ -768,7 +776,7 @@ function ResponsaveisObrasPage() {
                         <TableCell className="font-medium">
                           {index === 0 ? cargo.nome : ""}
                         </TableCell>
-                        <TableCell>{pessoa.nome}</TableCell>
+                        <TableCell>{formatarNomeResponsavel(pessoa.nome)}</TableCell>
                         <TableCell>
                           <StatusBadge status={pessoa.status} />
                         </TableCell>
@@ -1014,7 +1022,12 @@ function ResponsaveisObrasPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1 text-sm">
-            <p>Pessoa: {pessoas.find((p) => p.opcao_id === loteConfirmacao?.opcaoId)?.nome}</p>
+            <p>
+              Pessoa:{" "}
+              {formatarNomeResponsavel(
+                pessoas.find((p) => p.opcao_id === loteConfirmacao?.opcaoId)?.nome ?? "",
+              )}
+            </p>
             <p>Cargo: {cargos.find((c) => c.id === loteConfirmacao?.cargoId)?.nome}</p>
             <p>{loteConfirmacao?.obraIds.length} centros de custo selecionados</p>
             <p>{loteConfirmacao?.novos} novos vínculos</p>
@@ -1071,7 +1084,8 @@ function ResponsaveisObrasPage() {
                       setManualOpen(false);
                     }}
                   >
-                    {pessoa.nome} <span className="text-muted-foreground">· {pessoa.detalhe}</span>
+                    {formatarNomeResponsavel(pessoa.nome)}{" "}
+                    <span className="text-muted-foreground">· {pessoa.detalhe}</span>
                   </button>
                 ))}
               </div>
@@ -1196,12 +1210,12 @@ function ResponsaveisObrasPage() {
                   key={pessoa.pessoa_id}
                   className="flex items-center gap-2 rounded-md border p-3"
                 >
-                  <span className="flex-1 text-sm">{pessoa.nome}</span>
+                  <span className="flex-1 text-sm">{formatarNomeResponsavel(pessoa.nome)}</span>
                   <Button
                     size="sm"
                     variant="ghost"
                     className="text-destructive"
-                    aria-label={`Excluir pessoa manual ${pessoa.nome}`}
+                    aria-label={`Excluir pessoa manual ${formatarNomeResponsavel(pessoa.nome)}`}
                     onClick={() =>
                       setExclusao({
                         tipo: "pessoa",
@@ -1233,7 +1247,10 @@ function ResponsaveisObrasPage() {
           <DialogHeader>
             <DialogTitle>Confirmar exclusão definitiva</DialogTitle>
             <DialogDescription>
-              Excluir {exclusao?.tipo === "cargo" ? "o cargo" : "a pessoa manual"} “{exclusao?.nome}
+              Excluir {exclusao?.tipo === "cargo" ? "o cargo" : "a pessoa manual"} “
+              {exclusao?.tipo === "pessoa"
+                ? formatarNomeResponsavel(exclusao.nome)
+                : exclusao?.nome}
               ”? Esta ação não pode ser desfeita. Se houver vínculos com obras, a exclusão será
               bloqueada; remova todos os vínculos primeiro.
             </DialogDescription>

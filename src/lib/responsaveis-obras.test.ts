@@ -8,7 +8,10 @@ import {
   consolidarDesdobramentosResponsaveis,
   excluirCadastroResponsavel,
   filtrarObrasResponsaveis,
+  filtrarOpcoesPessoasResponsaveis,
+  formatarNomeResponsavel,
   montarHierarquiaResponsaveis,
+  normalizarBuscaResponsaveis,
   obrasExibidasResponsaveis,
   pessoasSemelhantes,
   podeGerenciarResponsaveis,
@@ -34,6 +37,83 @@ const base: ResponsavelObraRow = {
   total_obras_pessoa: 0,
   compartilhado: false,
 };
+
+test("formata nomes em caixa alta somente para exibição e preserva partículas", () => {
+  assert.equal(formatarNomeResponsavel("RODRIGO SANTOS BARBOSA"), "Rodrigo Santos Barbosa");
+  assert.equal(formatarNomeResponsavel("JOÃO DA SILVA"), "João da Silva");
+  assert.equal(formatarNomeResponsavel("MARIA DE SOUZA"), "Maria de Souza");
+  assert.equal(formatarNomeResponsavel("CARLOS DOS SANTOS E LIMA"), "Carlos dos Santos e Lima");
+  assert.equal(formatarNomeResponsavel("DA SILVA"), "Da Silva");
+  assert.equal(formatarNomeResponsavel("ANA-MARIA DO CARMO"), "Ana-Maria do Carmo");
+  assert.equal(formatarNomeResponsavel("Sue Mamede"), "Sue Mamede");
+  assert.equal(formatarNomeResponsavel("  NOME   MANUAL  "), "Nome Manual");
+  assert.equal(
+    normalizarBuscaResponsaveis("RODRIGO SANTOS"),
+    normalizarBuscaResponsaveis("Rodrigo Santos"),
+  );
+});
+
+test("tela aplica formatação visual sem modificar nomes usados nas operações", () => {
+  const tela = readFileSync("src/routes/_authenticated/responsaveis-obras.tsx", "utf8");
+  const seletor = readFileSync("src/components/ResponsavelPessoaSearchSelect.tsx", "utf8");
+  assert.match(tela, /formatarNomeResponsavel\(diretor\.nome\)/);
+  assert.match(tela, /formatarNomeResponsavel\(gerente\.nome\)/);
+  assert.match(tela, /formatarNomeResponsavel\(coordenador\.nome\)/);
+  assert.match(tela, /formatarNomeResponsavel\(pessoa\.nome\)/);
+  assert.match(seletor, /formatarNomeResponsavel\(selecionada\.nome\)/);
+  assert.match(seletor, /formatarNomeResponsavel\(pessoa\.nome\)/);
+  assert.match(tela, /nome: pessoa\.nome/);
+  assert.match(seletor, /onValueChange\(pessoa\.opcao_id\)/);
+});
+
+test("seletor oferece apenas categorias exatas de funcionários e preserva pessoas manuais", () => {
+  const opcoes = [
+    ...[
+      "SUPERVISOR I",
+      "SUPERVISOR II",
+      "SUPERVISOR III",
+      "ASSISTENTE DE ENGENHARIA",
+      "ASSISTENTE DE ENGENHARIA II",
+      "ASSISTENTE ADMINISTRATIVO OBRAS",
+      "TECNICO DE SEGURANCA DO TRABALHO",
+      "SUPERVISOR",
+      "SUPERVISOR IV",
+      "AUXILIAR DE ENGENHARIA",
+      "PEDREIRO",
+      "AJUDANTE",
+      "MONTADOR I",
+      "MESTRE DE OBRAS I",
+      "TÉCNICO DE SEGURANÇA",
+      "supervisor i",
+    ].map((detalhe, index) => ({
+      opcao_id: `funcionario:${index}`,
+      tipo: "funcionario",
+      funcionario_id: `${index}`,
+      detalhe,
+      nome: `Pessoa ${index}`,
+    })),
+    {
+      opcao_id: "manual:1",
+      tipo: "manual",
+      funcionario_id: null,
+      detalhe: "Cadastro manual",
+      nome: "Gerente manual",
+    },
+  ];
+  const filtradas = filtrarOpcoesPessoasResponsaveis(opcoes);
+  assert.deepEqual(
+    filtradas.map((opcao) => opcao.opcao_id),
+    [...Array.from({ length: 7 }, (_, index) => `funcionario:${index}`), "manual:1"],
+  );
+  assert.deepEqual(
+    pessoasSemelhantes(filtradas, "Gerente manual").map((opcao) => opcao.nome),
+    ["Gerente manual"],
+  );
+  const tela = readFileSync("src/routes/_authenticated/responsaveis-obras.tsx", "utf8");
+  assert.match(tela, /filtrarOpcoesPessoasResponsaveis\(data as OpcaoPessoaResponsavel\[\]\)/);
+  const seletor = readFileSync("src/components/ResponsavelPessoaSearchSelect.tsx", "utf8");
+  assert.match(seletor, /normalizarBuscaResponsaveis\(pessoa.nome\)\.includes\(busca\)/);
+});
 
 test("lote reconhece códigos exatos, marca encontrados e informa ausentes", () => {
   const obras = agruparResponsaveis([
