@@ -4,7 +4,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CalendarClock, History, Pencil, Plus, Search, Trash2, UserMinus } from "lucide-react";
+import {
+  CalendarClock,
+  History,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Search,
+  Trash2,
+  UserMinus,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -51,7 +61,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { tipoCategoria, useCategorias } from "@/lib/categorias";
-import { canDeactivateEmployee, canEditEmployeeTerminationDate } from "@/lib/access-control";
+import {
+  canDeactivateEmployee,
+  canEditEmployeeTerminationDate,
+  canReactivateEmployee,
+} from "@/lib/access-control";
 import { useAuth } from "@/hooks/use-auth";
 import { calcularCusto, ENCARGOS_PCT, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { Separator } from "@/components/ui/separator";
@@ -144,6 +158,8 @@ function FuncionariosPage() {
   const [deleting, setDeleting] = useState<Funcionario | null>(null);
   const [deactivating, setDeactivating] = useState<Funcionario | null>(null);
   const [terminationDate, setTerminationDate] = useState("");
+  const [reactivating, setReactivating] = useState<Funcionario | null>(null);
+  const [reactivationReason, setReactivationReason] = useState("");
   const [salarioDirty, setSalarioDirty] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -514,6 +530,45 @@ function FuncionariosPage() {
         );
       } else {
         toast.error(message || "Erro ao salvar data de desligamento");
+      }
+    },
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: async ({ funcionario, motivo }: { funcionario: Funcionario; motivo: string }) => {
+      const motivoNormalizado = motivo.trim();
+      if (motivoNormalizado.length < 10) {
+        throw new Error("Informe um motivo com pelo menos 10 caracteres.");
+      }
+      const { error } = await supabase.rpc("reativar_funcionario", {
+        p_funcionario_id: funcionario.id,
+        p_motivo: motivoNormalizado,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Funcionário reativado. O histórico anterior foi preservado.");
+      setReactivating(null);
+      setReactivationReason("");
+      qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-min-all"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-alocacao-selecao"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-alocar-periodo-base-segura"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-registros-selecao"] });
+      qc.invalidateQueries({ queryKey: ["funcionarios-relatorios"] });
+      qc.invalidateQueries({ queryKey: ["relatorio-sem-alocacao"] });
+      qc.invalidateQueries({ queryKey: ["relatorio-centros-custo"] });
+    },
+    onError: (error: unknown) => {
+      const message = databaseError(error).message;
+      if (message.includes("FUNCIONARIO_JA_ATIVO")) {
+        toast.error("Este funcionário já está ativo.");
+      } else if (message.includes("MOTIVO_REATIVACAO")) {
+        toast.error("Informe um motivo entre 10 e 1000 caracteres.");
+      } else if (message.includes("REATIVACAO_RESTRITA")) {
+        toast.error("Somente gerentes e diretores podem reativar funcionários.");
+      } else {
+        toast.error(message || "Erro ao reativar funcionário");
       }
     },
   });
@@ -1008,6 +1063,20 @@ function FuncionariosPage() {
                                 <CalendarClock className="h-4 w-4" />
                               </Button>
                             )}
+                            {canReactivateEmployee(role, f) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setReactivating(f);
+                                  setReactivationReason("");
+                                }}
+                                aria-label="Reativar funcionário"
+                                title="Reativar funcionário"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            )}
                             {isManagerOrAbove && (
                               <Button
                                 variant="ghost"
@@ -1124,6 +1193,77 @@ function FuncionariosPage() {
                 : deactivating?.ativo
                   ? "Desligar"
                   : "Salvar data"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(reactivating)}
+        onOpenChange={(value) => {
+          if (!value && !reactivateMutation.isPending) {
+            setReactivating(null);
+            setReactivationReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reativar funcionário</DialogTitle>
+            <DialogDescription>
+              O funcionário voltará a ficar disponível para novas alocações. O histórico anterior
+              será preservado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <div className="font-medium">{reactivating?.nome}</div>
+              <div className="text-muted-foreground">
+                Desligado em{" "}
+                {reactivating?.data_desligamento
+                  ? new Date(`${reactivating.data_desligamento}T00:00:00`).toLocaleDateString(
+                      "pt-BR",
+                    )
+                  : "—"}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="reactivation-reason" className="text-sm font-medium">
+                Motivo da reativação
+              </label>
+              <Textarea
+                id="reactivation-reason"
+                value={reactivationReason}
+                onChange={(event) => setReactivationReason(event.target.value)}
+                placeholder="Ex.: Desligamento lançado por engano"
+                maxLength={1000}
+                disabled={reactivateMutation.isPending}
+                required
+              />
+              <p className="text-xs text-muted-foreground">Mínimo de 10 caracteres.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={reactivateMutation.isPending}
+              onClick={() => {
+                setReactivating(null);
+                setReactivationReason("");
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={reactivationReason.trim().length < 10 || reactivateMutation.isPending}
+              onClick={() =>
+                reactivating &&
+                reactivateMutation.mutate({
+                  funcionario: reactivating,
+                  motivo: reactivationReason,
+                })
+              }
+            >
+              {reactivateMutation.isPending ? "Reativando..." : "Reativar funcionário"}
             </Button>
           </DialogFooter>
         </DialogContent>

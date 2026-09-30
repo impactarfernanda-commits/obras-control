@@ -5,12 +5,20 @@ import {
   canDeactivateEmployee,
   canDeleteDailyAllocation,
   canEditEmployeeTerminationDate,
+  canReactivateEmployee,
   hasAnyRole,
   highestRole,
   isExpectedAccessError,
   isTransientReadError,
   shouldRetryRead,
 } from "./access-control.ts";
+
+const desligadoElegivel = {
+  ativo: false,
+  data_desligamento: "2026-09-01",
+  deleted_at: null,
+  visivel_obras_control: true,
+};
 
 test("exclusão diária segue exatamente autoria ou papel gerente/diretor", () => {
   assert.equal(canDeleteDailyAllocation("assistente", "u1", "u1", "u1"), true);
@@ -37,6 +45,30 @@ test("somente gerente e diretor editam data de funcionario ja desligado", () => 
   assert.equal(canEditEmployeeTerminationDate("gerente", false), true);
   assert.equal(canEditEmployeeTerminationDate("diretor", false), true);
   assert.equal(canEditEmployeeTerminationDate("gerente", true), false);
+});
+
+test("somente gerente e diretor reativam funcionario desligado elegivel", () => {
+  assert.equal(canReactivateEmployee("gerente", desligadoElegivel), true);
+  assert.equal(canReactivateEmployee("diretor", desligadoElegivel), true);
+  for (const role of ["assistente", "supervisor", "coordenador", null] as const) {
+    assert.equal(canReactivateEmployee(role, desligadoElegivel), false, String(role));
+  }
+});
+
+test("reativacao exige desligamento preservado e funcionario visivel", () => {
+  assert.equal(canReactivateEmployee("gerente", { ...desligadoElegivel, ativo: true }), false);
+  assert.equal(
+    canReactivateEmployee("gerente", { ...desligadoElegivel, data_desligamento: null }),
+    false,
+  );
+  assert.equal(
+    canReactivateEmployee("gerente", { ...desligadoElegivel, deleted_at: "2026-09-02" }),
+    false,
+  );
+  assert.equal(
+    canReactivateEmployee("gerente", { ...desligadoElegivel, visivel_obras_control: false }),
+    false,
+  );
 });
 
 test("matriz de perfis preserva a maior role suportada", () => {

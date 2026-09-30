@@ -20,6 +20,26 @@ export function canEditEmployeeTerminationDate(role: Role | null, active: boolea
   return (role === "gerente" || role === "diretor") && !active;
 }
 
+export type ReactivatableEmployee = {
+  ativo: boolean;
+  data_desligamento: string | null;
+  deleted_at: string | null;
+  visivel_obras_control: boolean | null;
+};
+
+export function canReactivateEmployee(
+  role: Role | null,
+  funcionario: ReactivatableEmployee,
+): boolean {
+  return (
+    (role === "gerente" || role === "diretor") &&
+    funcionario.ativo === false &&
+    funcionario.deleted_at === null &&
+    funcionario.data_desligamento !== null &&
+    funcionario.visivel_obras_control === true
+  );
+}
+
 export function canDeleteDailyAllocation(
   role: Role | null,
   userId: string | null | undefined,

@@ -299,6 +299,85 @@ export type Database = {
         };
         Relationships: [];
       };
+      funcionario_estado_auditoria: {
+        Row: {
+          acao: "reativacao";
+          ativo_anterior: boolean;
+          ativo_novo: boolean;
+          created_at: string;
+          created_by: string;
+          data_desligamento_anterior: string | null;
+          data_desligamento_novo: string | null;
+          deleted_at_anterior: string | null;
+          deleted_at_novo: string | null;
+          funcionario_id: string;
+          id: string;
+          motivo: string;
+        };
+        Insert: {
+          acao: "reativacao";
+          ativo_anterior: boolean;
+          ativo_novo: boolean;
+          created_at?: string;
+          created_by: string;
+          data_desligamento_anterior?: string | null;
+          data_desligamento_novo?: string | null;
+          deleted_at_anterior?: string | null;
+          deleted_at_novo?: string | null;
+          funcionario_id: string;
+          id?: string;
+          motivo: string;
+        };
+        Update: {
+          acao?: "reativacao";
+          ativo_anterior?: boolean;
+          ativo_novo?: boolean;
+          created_at?: string;
+          created_by?: string;
+          data_desligamento_anterior?: string | null;
+          data_desligamento_novo?: string | null;
+          deleted_at_anterior?: string | null;
+          deleted_at_novo?: string | null;
+          funcionario_id?: string;
+          id?: string;
+          motivo?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "funcionario_estado_auditoria_funcionario_id_fkey";
+            columns: ["funcionario_id"];
+            isOneToOne: false;
+            referencedRelation: "funcionarios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      funcionario_reativacao_autorizacoes: {
+        Row: {
+          created_by: string;
+          funcionario_id: string;
+          transacao_id: number;
+        };
+        Insert: {
+          created_by: string;
+          funcionario_id: string;
+          transacao_id: number;
+        };
+        Update: {
+          created_by?: string;
+          funcionario_id?: string;
+          transacao_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "funcionario_reativacao_autorizacoes_funcionario_id_fkey";
+            columns: ["funcionario_id"];
+            isOneToOne: false;
+            referencedRelation: "funcionarios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       funcionario_regime_vigencias: {
         Row: {
           created_at: string;
@@ -802,6 +881,14 @@ export type Database = {
       };
     };
     Functions: {
+      reativar_funcionario: {
+        Args: { p_funcionario_id: string; p_motivo: string };
+        Returns: {
+          ativo: boolean;
+          data_desligamento: string | null;
+          funcionario_id: string;
+        }[];
+      };
       obras_control_responsaveis_lista: {
         Args: Record<PropertyKey, never>;
         Returns: {
