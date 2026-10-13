@@ -38,7 +38,8 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
+  const normalizedError = error instanceof Error ? error : new Error(String(error));
   console.error("Root route failed", safeErrorDetails(error));
   const router = useRouter();
   useEffect(() => {
@@ -56,8 +57,8 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         </p>
         {import.meta.env.DEV && (
           <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-left text-xs">
-            {error.name}: {error.message}
-            {error.stack ? `\n${error.stack}` : ""}
+            {normalizedError.name}: {normalizedError.message}
+            {normalizedError.stack ? `\n${normalizedError.stack}` : ""}
           </pre>
         )}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
