@@ -12,6 +12,10 @@ const componente = readFileSync(
   new URL("src/components/RelatorioAlocacaoCentroCusto.tsx", raiz),
   "utf8",
 );
+const serverFunction = readFileSync(
+  new URL("src/lib/relatorio-alocacao-centro-custo.functions.ts", raiz),
+  "utf8",
+);
 test("RPC reutiliza competência, alocação diária e não expõe dados privados", () => {
   assert.match(migration, /public\.competencia_25_24\(p_competencia\)/);
   assert.match(
@@ -108,4 +112,22 @@ test("aba está na ordem pedida e oferece filtros, detalhe e estados", () => {
     "Detalhamento diário",
   ])
     assert.match(componente, new RegExp(texto));
+});
+
+test("server function preserva a identidade autenticada em todas as páginas da RPC", () => {
+  assert.match(serverFunction, /handler\(async \(\{ data, context \}\)/);
+  assert.match(
+    serverFunction,
+    /buscarTodasPaginas<LinhaDiariaAlocacaoCc>[\s\S]*context\.supabase[\s\S]*\.rpc\([\s\S]*\.range\(inicio, fim\)/,
+  );
+  assert.doesNotMatch(serverFunction, /supabaseAdmin|client\.server/);
+});
+
+test("server function normaliza PostgrestError sem expor detalhes internos", () => {
+  assert.match(serverFunction, /error instanceof Error/);
+  assert.match(serverFunction, /typeof error\.message === "string"/);
+  assert.match(serverFunction, /throw new Error\(error\.message\)/);
+  assert.match(serverFunction, /Não foi possível carregar o relatório\./);
+  assert.doesNotMatch(serverFunction, /error\.(?:details|hint|stack)|console\./);
+  assert.match(componente, /query\.error instanceof Error \? query\.error\.message/);
 });

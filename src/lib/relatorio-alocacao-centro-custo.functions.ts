@@ -16,20 +16,32 @@ const inputSchema = z.object({
 export const getRelatorioAlocacaoCentroCusto = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => inputSchema.parse(data))
-  .handler(async ({ data }): Promise<LinhaDiariaAlocacaoCc[]> => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    return buscarTodasPaginas<LinhaDiariaAlocacaoCc>((inicio, fim) =>
-      supabaseAdmin
-        .rpc(
-          "relatorio_alocacao_centro_custo" as never,
-          {
-            p_competencia: `${data.competencia}-01`,
-            p_funcionario_id: data.funcionarioId ?? null,
-            p_obra_id: data.obraId ?? null,
-            p_categoria: data.categoria ?? null,
-            p_somente_pendencias: data.somentePendencias,
-          } as never,
-        )
-        .range(inicio, fim),
-    );
+  .handler(async ({ data, context }): Promise<LinhaDiariaAlocacaoCc[]> => {
+    try {
+      return await buscarTodasPaginas<LinhaDiariaAlocacaoCc>((inicio, fim) =>
+        context.supabase
+          .rpc(
+            "relatorio_alocacao_centro_custo" as never,
+            {
+              p_competencia: `${data.competencia}-01`,
+              p_funcionario_id: data.funcionarioId ?? null,
+              p_obra_id: data.obraId ?? null,
+              p_categoria: data.categoria ?? null,
+              p_somente_pendencias: data.somentePendencias,
+            } as never,
+          )
+          .range(inicio, fim),
+      );
+    } catch (error) {
+      if (error instanceof Error) throw error;
+      if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof error.message === "string" &&
+        error.message.trim()
+      )
+        throw new Error(error.message);
+      throw new Error("Não foi possível carregar o relatório.");
+    }
   });
