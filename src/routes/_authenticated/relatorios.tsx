@@ -68,6 +68,7 @@ import {
 } from "@/lib/supervisor-cc";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import { consolidarCustoFuncionario } from "@/lib/relatorio-funcionario";
+import { RelatorioAlocacaoCentroCusto } from "@/components/RelatorioAlocacaoCentroCusto";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -664,6 +665,7 @@ function RelatoriosPage() {
         <TabsList>
           {podeVerFolha && <TabsTrigger value="funcionarios">Custo por funcionário</TabsTrigger>}
           {podeVerCentroCusto && <TabsTrigger value="obras">Custo por centro de custo</TabsTrigger>}
+          <TabsTrigger value="alocacao-centro-custo">Alocação por Centro de Custo</TabsTrigger>
           <TabsTrigger value="sem-alocacao">Sem alocação</TabsTrigger>
         </TabsList>
 
@@ -936,6 +938,10 @@ function RelatoriosPage() {
             </Card>
           </TabsContent>
         )}
+
+        <TabsContent value="alocacao-centro-custo">
+          <RelatorioAlocacaoCentroCusto year={year} month={month} />
+        </TabsContent>
 
         <TabsContent value="sem-alocacao">
           <Card>
