@@ -66,31 +66,15 @@ export type ResumoAlocacaoCc = {
   centroCusto: string;
   obra: string;
   diasAlocados: number;
-  horasNormais: number;
-  horas50: number;
-  horas100: number;
-  horasSemAdicional: number;
-  totalHoras: number;
   percentualDiasAlocados: number;
-  diasEsperados: number;
-  diasAusencia: number;
-  diasSemAlocacao: number;
-  percentualCobertura: number;
-  percentualNaoDistribuido: number;
-  possuiPendencia: boolean;
-  observacaoPendencia: string;
 };
 
 export type FuncionarioAlocacaoCc = {
   funcionarioId: string;
   funcionarioNome: string;
   categoria: string;
-  diasEsperados: number;
-  diasAlocados: number;
-  diasAusencia: number;
-  diasSemAlocacao: number;
-  percentualCobertura: number;
-  linhas: ResumoAlocacaoCc[];
+  totalDiasAlocados: number;
+  centros: ResumoAlocacaoCc[];
   detalhes: LinhaDiariaAlocacaoCc[];
 };
 
@@ -101,14 +85,41 @@ export type RelatorioAlocacaoCc = {
   inconsistencias: number;
 };
 
-const horas = (minutos: number) => Number(minutos || 0) / 60;
+export type FiltrosAlocacaoCc = {
+  busca: string;
+  funcionarioId: string;
+  obraId: string;
+  categoria: string;
+};
+
+export function filtrarFuncionariosAlocacaoCc(
+  funcionarios: readonly FuncionarioAlocacaoCc[],
+  filtros: FiltrosAlocacaoCc,
+) {
+  const termo = filtros.busca.trim().toLocaleLowerCase("pt-BR");
+  return funcionarios.filter(
+    (funcionario) =>
+      (!termo || funcionario.funcionarioNome.toLocaleLowerCase("pt-BR").includes(termo)) &&
+      (filtros.funcionarioId === "all" || funcionario.funcionarioId === filtros.funcionarioId) &&
+      (filtros.obraId === "all" ||
+        funcionario.centros.some((centro) => centro.obraId === filtros.obraId)) &&
+      (filtros.categoria === "all" || funcionario.categoria === filtros.categoria),
+  );
+}
+
 const chaveFuncionarioObra = (funcionarioId: string, obraId: string) =>
   `${funcionarioId}|${obraId}`;
 
 export function montarRelatorioAlocacaoCentroCusto(
   entrada: readonly LinhaDiariaAlocacaoCc[],
 ): RelatorioAlocacaoCc {
-  const detalhes = [...entrada].sort(
+  const detalhesUnicos = new Map<string, LinhaDiariaAlocacaoCc>();
+  for (const linha of entrada) {
+    if (linha.situacao !== "alocado" || !linha.obra_id) continue;
+    const chave = `${linha.funcionario_id}|${linha.obra_id}|${linha.data}`;
+    if (!detalhesUnicos.has(chave)) detalhesUnicos.set(chave, linha);
+  }
+  const detalhes = [...detalhesUnicos.values()].sort(
     (a, b) =>
       a.funcionario_nome.localeCompare(b.funcionario_nome, "pt-BR") ||
       a.data.localeCompare(b.data) ||
@@ -130,14 +141,6 @@ export function montarRelatorioAlocacaoCentroCusto(
         .filter((linha) => linha.obra_id && linha.situacao === "alocado")
         .map((linha) => linha.data),
     );
-    const datasAusencia = new Set(
-      linhas.filter((linha) => linha.situacao === "ausencia").map((linha) => linha.data),
-    );
-    const datasSemAlocacao = new Set(
-      linhas.filter((linha) => linha.situacao === "sem_alocacao").map((linha) => linha.data),
-    );
-    const diasEsperados = Math.max(0, ...linhas.map((linha) => linha.dias_esperados_funcionario));
-    const percentualCobertura = diasEsperados ? (datasAlocadas.size / diasEsperados) * 100 : 0;
     const porObra = new Map<string, LinhaDiariaAlocacaoCc[]>();
     for (const linha of linhas) {
       if (!linha.obra_id || linha.situacao !== "alocado") continue;
@@ -151,19 +154,6 @@ export function montarRelatorioAlocacaoCentroCusto(
       const base = linhasObra[0];
       const partes = separarCentroCustoObra(base.obra_nome);
       const dias = new Set(linhasObra.map((linha) => linha.data)).size;
-      const normais = linhasObra.reduce((total, linha) => total + horas(linha.minutos_normais), 0);
-      const he50 = linhasObra.reduce((total, linha) => total + horas(linha.minutos_he_50), 0);
-      const he100 = linhasObra.reduce((total, linha) => total + horas(linha.minutos_he_100), 0);
-      const semAdicional = linhasObra.reduce(
-        (total, linha) => total + horas(linha.minutos_sem_adicional_he),
-        0,
-      );
-      const inconsistencias = linhasObra
-        .filter((linha) => linha.possui_inconsistencia)
-        .map((linha) => linha.tipo_inconsistencia ?? "Inconsistência")
-        .filter((valor, indice, todos) => todos.indexOf(valor) === indice);
-      if (!partes.formatoReconhecido)
-        inconsistencias.push("Nome do centro de custo fora do padrão");
       const item: ResumoAlocacaoCc = {
         funcionarioId,
         funcionarioNome: base.funcionario_nome,
@@ -173,26 +163,7 @@ export function montarRelatorioAlocacaoCentroCusto(
         centroCusto: partes.centroCusto,
         obra: partes.obra,
         diasAlocados: dias,
-        horasNormais: normais,
-        horas50: he50,
-        horas100: he100,
-        horasSemAdicional: semAdicional,
-        totalHoras: normais + he50 + he100 + semAdicional,
         percentualDiasAlocados: datasAlocadas.size ? (dias / datasAlocadas.size) * 100 : 0,
-        diasEsperados,
-        diasAusencia: datasAusencia.size,
-        diasSemAlocacao: datasSemAlocacao.size,
-        percentualCobertura,
-        percentualNaoDistribuido: diasEsperados
-          ? (Math.max(0, diasEsperados - datasAlocadas.size) / diasEsperados) * 100
-          : 0,
-        possuiPendencia:
-          inconsistencias.length > 0 || datasSemAlocacao.size > 0 || datasAusencia.size > 0,
-        observacaoPendencia: [
-          ...inconsistencias,
-          ...(datasAusencia.size ? [`${datasAusencia.size} dia(s) de ausência`] : []),
-          ...(datasSemAlocacao.size ? [`${datasSemAlocacao.size} dia(s) sem alocação`] : []),
-        ].join("; "),
       };
       linhasResumo.push(item);
       resumo.push(item);
@@ -204,12 +175,8 @@ export function montarRelatorioAlocacaoCentroCusto(
       funcionarioId,
       funcionarioNome: primeira.funcionario_nome,
       categoria: primeira.categoria,
-      diasEsperados,
-      diasAlocados: datasAlocadas.size,
-      diasAusencia: datasAusencia.size,
-      diasSemAlocacao: datasSemAlocacao.size,
-      percentualCobertura,
-      linhas: linhasResumo,
+      totalDiasAlocados: datasAlocadas.size,
+      centros: linhasResumo,
       detalhes: linhas,
     });
   }

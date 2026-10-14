@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  filtrarFuncionariosAlocacaoCc,
   montarRelatorioAlocacaoCentroCusto,
   separarCentroCustoObra,
   type LinhaDiariaAlocacaoCc,
@@ -51,34 +52,97 @@ test("separa código e obra com fallback seguro", () => {
   assert.equal(separarCentroCustoObra("SEDE").formatoReconhecido, false);
 });
 
-test("agrupa CCs, conta datas distintas e calcula 60/40 sem usar HE", () => {
+test("consolida um funcionário em uma linha, ordena três CCs e conta datas distintas", () => {
   const dados = [
-    ...Array.from({ length: 12 }, (_, i) =>
-      linha({ data: `2026-10-${String(i + 1).padStart(2, "0")}` }),
-    ),
-    ...Array.from({ length: 8 }, (_, i) =>
+    ...Array.from({ length: 15 }, (_, i) =>
       linha({
-        data: `2026-10-${String(i + 13).padStart(2, "0")}`,
-        obra_id: "o2",
-        obra_nome: "237 - PM Várzea Grande",
+        data: `2026-10-${String(i + 1).padStart(2, "0")}`,
+        obra_id: "o246",
+        obra_nome: "246 - Sanepar ETE Chopinzinho",
+      }),
+    ),
+    ...Array.from({ length: 7 }, (_, i) =>
+      linha({
+        data: `2026-10-${String(i + 16).padStart(2, "0")}`,
+        obra_id: "o253",
+        obra_nome: "253 - Sanepar Toledo 3",
         minutos_he_100: 600,
       }),
     ),
+    linha({ data: "2026-10-23", obra_id: "o230", obra_nome: "230 - Iguá ETE Sul" }),
   ];
   dados.push({ ...dados[0] });
   const relatorio = montarRelatorioAlocacaoCentroCusto(dados);
-  assert.equal(relatorio.resumo.length, 2);
-  assert.equal(relatorio.resumo[0].diasAlocados, 12);
-  assert.equal(relatorio.resumo[0].percentualDiasAlocados, 60);
-  assert.equal(relatorio.resumo[1].diasAlocados, 8);
-  assert.equal(relatorio.resumo[1].percentualDiasAlocados, 40);
+  assert.equal(relatorio.funcionarios.length, 1);
+  assert.equal(relatorio.funcionarios[0].totalDiasAlocados, 23);
+  assert.deepEqual(
+    relatorio.funcionarios[0].centros.map((centro) => centro.centroCusto),
+    ["230", "246", "253"],
+  );
+  assert.equal(relatorio.funcionarios[0].centros[1].diasAlocados, 15);
+  assert.equal(relatorio.funcionarios[0].centros[2].diasAlocados, 7);
+  assert.equal(relatorio.funcionarios[0].centros[1].percentualDiasAlocados, (15 / 23) * 100);
   assert.equal(
     relatorio.resumo.reduce((s, item) => s + item.percentualDiasAlocados, 0),
     100,
   );
 });
 
-test("ausência e sem alocação não entram em CC e reduzem cobertura", () => {
+test("calcula 15/7 como 68,18%/31,82% usando somente dias alocados", () => {
+  const dados = [
+    ...Array.from({ length: 15 }, (_, i) =>
+      linha({ data: `2026-10-${String(i + 1).padStart(2, "0")}` }),
+    ),
+    ...Array.from({ length: 7 }, (_, i) =>
+      linha({
+        data: `2026-10-${String(i + 16).padStart(2, "0")}`,
+        obra_id: "o2",
+        obra_nome: "253 - Toledo 3",
+      }),
+    ),
+  ];
+  const centros = montarRelatorioAlocacaoCentroCusto(dados).funcionarios[0].centros;
+  assert.deepEqual(
+    centros.map((centro) => Number(centro.percentualDiasAlocados.toFixed(2))),
+    [68.18, 31.82],
+  );
+});
+
+test("um único CC representa 100%", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto([linha()]).funcionarios[0];
+  assert.equal(funcionario.centros.length, 1);
+  assert.equal(funcionario.centros[0].percentualDiasAlocados, 100);
+});
+
+test("filtra por busca, funcionário, categoria e CC sem dividir a linha do funcionário", () => {
+  const relatorio = montarRelatorioAlocacaoCentroCusto([
+    linha(),
+    linha({ obra_id: "o2", obra_nome: "253 - Toledo 3", data: "2026-10-02" }),
+    linha({ funcionario_id: "f2", funcionario_nome: "Maria", categoria: "Pedreira" }),
+  ]);
+  const todos = { busca: "", funcionarioId: "all", obraId: "all", categoria: "all" };
+  assert.deepEqual(
+    filtrarFuncionariosAlocacaoCc(relatorio.funcionarios, { ...todos, busca: "joão" }).map(
+      (item) => item.funcionarioId,
+    ),
+    ["f1"],
+  );
+  assert.equal(
+    filtrarFuncionariosAlocacaoCc(relatorio.funcionarios, { ...todos, obraId: "o2" })[0].centros
+      .length,
+    2,
+  );
+  assert.deepEqual(
+    filtrarFuncionariosAlocacaoCc(relatorio.funcionarios, {
+      ...todos,
+      funcionarioId: "f2",
+      categoria: "Pedreira",
+    }).map((item) => item.funcionarioNome),
+    ["Maria"],
+  );
+});
+
+test("ausência, falta, férias e sem alocação não aparecem no relatório", () => {
   const relatorio = montarRelatorioAlocacaoCentroCusto([
     linha({ dias_esperados_funcionario: 4 }),
     linha({ data: "2026-10-02", dias_esperados_funcionario: 4 }),
@@ -103,16 +167,21 @@ test("ausência e sem alocação não entram em CC e reduzem cobertura", () => {
       minutos_he_50: 0,
       dias_esperados_funcionario: 4,
     }),
+    linha({
+      data: "2026-10-07",
+      situacao: "ausencia",
+      tipo_registro: "ferias",
+      obra_id: null,
+      obra_nome: null,
+    }),
   ]);
   assert.equal(relatorio.resumo.length, 1);
   assert.equal(relatorio.resumo[0].diasAlocados, 2);
-  assert.equal(relatorio.resumo[0].diasAusencia, 1);
-  assert.equal(relatorio.resumo[0].diasSemAlocacao, 1);
-  assert.equal(relatorio.resumo[0].percentualCobertura, 50);
-  assert.equal(relatorio.detalhes.length, 4);
+  assert.equal(relatorio.detalhes.length, 2);
+  assert.ok(relatorio.detalhes.every((item) => item.situacao === "alocado" && item.obra_id));
 });
 
-test("soma minutos detalhados, preserva virada e sinaliza legado/inconsistência", () => {
+test("preserva somente os dias alocados no detalhamento", () => {
   const relatorio = montarRelatorioAlocacaoCentroCusto([
     linha({
       data_saida: "2026-10-02",
@@ -128,7 +197,6 @@ test("soma minutos detalhados, preserva virada e sinaliza legado/inconsistência
       tipo_inconsistencia: "HORAS_SEM_DETALHE",
     }),
   ]);
-  assert.equal(relatorio.resumo[0].totalHoras, 18.75);
   assert.equal(relatorio.detalhes[0].data_saida, "2026-10-02");
   assert.equal(relatorio.inconsistencias, 1);
 });

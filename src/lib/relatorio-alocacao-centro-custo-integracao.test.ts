@@ -89,7 +89,7 @@ test("RETURN QUERY qualifica colunas que colidem com variáveis de RETURNS TABLE
   }
 });
 
-test("aba está na ordem pedida e oferece filtros, detalhe e estados", () => {
+test("aba está na ordem pedida e oferece resumo, filtros, detalhe e estados", () => {
   const gatilhos =
     tela.match(
       /<TabsTrigger[\s\S]*?<TabsTrigger value="sem-alocacao">Sem alocação<\/TabsTrigger>/,
@@ -106,12 +106,24 @@ test("aba está na ordem pedida e oferece filtros, detalhe e estados", () => {
     "Buscar funcionário",
     "Todos os centros",
     "Todas as categorias",
-    "Somente com pendência",
+    "Alocação por Centro de Custo",
+    "Total dias",
     "Skeleton",
-    "Não há alocações ou registros",
+    "Não há alocações para esta competência",
     "Detalhamento diário",
   ])
     assert.match(componente, new RegExp(texto));
+  for (const removido of [
+    "Somente com pendência",
+    "Dias esperados",
+    "Dias de ausência",
+    "Dias sem alocação",
+    "% cobertura",
+    "Horas normais",
+    "HE 50%",
+    "Sem alocação",
+  ])
+    assert.doesNotMatch(componente, new RegExp(removido));
 });
 
 test("server function preserva a identidade autenticada em todas as páginas da RPC", () => {
