@@ -52,13 +52,14 @@ test("separa código e obra com fallback seguro", () => {
   assert.equal(separarCentroCustoObra("SEDE").formatoReconhecido, false);
 });
 
-test("consolida um funcionário em uma linha, ordena três CCs e conta datas distintas", () => {
+test("consolida um funcionário em uma linha, ordena três CCs e usa dias disponíveis", () => {
   const dados = [
     ...Array.from({ length: 15 }, (_, i) =>
       linha({
         data: `2026-10-${String(i + 1).padStart(2, "0")}`,
         obra_id: "o246",
         obra_nome: "246 - Sanepar ETE Chopinzinho",
+        dias_esperados_funcionario: 23,
       }),
     ),
     ...Array.from({ length: 7 }, (_, i) =>
@@ -67,9 +68,15 @@ test("consolida um funcionário em uma linha, ordena três CCs e conta datas dis
         obra_id: "o253",
         obra_nome: "253 - Sanepar Toledo 3",
         minutos_he_100: 600,
+        dias_esperados_funcionario: 23,
       }),
     ),
-    linha({ data: "2026-10-23", obra_id: "o230", obra_nome: "230 - Iguá ETE Sul" }),
+    linha({
+      data: "2026-10-23",
+      obra_id: "o230",
+      obra_nome: "230 - Iguá ETE Sul",
+      dias_esperados_funcionario: 23,
+    }),
   ];
   dados.push({ ...dados[0] });
   const relatorio = montarRelatorioAlocacaoCentroCusto(dados);
@@ -81,23 +88,24 @@ test("consolida um funcionário em uma linha, ordena três CCs e conta datas dis
   );
   assert.equal(relatorio.funcionarios[0].centros[1].diasAlocados, 15);
   assert.equal(relatorio.funcionarios[0].centros[2].diasAlocados, 7);
+  assert.equal(relatorio.funcionarios[0].totalDiasDisponiveis, 23);
   assert.equal(relatorio.funcionarios[0].centros[1].percentualDiasAlocados, (15 / 23) * 100);
-  assert.equal(
-    relatorio.resumo.reduce((s, item) => s + item.percentualDiasAlocados, 0),
-    100,
-  );
 });
 
-test("calcula 15/7 como 68,18%/31,82% usando somente dias alocados", () => {
+test("calcula 15/7 como 68,18%/31,82% sobre 22 dias disponíveis", () => {
   const dados = [
     ...Array.from({ length: 15 }, (_, i) =>
-      linha({ data: `2026-10-${String(i + 1).padStart(2, "0")}` }),
+      linha({
+        data: `2026-10-${String(i + 1).padStart(2, "0")}`,
+        dias_esperados_funcionario: 22,
+      }),
     ),
     ...Array.from({ length: 7 }, (_, i) =>
       linha({
         data: `2026-10-${String(i + 16).padStart(2, "0")}`,
         obra_id: "o2",
         obra_nome: "253 - Toledo 3",
+        dias_esperados_funcionario: 22,
       }),
     ),
   ];
@@ -108,10 +116,40 @@ test("calcula 15/7 como 68,18%/31,82% usando somente dias alocados", () => {
   );
 });
 
-test("um único CC representa 100%", () => {
-  const funcionario = montarRelatorioAlocacaoCentroCusto([linha()]).funcionarios[0];
+test("um único CC com 12 de 22 dias representa 54,55%", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto(
+    Array.from({ length: 12 }, (_, indice) =>
+      linha({
+        data: `2026-10-${String(indice + 1).padStart(2, "0")}`,
+        dias_esperados_funcionario: 22,
+      }),
+    ),
+  ).funcionarios[0];
   assert.equal(funcionario.centros.length, 1);
+  assert.equal(Number(funcionario.centros[0].percentualDiasAlocados.toFixed(2)), 54.55);
+  assert.equal(funcionario.observacao, "Alocação incompleta");
+});
+
+test("disponibilidade parcial pode representar 100% e sinaliza admissão e desligamento", () => {
+  const periodoCompleto = [
+    linha({ funcionario_id: "f0", funcionario_nome: "Referência", data: "2026-10-01" }),
+    linha({ funcionario_id: "f0", funcionario_nome: "Referência", data: "2026-10-24" }),
+  ];
+  const parcial = Array.from({ length: 12 }, (_, indice) =>
+    linha({
+      funcionario_id: "f1",
+      data: `2026-10-${String(indice + 6).padStart(2, "0")}`,
+      dias_esperados_funcionario: 12,
+    }),
+  );
+  const funcionario = montarRelatorioAlocacaoCentroCusto([
+    ...periodoCompleto,
+    ...parcial,
+  ]).funcionarios.find((item) => item.funcionarioId === "f1")!;
+  assert.equal(funcionario.totalDiasDisponiveis, 12);
   assert.equal(funcionario.centros[0].percentualDiasAlocados, 100);
+  assert.match(funcionario.observacao, /Admitido no período/);
+  assert.match(funcionario.observacao, /Desligado no período/);
 });
 
 test("filtra por busca, funcionário, categoria e CC sem dividir a linha do funcionário", () => {

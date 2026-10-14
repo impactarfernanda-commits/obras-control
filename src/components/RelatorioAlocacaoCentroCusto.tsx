@@ -78,11 +78,21 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
     categoria,
   });
   const idsVisiveis = new Set(filtradas.map((funcionario) => funcionario.funcionarioId));
+  const resumoVisivel = relatorio.resumo.filter(
+    (linha) =>
+      idsVisiveis.has(linha.funcionarioId) && (obraId === "all" || linha.obraId === obraId),
+  );
+  const centrosVisiveis = [
+    ...new Map(resumoVisivel.map((linha) => [linha.obraId, linha])).values(),
+  ].sort((a, b) => a.centroCusto.localeCompare(b.centroCusto, "pt-BR", { numeric: true }));
   const relatorioFiltrado = {
     ...relatorio,
-    resumo: relatorio.resumo.filter((linha) => idsVisiveis.has(linha.funcionarioId)),
+    resumo: resumoVisivel,
     funcionarios: filtradas,
-    detalhes: relatorio.detalhes.filter((linha) => idsVisiveis.has(linha.funcionario_id)),
+    detalhes: relatorio.detalhes.filter(
+      (linha) =>
+        idsVisiveis.has(linha.funcionario_id) && (obraId === "all" || linha.obra_id === obraId),
+    ),
   };
   const detalhe = funcionarios.find((item) => item.funcionarioId === detalheId) ?? null;
 
@@ -175,20 +185,21 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="min-w-max">
                   <TableHeader>
                     <TableRow>
-                      {[
-                        "Funcionário",
-                        "Categoria/Função",
-                        "Alocação por Centro de Custo",
-                        "Total dias",
-                      ].map((titulo) => (
-                        <TableHead
-                          key={titulo}
-                          className={titulo === "Total dias" ? "text-right" : ""}
-                        >
-                          {titulo}
+                      <TableHead className="sticky left-0 z-20 min-w-[240px] bg-background">
+                        Funcionário
+                      </TableHead>
+                      <TableHead className="sticky left-[240px] z-20 min-w-[200px] bg-background">
+                        Categoria/Função
+                      </TableHead>
+                      <TableHead className="min-w-[120px] text-right">Dias disponíveis</TableHead>
+                      <TableHead className="min-w-[110px] text-right">Dias alocados</TableHead>
+                      <TableHead className="min-w-[190px]">Observação</TableHead>
+                      {centrosVisiveis.map((centro) => (
+                        <TableHead key={centro.obraId} className="min-w-[180px] text-center">
+                          {centro.centroCusto} - {centro.obra}
                         </TableHead>
                       ))}
                     </TableRow>
@@ -196,14 +207,17 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
                   <TableBody>
                     {!filtradas.length ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                        <TableCell
+                          colSpan={5 + centrosVisiveis.length}
+                          className="py-10 text-center text-muted-foreground"
+                        >
                           Não há alocações para esta competência.
                         </TableCell>
                       </TableRow>
                     ) : (
                       filtradas.map((funcionario) => (
                         <TableRow key={funcionario.funcionarioId}>
-                          <TableCell>
+                          <TableCell className="sticky left-0 z-10 bg-background">
                             <button
                               type="button"
                               className="font-medium hover:underline"
@@ -212,28 +226,39 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
                               {funcionario.funcionarioNome}
                             </button>
                           </TableCell>
-                          <TableCell>{funcionario.categoria}</TableCell>
-                          <TableCell className="min-w-[320px]">
-                            <div className="flex flex-wrap gap-2">
-                              {funcionario.centros.map((centro) => (
-                                <div
-                                  key={centro.obraId}
-                                  className="rounded-md border bg-muted/30 px-3 py-1.5"
-                                >
-                                  <div className="text-sm font-medium">
-                                    {centro.centroCusto} · {centro.obra}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {percentual(centro.percentualDiasAlocados)} ·{" "}
-                                    {centro.diasAlocados} dia(s)
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                          <TableCell className="sticky left-[240px] z-10 bg-background">
+                            {funcionario.categoria}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {funcionario.totalDiasDisponiveis}
                           </TableCell>
                           <TableCell className="text-right">
                             {funcionario.totalDiasAlocados}
                           </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {funcionario.observacao}
+                          </TableCell>
+                          {centrosVisiveis.map((coluna) => {
+                            const centro = funcionario.centros.find(
+                              (item) => item.obraId === coluna.obraId,
+                            );
+                            return (
+                              <TableCell key={coluna.obraId} className="text-center">
+                                {centro ? (
+                                  <>
+                                    <div className="font-medium">
+                                      {percentual(centro.percentualDiasAlocados)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {centro.diasAlocados} dia(s)
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                            );
+                          })}
                         </TableRow>
                       ))
                     )}

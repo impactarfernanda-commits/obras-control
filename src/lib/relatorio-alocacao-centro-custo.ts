@@ -73,7 +73,9 @@ export type FuncionarioAlocacaoCc = {
   funcionarioId: string;
   funcionarioNome: string;
   categoria: string;
+  totalDiasDisponiveis: number;
   totalDiasAlocados: number;
+  observacao: string;
   centros: ResumoAlocacaoCc[];
   detalhes: LinhaDiariaAlocacaoCc[];
 };
@@ -113,6 +115,26 @@ const chaveFuncionarioObra = (funcionarioId: string, obraId: string) =>
 export function montarRelatorioAlocacaoCentroCusto(
   entrada: readonly LinhaDiariaAlocacaoCc[],
 ): RelatorioAlocacaoCc {
+  const diasEsperadosPorFuncionario = new Map<string, Set<string>>();
+  const disponibilidadeInformada = new Map<string, number>();
+  const datasEsperadasGlobais = new Set<string>();
+  for (const linha of entrada) {
+    disponibilidadeInformada.set(
+      linha.funcionario_id,
+      Math.max(
+        disponibilidadeInformada.get(linha.funcionario_id) ?? 0,
+        linha.dias_esperados_funcionario,
+      ),
+    );
+    if (!linha.dia_esperado) continue;
+    const datas = diasEsperadosPorFuncionario.get(linha.funcionario_id) ?? new Set<string>();
+    datas.add(linha.data);
+    diasEsperadosPorFuncionario.set(linha.funcionario_id, datas);
+    datasEsperadasGlobais.add(linha.data);
+  }
+  const primeiraDataEsperadaGlobal = [...datasEsperadasGlobais].sort()[0] ?? null;
+  const ultimaDataEsperadaGlobal = [...datasEsperadasGlobais].sort().at(-1) ?? null;
+  const maiorDisponibilidade = Math.max(0, ...disponibilidadeInformada.values());
   const detalhesUnicos = new Map<string, LinhaDiariaAlocacaoCc>();
   for (const linha of entrada) {
     if (linha.situacao !== "alocado" || !linha.obra_id) continue;
@@ -142,6 +164,27 @@ export function montarRelatorioAlocacaoCentroCusto(
         .map((linha) => linha.data),
     );
     const porObra = new Map<string, LinhaDiariaAlocacaoCc[]>();
+    const datasEsperadas = [...(diasEsperadosPorFuncionario.get(funcionarioId) ?? [])].sort();
+    const totalDiasDisponiveis = Math.max(
+      disponibilidadeInformada.get(funcionarioId) ?? 0,
+      datasEsperadas.length,
+    );
+    const observacoes: string[] = [];
+    if (
+      primeiraDataEsperadaGlobal &&
+      datasEsperadas[0] &&
+      datasEsperadas[0] > primeiraDataEsperadaGlobal
+    )
+      observacoes.push("Admitido no período");
+    if (
+      ultimaDataEsperadaGlobal &&
+      datasEsperadas.at(-1) &&
+      datasEsperadas.at(-1)! < ultimaDataEsperadaGlobal
+    )
+      observacoes.push("Desligado no período");
+    if (totalDiasDisponiveis < maiorDisponibilidade)
+      observacoes.push("Dias disponíveis diferentes do período completo");
+    if (totalDiasDisponiveis > datasAlocadas.size) observacoes.push("Alocação incompleta");
     for (const linha of linhas) {
       if (!linha.obra_id || linha.situacao !== "alocado") continue;
       const chave = chaveFuncionarioObra(funcionarioId, linha.obra_id);
@@ -163,7 +206,7 @@ export function montarRelatorioAlocacaoCentroCusto(
         centroCusto: partes.centroCusto,
         obra: partes.obra,
         diasAlocados: dias,
-        percentualDiasAlocados: datasAlocadas.size ? (dias / datasAlocadas.size) * 100 : 0,
+        percentualDiasAlocados: totalDiasDisponiveis ? (dias / totalDiasDisponiveis) * 100 : 0,
       };
       linhasResumo.push(item);
       resumo.push(item);
@@ -175,7 +218,9 @@ export function montarRelatorioAlocacaoCentroCusto(
       funcionarioId,
       funcionarioNome: primeira.funcionario_nome,
       categoria: primeira.categoria,
+      totalDiasDisponiveis,
       totalDiasAlocados: datasAlocadas.size,
+      observacao: observacoes.join(" · ") || "—",
       centros: linhasResumo,
       detalhes: linhas,
     });

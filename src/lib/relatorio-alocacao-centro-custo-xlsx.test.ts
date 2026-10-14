@@ -41,7 +41,7 @@ const base: LinhaDiariaAlocacaoCc = {
   dias_esperados_funcionario: 20,
 };
 
-test("gera resumo enxuto e detalhamento somente com alocações", () => {
+test("gera resumo matricial e detalhamento somente com alocações", () => {
   const relatorio = montarRelatorioAlocacaoCentroCusto([
     base,
     {
@@ -70,15 +70,15 @@ test("gera resumo enxuto e detalhamento somente com alocações", () => {
   assert.deepEqual(workbook.SheetNames, ["RESUMO", "DETALHAMENTO"]);
   const resumo = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.RESUMO, { header: 1 });
   const detalhes = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.DETALHAMENTO, { header: 1 });
-  assert.equal(resumo.length, relatorio.resumo.length + 1);
+  assert.equal(resumo.length, relatorio.funcionarios.length + 1);
   assert.equal(detalhes.length, relatorio.detalhes.length + 1);
   assert.deepEqual(resumo[0], [
     "Funcionário",
     "Categoria/Função",
-    "Centro de custo",
-    "Obra",
+    "Dias disponíveis",
     "Dias alocados",
-    "Percentual",
+    "Observação",
+    "230 - ETE Sul",
   ]);
   assert.deepEqual(detalhes[0], [
     "Funcionário",
@@ -88,31 +88,42 @@ test("gera resumo enxuto e detalhamento somente com alocações", () => {
     "Obra",
   ]);
   assert.equal(detalhes.length, 2);
-  assert.equal(resumo[1][5], 1);
+  assert.equal(resumo[1][2], 20);
+  assert.equal(resumo[1][3], 1);
+  assert.equal(resumo[1][5], "5%\n1 dia(s)");
   assert.equal(
     nomeArquivoAlocacaoCentroCusto("2026-10"),
     "Alocacao_por_Centro_de_Custo_2026-10.xlsx",
   );
 });
 
-test("Excel usa a mesma distribuição percentual 15/7 do relatório", () => {
+test("Excel usa a mesma matriz percentual 15/7 sobre 22 dias disponíveis", () => {
   const entradas = [
     ...Array.from({ length: 15 }, (_, indice) => ({
       ...base,
       data: `2026-10-${String(indice + 1).padStart(2, "0")}`,
+      dias_esperados_funcionario: 22,
     })),
     ...Array.from({ length: 7 }, (_, indice) => ({
       ...base,
       data: `2026-10-${String(indice + 16).padStart(2, "0")}`,
       obra_id: "o2",
       obra_nome: "253 - Toledo 3",
+      dias_esperados_funcionario: 22,
     })),
   ];
   const relatorio = montarRelatorioAlocacaoCentroCusto(entradas);
   const workbook = buildAlocacaoCentroCustoWorkbook(relatorio);
   const resumo = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.RESUMO, { header: 1 });
-  assert.deepEqual(
-    resumo.slice(1).map((linha) => Number((Number(linha[5]) * 100).toFixed(2))),
-    [68.18, 31.82],
-  );
+  assert.deepEqual(resumo[0], [
+    "Funcionário",
+    "Categoria/Função",
+    "Dias disponíveis",
+    "Dias alocados",
+    "Observação",
+    "230 - ETE Sul",
+    "253 - Toledo 3",
+  ]);
+  assert.equal(resumo[1][5], "68,18%\n15 dia(s)");
+  assert.equal(resumo[1][6], "31,82%\n7 dia(s)");
 });
