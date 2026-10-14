@@ -37,6 +37,8 @@ function linha(overrides: Partial<LinhaDiariaAlocacaoCc> = {}): LinhaDiariaAloca
     origem_horas: "detalhe",
     dia_esperado: true,
     dias_esperados_funcionario: 20,
+    data_admissao_funcionario: "2020-01-01",
+    data_desligamento_funcionario: null,
     ...overrides,
   };
 }
@@ -130,26 +132,48 @@ test("um único CC com 12 de 22 dias representa 54,55%", () => {
   assert.equal(funcionario.observacao, "Alocação incompleta");
 });
 
-test("disponibilidade parcial pode representar 100% e sinaliza admissão e desligamento", () => {
-  const periodoCompleto = [
-    linha({ funcionario_id: "f0", funcionario_nome: "Referência", data: "2026-10-01" }),
-    linha({ funcionario_id: "f0", funcionario_nome: "Referência", data: "2026-10-24" }),
-  ];
+test("disponibilidade parcial pode representar 100% e usa datas explícitas do vínculo", () => {
   const parcial = Array.from({ length: 12 }, (_, indice) =>
     linha({
       funcionario_id: "f1",
       data: `2026-10-${String(indice + 6).padStart(2, "0")}`,
       dias_esperados_funcionario: 12,
+      data_admissao_funcionario: "2026-10-06",
+      data_desligamento_funcionario: "2026-10-17",
     }),
   );
-  const funcionario = montarRelatorioAlocacaoCentroCusto([
-    ...periodoCompleto,
-    ...parcial,
-  ]).funcionarios.find((item) => item.funcionarioId === "f1")!;
+  const funcionario = montarRelatorioAlocacaoCentroCusto(parcial).funcionarios[0];
   assert.equal(funcionario.totalDiasDisponiveis, 12);
   assert.equal(funcionario.centros[0].percentualDiasAlocados, 100);
   assert.match(funcionario.observacao, /Admitido no período/);
   assert.match(funcionario.observacao, /Desligado no período/);
+});
+
+test("não marca incompleto nem trunca percentual acima de 100% por trabalho não útil", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto(
+    Array.from({ length: 22 }, (_, indice) =>
+      linha({
+        data: `2026-10-${String(indice + 1).padStart(2, "0")}`,
+        dias_esperados_funcionario: 20,
+      }),
+    ),
+  ).funcionarios[0];
+  assert.equal(funcionario.totalDiasAlocados, 22);
+  assert.equal(Number(funcionario.centros[0].percentualDiasAlocados.toFixed(2)), 110);
+  assert.equal(funcionario.observacao, "—");
+});
+
+test("12 disponíveis e 8 alocados representam 66,67%", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto(
+    Array.from({ length: 8 }, (_, indice) =>
+      linha({
+        data: `2026-10-${String(indice + 1).padStart(2, "0")}`,
+        dias_esperados_funcionario: 12,
+      }),
+    ),
+  ).funcionarios[0];
+  assert.equal(Number(funcionario.centros[0].percentualDiasAlocados.toFixed(2)), 66.67);
+  assert.equal(funcionario.observacao, "Alocação incompleta");
 });
 
 test("filtra por busca, funcionário, categoria e CC sem dividir a linha do funcionário", () => {

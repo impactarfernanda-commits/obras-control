@@ -881,6 +881,46 @@ export type Database = {
       };
     };
     Functions: {
+      relatorio_alocacao_centro_custo: {
+        Args: {
+          p_competencia: string;
+          p_funcionario_id?: string | null;
+          p_obra_id?: string | null;
+          p_categoria?: string | null;
+          p_somente_pendencias?: boolean;
+        };
+        Returns: {
+          competencia: string;
+          periodo_inicio: string;
+          periodo_fim: string;
+          funcionario_id: string;
+          funcionario_nome: string;
+          categoria: string;
+          data: string;
+          data_inicio: string | null;
+          data_saida: string | null;
+          hora_entrada: string | null;
+          hora_saida: string | null;
+          situacao: string;
+          tipo_registro: string | null;
+          falta_tipo: string | null;
+          obra_id: string | null;
+          obra_nome: string | null;
+          minutos_normais: number;
+          minutos_he_50: number;
+          minutos_he_100: number;
+          minutos_sem_adicional_he: number;
+          minutos_noturnos: number;
+          observacoes: string | null;
+          possui_inconsistencia: boolean;
+          tipo_inconsistencia: string | null;
+          origem_horas: string;
+          dia_esperado: boolean;
+          dias_esperados_funcionario: number;
+          data_admissao_funcionario: string | null;
+          data_desligamento_funcionario: string | null;
+        }[];
+      };
       reativar_funcionario: {
         Args: { p_funcionario_id: string; p_motivo: string };
         Returns: {

@@ -39,9 +39,11 @@ const base: LinhaDiariaAlocacaoCc = {
   origem_horas: "detalhe",
   dia_esperado: true,
   dias_esperados_funcionario: 20,
+  data_admissao_funcionario: "2020-01-01",
+  data_desligamento_funcionario: null,
 };
 
-test("gera resumo matricial e detalhamento somente com alocações", () => {
+test("gera resumo tabular por funcionário e CC e detalhamento somente com alocações", () => {
   const relatorio = montarRelatorioAlocacaoCentroCusto([
     base,
     {
@@ -70,15 +72,18 @@ test("gera resumo matricial e detalhamento somente com alocações", () => {
   assert.deepEqual(workbook.SheetNames, ["RESUMO", "DETALHAMENTO"]);
   const resumo = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.RESUMO, { header: 1 });
   const detalhes = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.DETALHAMENTO, { header: 1 });
-  assert.equal(resumo.length, relatorio.funcionarios.length + 1);
+  assert.equal(resumo.length, relatorio.resumo.length + 1);
   assert.equal(detalhes.length, relatorio.detalhes.length + 1);
   assert.deepEqual(resumo[0], [
     "Funcionário",
     "Categoria/Função",
     "Dias disponíveis",
-    "Dias alocados",
+    "Dias alocados total",
     "Observação",
-    "230 - ETE Sul",
+    "Centro de custo",
+    "Obra",
+    "Dias no CC",
+    "Percentual",
   ]);
   assert.deepEqual(detalhes[0], [
     "Funcionário",
@@ -90,14 +95,17 @@ test("gera resumo matricial e detalhamento somente com alocações", () => {
   assert.equal(detalhes.length, 2);
   assert.equal(resumo[1][2], 20);
   assert.equal(resumo[1][3], 1);
-  assert.equal(resumo[1][5], "5%\n1 dia(s)");
+  assert.equal(resumo[1][5], "230");
+  assert.equal(resumo[1][6], "ETE Sul");
+  assert.equal(resumo[1][7], 1);
+  assert.equal(resumo[1][8], 0.05);
   assert.equal(
     nomeArquivoAlocacaoCentroCusto("2026-10"),
     "Alocacao_por_Centro_de_Custo_2026-10.xlsx",
   );
 });
 
-test("Excel usa a mesma matriz percentual 15/7 sobre 22 dias disponíveis", () => {
+test("Excel usa linhas por CC com percentuais 15/7 sobre 22 dias disponíveis", () => {
   const entradas = [
     ...Array.from({ length: 15 }, (_, indice) => ({
       ...base,
@@ -119,11 +127,18 @@ test("Excel usa a mesma matriz percentual 15/7 sobre 22 dias disponíveis", () =
     "Funcionário",
     "Categoria/Função",
     "Dias disponíveis",
-    "Dias alocados",
+    "Dias alocados total",
     "Observação",
-    "230 - ETE Sul",
-    "253 - Toledo 3",
+    "Centro de custo",
+    "Obra",
+    "Dias no CC",
+    "Percentual",
   ]);
-  assert.equal(resumo[1][5], "68,18%\n15 dia(s)");
-  assert.equal(resumo[1][6], "31,82%\n7 dia(s)");
+  assert.equal(resumo.length, 3);
+  assert.equal(resumo[1][5], "230");
+  assert.equal(resumo[1][7], 15);
+  assert.equal(Number((resumo[1][8] as number).toFixed(4)), 0.6818);
+  assert.equal(resumo[2][5], "253");
+  assert.equal(resumo[2][7], 7);
+  assert.equal(Number((resumo[2][8] as number).toFixed(4)), 0.3182);
 });

@@ -82,9 +82,6 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
     (linha) =>
       idsVisiveis.has(linha.funcionarioId) && (obraId === "all" || linha.obraId === obraId),
   );
-  const centrosVisiveis = [
-    ...new Map(resumoVisivel.map((linha) => [linha.obraId, linha])).values(),
-  ].sort((a, b) => a.centroCusto.localeCompare(b.centroCusto, "pt-BR", { numeric: true }));
   const relatorioFiltrado = {
     ...relatorio,
     resumo: resumoVisivel,
@@ -185,7 +182,7 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table className="min-w-max">
+                <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky left-0 z-20 min-w-[240px] bg-background">
@@ -197,20 +194,13 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
                       <TableHead className="min-w-[120px] text-right">Dias disponíveis</TableHead>
                       <TableHead className="min-w-[110px] text-right">Dias alocados</TableHead>
                       <TableHead className="min-w-[190px]">Observação</TableHead>
-                      {centrosVisiveis.map((centro) => (
-                        <TableHead key={centro.obraId} className="min-w-[180px] text-center">
-                          {centro.centroCusto} - {centro.obra}
-                        </TableHead>
-                      ))}
+                      <TableHead className="min-w-[320px]">Alocação por Centro de Custo</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {!filtradas.length ? (
                       <TableRow>
-                        <TableCell
-                          colSpan={5 + centrosVisiveis.length}
-                          className="py-10 text-center text-muted-foreground"
-                        >
+                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                           Não há alocações para esta competência.
                         </TableCell>
                       </TableRow>
@@ -238,27 +228,23 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
                           <TableCell className="text-sm text-muted-foreground">
                             {funcionario.observacao}
                           </TableCell>
-                          {centrosVisiveis.map((coluna) => {
-                            const centro = funcionario.centros.find(
-                              (item) => item.obraId === coluna.obraId,
-                            );
-                            return (
-                              <TableCell key={coluna.obraId} className="text-center">
-                                {centro ? (
-                                  <>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              {funcionario.centros
+                                .filter((centro) => obraId === "all" || centro.obraId === obraId)
+                                .map((centro) => (
+                                  <div key={centro.obraId} className="min-w-[190px] py-0.5 text-sm">
                                     <div className="font-medium">
-                                      {percentual(centro.percentualDiasAlocados)}
+                                      {centro.centroCusto} · {centro.obra}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
+                                      {percentual(centro.percentualDiasAlocados)} ·{" "}
                                       {centro.diasAlocados} dia(s)
                                     </div>
-                                  </>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                            );
-                          })}
+                                  </div>
+                                ))}
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))
                     )}

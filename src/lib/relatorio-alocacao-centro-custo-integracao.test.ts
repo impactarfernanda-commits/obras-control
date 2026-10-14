@@ -7,6 +7,13 @@ const migration = readFileSync(
   new URL("supabase/migrations/20261013120000_relatorio_alocacao_centro_custo.sql", raiz),
   "utf8",
 );
+const migrationCorretiva = readFileSync(
+  new URL(
+    "supabase/migrations/20261014120000_corrige_disponibilidade_relatorio_alocacao_cc.sql",
+    raiz,
+  ),
+  "utf8",
+);
 const tela = readFileSync(new URL("src/routes/_authenticated/relatorios.tsx", raiz), "utf8");
 const componente = readFileSync(
   new URL("src/components/RelatorioAlocacaoCentroCusto.tsx", raiz),
@@ -37,6 +44,35 @@ test("RPC protege autenticação, roles, search_path e grants", () => {
   assert.match(migration, /SECURITY DEFINER[\s\S]*SET search_path TO ''/);
   assert.match(migration, /REVOKE ALL[\s\S]*FROM PUBLIC, anon/);
   assert.match(migration, /GRANT EXECUTE[\s\S]*TO authenticated/);
+});
+
+test("migration corretiva preserva implementação e segurança sem usar data de referência", () => {
+  assert.match(
+    migrationCorretiva,
+    /ALTER FUNCTION[\s\S]*RENAME TO relatorio_alocacao_centro_custo_referencia_anterior/,
+  );
+  assert.match(migrationCorretiva, /SECURITY DEFINER[\s\S]*SET search_path TO ''/);
+  assert.match(migrationCorretiva, /auth\.uid\(\)/);
+  for (const role of ["assistente", "supervisor", "coordenador", "gerente", "diretor"])
+    assert.match(migrationCorretiva, new RegExp(`'${role}'`));
+  assert.match(migrationCorretiva, /REVOKE ALL[\s\S]*FROM PUBLIC, anon/);
+  assert.match(migrationCorretiva, /GRANT EXECUTE[\s\S]*TO authenticated/);
+  assert.doesNotMatch(migrationCorretiva, /current_date|CASCADE/i);
+});
+
+test("migration corretiva usa competência integral e retorna datas inequívocas do vínculo", () => {
+  assert.match(
+    migrationCorretiva,
+    /least\(r\.periodo_fim, coalesce\(f\.data_desligamento, r\.periodo_fim\)\)/,
+  );
+  assert.match(
+    migrationCorretiva,
+    /greatest\(r\.periodo_inicio, coalesce\(f\.data_admissao, r\.periodo_inicio\)\)/,
+  );
+  assert.match(migrationCorretiva, /data_admissao_funcionario date/);
+  assert.match(migrationCorretiva, /data_desligamento_funcionario date/);
+  assert.match(migrationCorretiva, /extract\(isodow FROM gs\.d\) BETWEEN 1 AND 5/);
+  assert.match(migrationCorretiva, /public\.feriados_obras_control/);
 });
 
 test("fonte diária preserva detalhe, fallback, ausências e inconsistências", () => {
@@ -126,6 +162,9 @@ test("aba está na ordem pedida e oferece resumo, filtros, detalhe e estados", (
     "Sem alocação",
   ])
     assert.doesNotMatch(componente, new RegExp(removido));
+  assert.match(componente, /Alocação por Centro de Custo<\/TableHead>/);
+  assert.doesNotMatch(componente, /centrosVisiveis\.map/);
+  assert.match(componente, /funcionario\.centros[\s\S]*\.filter[\s\S]*\.map/);
 });
 
 test("server function preserva a identidade autenticada em todas as páginas da RPC", () => {
