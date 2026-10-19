@@ -12,7 +12,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { calcularCompetencia, formatarPeriodoCompetencia } from "@/lib/competencias";
 import {
+  compararCentrosCusto,
+  existeCodigoCentroCusto,
   mensagemErroCriacaoCentroCusto,
+  mensagemErroExclusaoCentroCusto,
   normalizarDescricaoCentroCusto,
   podeCriarCentroCusto,
   prepararCodigoExibicaoCentroCusto,
@@ -205,6 +208,8 @@ function ObrasPage() {
   const createMutation = useMutation({
     mutationFn: async (values: CreateFormVals) => {
       const codigo = prepararCodigoExibicaoCentroCusto(values.codigo);
+      if (existeCodigoCentroCusto(data ?? [], codigo))
+        throw { code: "23505", message: "Centro de custo já cadastrado" };
       const descricao = normalizarDescricaoCentroCusto(values.descricao);
       const { error } = await supabase.rpc("obras_criar_centro_custo", {
         p_codigo: codigo,
@@ -234,7 +239,8 @@ function ObrasPage() {
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
     },
-    onError: (error: Error) => toast.error(error.message || "Erro ao remover"),
+    onError: (error: { code?: string | null; message?: string | null }) =>
+      toast.error(mensagemErroExclusaoCentroCusto(error)),
   });
 
   const statusMutation = useMutation({
@@ -286,10 +292,12 @@ function ObrasPage() {
 
   const filtered = useMemo(
     () =>
-      (data ?? []).filter((obra) => {
-        if (search && !obra.nome.toLowerCase().includes(search.toLowerCase())) return false;
-        return statusFilter === "all" || obra.status === statusFilter;
-      }),
+      (data ?? [])
+        .filter((obra) => {
+          if (search && !obra.nome.toLowerCase().includes(search.toLowerCase())) return false;
+          return statusFilter === "all" || obra.status === statusFilter;
+        })
+        .sort(compararCentrosCusto),
     [data, search, statusFilter],
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));

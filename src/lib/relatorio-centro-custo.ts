@@ -1,4 +1,5 @@
 import type { CustoBreakdown } from "./custos-core";
+import { compararCentrosCusto } from "./centros-custo.ts";
 import {
   calcularCustoHorasExtras,
   calcularCustoJornadaDetalhada,
@@ -600,6 +601,6 @@ export function consolidarCustosCentros(input: Input) {
     });
   }
 
-  centros.sort((a, b) => b.total - a.total);
+  centros.sort(compararCentrosCusto);
   return { centros, avisos: Array.from(avisos) };
 }

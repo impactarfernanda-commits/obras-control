@@ -3,13 +3,69 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  compararCentrosCusto,
+  existeCodigoCentroCusto,
   mensagemErroCriacaoCentroCusto,
+  mensagemErroExclusaoCentroCusto,
   normalizarCodigoCentroCusto,
   normalizarDescricaoCentroCusto,
   podeCriarCentroCusto,
   prepararCodigoExibicaoCentroCusto,
   validarCodigoExibicaoCentroCusto,
 } from "./centros-custo.ts";
+
+test("ordena centros numericamente, incluindo subcentros", () => {
+  const entrada = ["247", "236.2", "170", "237.1", "236", "250.1", "234", "236.1", "237", "250"];
+  const saida = entrada
+    .map((nome) => ({ nome }))
+    .sort(compararCentrosCusto)
+    .map(({ nome }) => nome);
+  assert.deepEqual(saida, [
+    "170",
+    "234",
+    "236",
+    "236.1",
+    "236.2",
+    "237",
+    "237.1",
+    "247",
+    "250",
+    "250.1",
+  ]);
+});
+
+test("aceita hifen com ou sem espacos e deixa itens nao numericos por ultimo", () => {
+  const entrada = [
+    { nome: "Administrativo" },
+    { nome: "  247- ÁGUAS" },
+    { nome: "247 - ÁGUAS DO BRASIL" },
+    { nome: "236.2 - SUBCENTRO" },
+    { nome: "236 - PRINCIPAL" },
+    { nome: "Zeladoria" },
+  ];
+  assert.deepEqual(
+    entrada.sort(compararCentrosCusto).map(({ nome }) => nome),
+    [
+      "236 - PRINCIPAL",
+      "236.2 - SUBCENTRO",
+      "  247- ÁGUAS",
+      "247 - ÁGUAS DO BRASIL",
+      "Administrativo",
+      "Zeladoria",
+    ],
+  );
+});
+
+test("detecta no frontend somente o mesmo codigo exato", () => {
+  const obras = [
+    { nome: "236 - Principal" },
+    { nome: "236.1 - Subcentro" },
+    { nome: "247- Águas" },
+  ];
+  assert.equal(existeCodigoCentroCusto(obras, "247"), true);
+  assert.equal(existeCodigoCentroCusto(obras, "236"), true);
+  assert.equal(existeCodigoCentroCusto(obras, "236.2"), false);
+});
 
 const tela = readFileSync("src/routes/_authenticated/obras.tsx", "utf8");
 const migrationRpc = readFileSync(
@@ -50,6 +106,17 @@ test("duplicidade recebe mensagem clara", () => {
   assert.equal(
     mensagemErroCriacaoCentroCusto({ code: "23505", message: "duplicate key" }),
     "Já existe um centro de custo com este código.",
+  );
+});
+
+test("violacao de FK na exclusao recebe mensagem amigavel sem mascarar outros erros", () => {
+  assert.equal(
+    mensagemErroExclusaoCentroCusto({ code: "23503", message: "postgres raw" }),
+    "Este centro de custo possui registros vinculados e não pode ser excluído.",
+  );
+  assert.equal(
+    mensagemErroExclusaoCentroCusto({ code: "XX000", message: "erro inesperado" }),
+    "erro inesperado",
   );
 });
 
