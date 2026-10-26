@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  calcularPendenciasSemAlocacao,
   dataLimitePendencias,
   filtrarDatasPendentes,
   ultimasAlocacoesPorFuncionario,
@@ -38,9 +39,7 @@ test("pendências diminuem na coleção de dias disponíveis sem filtrar só a a
   ).filter((data) => !alocadas.has(data));
   assert.equal(datasSemAlocacao.length, semFeriados.length - 1);
   assert.deepEqual(datasSemAlocacao, ["2026-09-04", "2026-09-09"]);
-  assert.match(tela, /datasUteisNoIntervalo\(inicio, fim, feriadosSemAlocacao\)/);
-  assert.match(tela, /diasSemAlocacao: diasSemAlocacao.length/);
-  assert.match(tela, /datasSemAlocacao: diasSemAlocacao/);
+  assert.match(tela, /calcularPendenciasSemAlocacao/);
   assert.match(tela, /semAlocacao\.map/);
 });
 
@@ -48,7 +47,63 @@ test("dia útil anterior ao desligamento pula feriado e fim de semana", () => {
   assert.equal(diaUtilAnterior("2026-09-08", new Set(["2026-09-07"])), "2026-09-04");
   assert.equal(diaUtilAnterior("2026-09-08"), "2026-09-07");
   assert.equal(diaUtilAnterior("2026-09-09", new Set(["2026-09-07", "2026-09-08"])), "2026-09-04");
-  assert.match(tela, /diaUtilAnterior\(f.data_desligamento, feriadosSemAlocacao\)/);
+});
+
+test("helper canônico respeita cobertura, feriado, fim de semana, admissão e desligamento", () => {
+  const [funcionario] = calcularPendenciasSemAlocacao({
+    funcionarios: [
+      {
+        id: "f1",
+        categoria_mo: "Montador",
+        data_admissao: "2026-09-04",
+        data_desligamento: "2026-09-10",
+      },
+    ],
+    coberturas: [
+      { funcionario_id: "f1", data: "2026-09-04" },
+      { funcionario_id: "f1", data: "2026-09-08" },
+    ],
+    feriados: new Set(["2026-09-07"]),
+    inicioCompetencia: "2026-08-25",
+    fimCompetencia: "2026-09-24",
+    dataLimiteAnalise: "2026-09-12",
+  });
+
+  assert.deepEqual(funcionario.datasSemAlocacao, ["2026-09-09"]);
+  assert.equal(funcionario.diasDisponiveis, 3);
+  assert.equal(funcionario.diasComAlocacao, 2);
+  assert.equal(funcionario.admitidoNoPeriodo, true);
+  assert.equal(funcionario.desligadoNoPeriodo, true);
+});
+
+test("helper canônico diferencia Para tratar de ontem e hoje sem depender de filtro visual", () => {
+  const funcionarios = [
+    {
+      id: "f1",
+      categoria_mo: "Montador",
+      data_admissao: null,
+      data_desligamento: null,
+    },
+  ];
+  const base = {
+    funcionarios,
+    coberturas: [{ funcionario_id: "f1", data: "2026-09-01" }],
+    feriados: new Set<string>(),
+    inicioCompetencia: "2026-09-01",
+    fimCompetencia: "2026-09-30",
+  };
+  const paraTratar = calcularPendenciasSemAlocacao({
+    ...base,
+    dataLimiteAnalise: dataLimitePendencias("2026-09-04", base.fimCompetencia, "para-tratar"),
+  })[0];
+  const todas = calcularPendenciasSemAlocacao({
+    ...base,
+    dataLimiteAnalise: dataLimitePendencias("2026-09-04", base.fimCompetencia, "todas"),
+  })[0];
+
+  assert.deepEqual(paraTratar.datasSemAlocacao, ["2026-09-02"]);
+  assert.deepEqual(todas.datasSemAlocacao, ["2026-09-02", "2026-09-03"]);
+  assert.equal(paraTratar.datasSemAlocacao.includes("2026-09-04"), false);
 });
 
 test("servidor retorna somente feriados ativos do intervalo analisado", () => {
@@ -126,7 +181,8 @@ test("tela e Excel exibem e filtram os novos campos sem renomear a semântica", 
   ])
     assert.match(tela, new RegExp(label));
   assert.match(tela, /ultimoCcFilter/);
-  assert.match(tela, /referencia: dataLimiteAnalise/);
+  assert.match(tela, /referencia: dataLimiteConsultaSemAlocacao/);
+  assert.match(tela, /calcularPendenciasAte\(dataLimiteAnalise\)/);
   assert.match(tela, /Sem CC anterior/);
   assert.doesNotMatch(tela, /Responsável pelo CC/);
 });

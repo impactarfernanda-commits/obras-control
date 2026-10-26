@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { PageHeader } from "@/components/PageHeader";
@@ -38,10 +38,9 @@ import * as XLSX from "xlsx";
 
 import { supabase } from "@/integrations/supabase/client";
 import {
+  calcularPendenciasSemAlocacao,
   dataLimitePendencias,
   dataLocalISO,
-  datasUteisNoIntervalo,
-  diaUtilAnterior,
   type VisaoPendencias,
 } from "@/lib/relatorio-sem-alocacao";
 import { useCategorias } from "@/lib/categorias";
@@ -164,7 +163,10 @@ function RelatoriosPage() {
   const { start, end, startDate, endDate } = payrollRange(year, month);
   const hojeISO = dataLocalISO(today);
   const dataLimiteAnalise = dataLimitePendencias(hojeISO, end, visaoPendencias);
+  const dataLimiteConsultaSemAlocacao = dataLimitePendencias(hojeISO, end, "todas");
+  const dataLimitePendenciasParaTratar = dataLimitePendencias(hojeISO, end, "para-tratar");
   const competenciaSemDiasVencidos = dataLimiteAnalise < start;
+  const competenciaSemDadosConsultaveis = dataLimiteConsultaSemAlocacao < start;
 
   const { data: alocacoes, isLoading: la } = useQuery({
     queryKey: ["alocacoes-mes", start, end],
@@ -224,12 +226,12 @@ function RelatoriosPage() {
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
-    queryKey: ["relatorio-sem-alocacao", start, end, dataLimiteAnalise],
+    queryKey: ["relatorio-sem-alocacao", start, end, dataLimiteConsultaSemAlocacao],
     queryFn: () =>
       getRelatorioSemAlocacao({
-        data: { inicio: start, fim: end, referencia: dataLimiteAnalise },
+        data: { inicio: start, fim: end, referencia: dataLimiteConsultaSemAlocacao },
       }),
-    enabled: !competenciaSemDiasVencidos,
+    enabled: !competenciaSemDadosConsultaveis,
   });
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
@@ -353,79 +355,62 @@ function RelatoriosPage() {
     [relatorioSemAlocacao?.feriados],
   );
 
+  const calcularPendenciasAte = useCallback(
+    (dataLimite: string) =>
+      calcularPendenciasSemAlocacao({
+        funcionarios: funcionariosSemAlocacao,
+        coberturas: alocacoesSemAlocacao,
+        feriados: feriadosSemAlocacao,
+        inicioCompetencia: start,
+        fimCompetencia: end,
+        dataLimiteAnalise: dataLimite,
+        vigenciasCentroCusto: relatorioSemAlocacao?.vigenciasCentroCusto,
+      }),
+    [
+      alocacoesSemAlocacao,
+      end,
+      feriadosSemAlocacao,
+      funcionariosSemAlocacao,
+      relatorioSemAlocacao?.vigenciasCentroCusto,
+      start,
+    ],
+  );
+
+  const pendenciasParaTratarPorFuncionario = useMemo(
+    () =>
+      new Map(
+        calcularPendenciasAte(dataLimitePendenciasParaTratar).map((funcionario) => [
+          funcionario.id,
+          funcionario.diasSemAlocacao,
+        ]),
+      ),
+    [calcularPendenciasAte, dataLimitePendenciasParaTratar],
+  );
+
   const semAlocacao = useMemo(() => {
     if (competenciaSemDiasVencidos) return [];
-    const alocacoesPorFuncionario = new Map<string, Set<string>>();
-    for (const alocacao of alocacoesSemAlocacao) {
-      const datas = alocacoesPorFuncionario.get(alocacao.funcionario_id) ?? new Set<string>();
-      datas.add(alocacao.data);
-      alocacoesPorFuncionario.set(alocacao.funcionario_id, datas);
-    }
-    return funcionariosSemAlocacao
-      .filter((f) => {
-        if (f.data_admissao && f.data_admissao > dataLimiteAnalise) return false;
-        return true;
-      })
+    return calcularPendenciasAte(dataLimiteAnalise)
       .map((f) => {
         const ultimaAlocacao = ultimaAlocacaoPorFuncionario.get(f.id) ?? null;
-        const inicio = f.data_admissao && f.data_admissao > start ? f.data_admissao : start;
-        const fimAnteriorAoDesligamento = f.data_desligamento
-          ? diaUtilAnterior(f.data_desligamento, feriadosSemAlocacao)
-          : dataLimiteAnalise;
-        const fim =
-          fimAnteriorAoDesligamento < dataLimiteAnalise
-            ? fimAnteriorAoDesligamento
-            : dataLimiteAnalise;
-        const diasDisponiveis = datasUteisNoIntervalo(inicio, fim, feriadosSemAlocacao);
-        const datasAlocadas = alocacoesPorFuncionario.get(f.id) ?? new Set<string>();
-        const vigenciasSupervisor =
-          SUPERVISOR_CC_VIGENCIAS_ATIVAS && categoriaEhSupervisor(f.categoria_mo)
-            ? (relatorioSemAlocacao?.vigenciasCentroCusto ?? []).filter(
-                (vigencia) => vigencia.funcionario_id === f.id,
-              )
-            : [];
-        const coberto = (data: string) =>
-          datasAlocadas.has(data) ||
-          (SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
-            data >= SUPERVISOR_CC_DATA_CORTE &&
-            vigenciasSupervisor.some(
-              (vigencia) =>
-                vigencia.vigencia_inicio <= data &&
-                (!vigencia.vigencia_fim || vigencia.vigencia_fim >= data),
-            ));
-        const diasComAlocacao = diasDisponiveis.filter(coberto);
-        const diasSemAlocacao = diasDisponiveis.filter((data) => !coberto(data));
-        const admitidoNoPeriodo = Boolean(
-          f.data_admissao && f.data_admissao >= start && f.data_admissao <= end,
-        );
-        const desligadoNoPeriodo = Boolean(
-          f.data_desligamento && f.data_desligamento >= start && f.data_desligamento <= end,
-        );
         const observacoes = [
           SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
           categoriaEhSupervisor(f.categoria_mo) &&
-          diasSemAlocacao.some((data) => data >= SUPERVISOR_CC_DATA_CORTE)
+          f.datasSemAlocacao.some((data) => data >= SUPERVISOR_CC_DATA_CORTE)
             ? "Supervisor com ausência ou lacuna de vigência de centro de custo."
-            : diasComAlocacao.length === 0
+            : f.diasComAlocacao === 0
               ? "Sem nenhuma alocação registrada na competência."
               : "Possui alocação parcial. Existem dias úteis sem lançamento.",
         ];
-        if (admitidoNoPeriodo)
+        if (f.admitidoNoPeriodo)
           observacoes.push(
             `Admitido em ${new Date(f.data_admissao! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações a partir da admissão.`,
           );
-        if (desligadoNoPeriodo)
+        if (f.desligadoNoPeriodo)
           observacoes.push(
             `Desligado em ${new Date(f.data_desligamento! + "T00:00:00").toLocaleDateString("pt-BR")}. Verificar alocações até o dia útil anterior ao desligamento.`,
           );
         return {
           ...f,
-          diasDisponiveis: diasDisponiveis.length,
-          diasComAlocacao: diasComAlocacao.length,
-          diasSemAlocacao: diasSemAlocacao.length,
-          datasSemAlocacao: diasSemAlocacao,
-          admitidoNoPeriodo,
-          desligadoNoPeriodo,
           observacao: observacoes.join(" "),
           ultimoCcId: ultimaAlocacao?.obra_id ?? null,
           ultimoCcNome: ultimaAlocacao?.obra_nome ?? null,
@@ -451,11 +436,7 @@ function RelatoriosPage() {
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [
-    alocacoesSemAlocacao,
-    feriadosSemAlocacao,
-    funcionariosSemAlocacao,
-    start,
-    end,
+    calcularPendenciasAte,
     dataLimiteAnalise,
     competenciaSemDiasVencidos,
     pendenciaFilter,
@@ -463,7 +444,6 @@ function RelatoriosPage() {
     coberturaFilter,
     ultimoCcFilter,
     ultimaAlocacaoPorFuncionario,
-    relatorioSemAlocacao?.vigenciasCentroCusto,
   ]);
 
   const categoriasPendencias = useMemo(
@@ -940,7 +920,12 @@ function RelatoriosPage() {
         )}
 
         <TabsContent value="alocacao-centro-custo">
-          <RelatorioAlocacaoCentroCusto year={year} month={month} />
+          <RelatorioAlocacaoCentroCusto
+            year={year}
+            month={month}
+            quantidadePendenciasPorFuncionario={pendenciasParaTratarPorFuncionario}
+            carregandoPendencias={loadingSemAlocacao}
+          />
         </TabsContent>
 
         <TabsContent value="sem-alocacao">

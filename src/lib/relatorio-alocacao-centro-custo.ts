@@ -116,6 +116,7 @@ const chaveFuncionarioObra = (funcionarioId: string, obraId: string) =>
 
 export function montarRelatorioAlocacaoCentroCusto(
   entrada: readonly LinhaDiariaAlocacaoCc[],
+  quantidadePendenciasPorFuncionario: ReadonlyMap<string, number> = new Map(),
 ): RelatorioAlocacaoCc {
   const disponibilidadeInformada = new Map<string, number>();
   for (const linha of entrada) {
@@ -173,7 +174,8 @@ export function montarRelatorioAlocacaoCentroCusto(
     if (desligadoNoPeriodo) observacoes.push("Desligado no período");
     if (totalDiasDisponiveis < maiorDisponibilidade && !admitidoNoPeriodo && !desligadoNoPeriodo)
       observacoes.push("Disponibilidade parcial");
-    if (totalDiasDisponiveis > datasAlocadas.size) observacoes.push("Alocação incompleta");
+    if ((quantidadePendenciasPorFuncionario.get(funcionarioId) ?? 0) > 0)
+      observacoes.push("Alocação incompleta");
     for (const linha of linhas) {
       if (!linha.obra_id || linha.situacao !== "alocado") continue;
       const chave = chaveFuncionarioObra(funcionarioId, linha.obra_id);

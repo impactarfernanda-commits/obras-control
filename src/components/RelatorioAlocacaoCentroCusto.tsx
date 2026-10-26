@@ -41,7 +41,17 @@ import { exportarAlocacaoCentroCustoXlsx } from "@/lib/relatorio-alocacao-centro
 const percentual = (valor: number) =>
   `${valor.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;
 
-export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; month: number }) {
+export function RelatorioAlocacaoCentroCusto({
+  year,
+  month,
+  quantidadePendenciasPorFuncionario,
+  carregandoPendencias = false,
+}: {
+  year: number;
+  month: number;
+  quantidadePendenciasPorFuncionario: ReadonlyMap<string, number>;
+  carregandoPendencias?: boolean;
+}) {
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}`;
   const periodo = calcularCompetencia(`${competencia}-01`);
   const [busca, setBusca] = useState("");
@@ -55,8 +65,8 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
     queryFn: () => getRelatorioAlocacaoCentroCusto({ data: { competencia } }),
   });
   const relatorio = useMemo(
-    () => montarRelatorioAlocacaoCentroCusto(query.data ?? []),
-    [query.data],
+    () => montarRelatorioAlocacaoCentroCusto(query.data ?? [], quantidadePendenciasPorFuncionario),
+    [query.data, quantidadePendenciasPorFuncionario],
   );
   const funcionarios = relatorio.funcionarios;
   const obras = useMemo(() => {
@@ -165,7 +175,7 @@ export function RelatorioAlocacaoCentroCusto({ year, month }: { year: number; mo
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {query.isLoading ? (
+          {query.isLoading || carregandoPendencias ? (
             <div className="space-y-2 p-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />

@@ -142,3 +142,12 @@ test("Excel usa linhas por CC com percentuais 15/7 sobre 22 dias disponíveis", 
   assert.equal(resumo[2][7], 7);
   assert.equal(Number((resumo[2][8] as number).toFixed(4)), 0.3182);
 });
+
+test("Excel usa a mesma observação canônica da tela", () => {
+  const relatorio = montarRelatorioAlocacaoCentroCusto([base], new Map([["f1", 1]]));
+  const workbook = buildAlocacaoCentroCustoWorkbook(relatorio);
+  const resumo = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.RESUMO, { header: 1 });
+
+  assert.equal(relatorio.funcionarios[0].observacao, "Alocação incompleta");
+  assert.equal(resumo[1][4], relatorio.funcionarios[0].observacao);
+});
