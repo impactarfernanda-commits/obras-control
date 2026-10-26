@@ -60,8 +60,8 @@ test("helper canônico respeita cobertura, feriado, fim de semana, admissão e d
       },
     ],
     coberturas: [
-      { funcionario_id: "f1", data: "2026-09-04" },
-      { funcionario_id: "f1", data: "2026-09-08" },
+      { funcionario_id: "f1", data: "2026-09-04", tipo: "alocacao" },
+      { funcionario_id: "f1", data: "2026-09-08", tipo: "ferias" },
     ],
     feriados: new Set(["2026-09-07"]),
     inicioCompetencia: "2026-08-25",
@@ -71,7 +71,8 @@ test("helper canônico respeita cobertura, feriado, fim de semana, admissão e d
 
   assert.deepEqual(funcionario.datasSemAlocacao, ["2026-09-09"]);
   assert.equal(funcionario.diasDisponiveis, 3);
-  assert.equal(funcionario.diasComAlocacao, 2);
+  assert.equal(funcionario.diasComAlocacao, 1);
+  assert.equal(funcionario.diasCobertos, 2);
   assert.equal(funcionario.admitidoNoPeriodo, true);
   assert.equal(funcionario.desligadoNoPeriodo, true);
 });
@@ -87,7 +88,7 @@ test("helper canônico diferencia Para tratar de ontem e hoje sem depender de fi
   ];
   const base = {
     funcionarios,
-    coberturas: [{ funcionario_id: "f1", data: "2026-09-01" }],
+    coberturas: [{ funcionario_id: "f1", data: "2026-09-01", tipo: "alocacao" as const }],
     feriados: new Set<string>(),
     inicioCompetencia: "2026-09-01",
     fimCompetencia: "2026-09-30",
@@ -104,6 +105,40 @@ test("helper canônico diferencia Para tratar de ontem e hoje sem depender de fi
   assert.deepEqual(paraTratar.datasSemAlocacao, ["2026-09-02"]);
   assert.deepEqual(todas.datasSemAlocacao, ["2026-09-02", "2026-09-03"]);
   assert.equal(paraTratar.datasSemAlocacao.includes("2026-09-04"), false);
+});
+
+test("cobertura tipada deduplica o dia e inclui apenas ausências autorizadas", () => {
+  const [funcionario] = calcularPendenciasSemAlocacao({
+    funcionarios: [
+      { id: "f1", categoria_mo: "Montador", data_admissao: null, data_desligamento: null },
+    ],
+    coberturas: [
+      { funcionario_id: "f1", data: "2026-09-01", tipo: "alocacao" },
+      { funcionario_id: "f1", data: "2026-09-01", tipo: "atestado" },
+      { funcionario_id: "f1", data: "2026-09-02", tipo: "afastamento" },
+    ],
+    feriados: new Set(),
+    inicioCompetencia: "2026-09-01",
+    fimCompetencia: "2026-09-03",
+    dataLimiteAnalise: "2026-09-03",
+  });
+  assert.equal(funcionario.diasCobertos, 2);
+  assert.equal(funcionario.diasComAlocacao, 1);
+  assert.equal(Number(funcionario.coberturaPercentual.toFixed(2)), 66.67);
+  assert.deepEqual(
+    new Set(funcionario.tiposCobertura),
+    new Set(["alocacao", "atestado", "afastamento"]),
+  );
+  assert.deepEqual(funcionario.datasSemAlocacao, ["2026-09-03"]);
+});
+
+test("servidor inclui atestado e afastamento explícitos e exclui demais faltas", () => {
+  assert.match(
+    servidor,
+    /\.eq\("tipo_registro", "falta"\)[\s\S]*\.in\("falta_tipo", \["atestado", "afastamento"\]\)/,
+  );
+  for (const tipo of ["nao_justificada", "suspensao", "outro", "justificada"])
+    assert.doesNotMatch(servidor, new RegExp(`falta_tipo\\.in\\.\\([^)]*${tipo}`));
 });
 
 test("servidor retorna somente feriados ativos do intervalo analisado", () => {
@@ -181,7 +216,7 @@ test("tela e Excel exibem e filtram os novos campos sem renomear a semântica", 
   ])
     assert.match(tela, new RegExp(label));
   assert.match(tela, /ultimoCcFilter/);
-  assert.match(tela, /referencia: dataLimiteConsultaSemAlocacao/);
+  assert.match(tela, /referencia: end/);
   assert.match(tela, /calcularPendenciasAte\(dataLimiteAnalise\)/);
   assert.match(tela, /Sem CC anterior/);
   assert.doesNotMatch(tela, /Responsável pelo CC/);

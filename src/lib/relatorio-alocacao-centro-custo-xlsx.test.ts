@@ -79,6 +79,8 @@ test("gera resumo tabular por funcionário e CC e detalhamento somente com aloca
     "Categoria/Função",
     "Dias disponíveis",
     "Dias alocados total",
+    "Dias cobertos",
+    "Cobertura da competência",
     "Observação",
     "Centro de custo",
     "Obra",
@@ -95,10 +97,12 @@ test("gera resumo tabular por funcionário e CC e detalhamento somente com aloca
   assert.equal(detalhes.length, 2);
   assert.equal(resumo[1][2], 20);
   assert.equal(resumo[1][3], 1);
-  assert.equal(resumo[1][5], "230");
-  assert.equal(resumo[1][6], "ETE Sul");
-  assert.equal(resumo[1][7], 1);
-  assert.equal(resumo[1][8], 0.05);
+  assert.equal(resumo[1][4], 1);
+  assert.equal(resumo[1][5], 0.05);
+  assert.equal(resumo[1][7], "230");
+  assert.equal(resumo[1][8], "ETE Sul");
+  assert.equal(resumo[1][9], 1);
+  assert.equal(resumo[1][10], 0.05);
   assert.equal(
     nomeArquivoAlocacaoCentroCusto("2026-10"),
     "Alocacao_por_Centro_de_Custo_2026-10.xlsx",
@@ -128,6 +132,8 @@ test("Excel usa linhas por CC com percentuais 15/7 sobre 22 dias disponíveis", 
     "Categoria/Função",
     "Dias disponíveis",
     "Dias alocados total",
+    "Dias cobertos",
+    "Cobertura da competência",
     "Observação",
     "Centro de custo",
     "Obra",
@@ -135,19 +141,26 @@ test("Excel usa linhas por CC com percentuais 15/7 sobre 22 dias disponíveis", 
     "Percentual",
   ]);
   assert.equal(resumo.length, 3);
-  assert.equal(resumo[1][5], "230");
-  assert.equal(resumo[1][7], 15);
-  assert.equal(Number((resumo[1][8] as number).toFixed(4)), 0.6818);
-  assert.equal(resumo[2][5], "253");
-  assert.equal(resumo[2][7], 7);
-  assert.equal(Number((resumo[2][8] as number).toFixed(4)), 0.3182);
+  assert.equal(resumo[1][7], "230");
+  assert.equal(resumo[1][9], 15);
+  assert.equal(Number((resumo[1][10] as number).toFixed(4)), 0.6818);
+  assert.equal(resumo[2][7], "253");
+  assert.equal(resumo[2][9], 7);
+  assert.equal(Number((resumo[2][10] as number).toFixed(4)), 0.3182);
 });
 
-test("Excel usa a mesma observação canônica da tela", () => {
-  const relatorio = montarRelatorioAlocacaoCentroCusto([base], new Map([["f1", 1]]));
+test("Excel usa a mesma observação e cobertura canônicas da tela", () => {
+  const relatorio = montarRelatorioAlocacaoCentroCusto(
+    [base],
+    new Map([
+      ["f1", { quantidadePendenciasParaTratar: 1, diasCobertos: 18, tiposCobertura: ["ferias"] }],
+    ]),
+  );
   const workbook = buildAlocacaoCentroCustoWorkbook(relatorio);
   const resumo = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.RESUMO, { header: 1 });
 
-  assert.equal(relatorio.funcionarios[0].observacao, "Alocação incompleta");
-  assert.equal(resumo[1][4], relatorio.funcionarios[0].observacao);
+  assert.equal(relatorio.funcionarios[0].observacao, "Férias no período · Alocação incompleta");
+  assert.equal(resumo[1][4], 18);
+  assert.equal(resumo[1][5], 0.9);
+  assert.equal(resumo[1][6], relatorio.funcionarios[0].observacao);
 });

@@ -7,6 +7,7 @@ import { SUPERVISOR_CC_VIGENCIAS_ATIVAS } from "@/lib/supervisor-cc";
 import {
   ultimasAlocacoesPorFuncionario,
   type AlocacaoHistorica,
+  type CoberturaSemAlocacao,
 } from "@/lib/relatorio-sem-alocacao";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
@@ -25,7 +26,7 @@ export type FuncionarioSemAlocacaoDTO = {
 export type RelatorioSemAlocacaoDTO = {
   feriados: string[];
   funcionarios: FuncionarioSemAlocacaoDTO[];
-  alocacoes: Array<{ funcionario_id: string; data: string }>;
+  alocacoes: CoberturaSemAlocacao[];
   ultimasAlocacoes: Array<{
     funcionario_id: string;
     obra_id: string;
@@ -76,6 +77,7 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
       funcionarios,
       alocacoes,
       ausenciasPlanejadas,
+      faltasCobertas,
       historicoAlocacoes,
       obras,
       vigenciasCentroCusto,
@@ -100,11 +102,33 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
           .order("funcionario_id", { ascending: true })
           .range(from, to),
       ),
-      buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
+      buscarTodasPaginas<{
+        funcionario_id: string;
+        data: string;
+        tipo_registro: string;
+        falta_tipo: string | null;
+      }>((from, to) =>
         supabaseAdmin
           .from("registros_horas")
-          .select("funcionario_id,data")
+          .select("funcionario_id,data,tipo_registro,falta_tipo")
           .in("tipo_registro", ["ferias", "folga_campo"])
+          .gte("data", data.inicio)
+          .lte("data", data.referencia)
+          .order("data", { ascending: true })
+          .order("funcionario_id", { ascending: true })
+          .range(from, to),
+      ),
+      buscarTodasPaginas<{
+        funcionario_id: string;
+        data: string;
+        tipo_registro: string;
+        falta_tipo: string | null;
+      }>((from, to) =>
+        supabaseAdmin
+          .from("registros_horas")
+          .select("funcionario_id,data,tipo_registro,falta_tipo")
+          .eq("tipo_registro", "falta")
+          .in("falta_tipo", ["atestado", "afastamento"])
           .gte("data", data.inicio)
           .lte("data", data.referencia)
           .order("data", { ascending: true })
@@ -156,9 +180,20 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
           .range(from, to),
       ),
     ]);
-    const cobertura = new Map<string, { funcionario_id: string; data: string }>();
-    for (const item of [...alocacoes, ...ausenciasPlanejadas]) {
-      cobertura.set(`${item.funcionario_id}|${item.data}`, item);
+    const cobertura: CoberturaSemAlocacao[] = alocacoes.map((item) => ({
+      ...item,
+      tipo: "alocacao",
+    }));
+    for (const item of [...ausenciasPlanejadas, ...faltasCobertas]) {
+      const tipo =
+        item.tipo_registro === "falta"
+          ? item.falta_tipo === "atestado"
+            ? "atestado"
+            : "afastamento"
+          : item.tipo_registro === "ferias"
+            ? "ferias"
+            : "folga_campo";
+      cobertura.push({ funcionario_id: item.funcionario_id, data: item.data, tipo });
     }
     const obraNome = new Map(obras.map((obra) => [obra.id, obra.nome]));
     const ultimasAlocacoes = Array.from(
@@ -171,7 +206,7 @@ export const getRelatorioSemAlocacao = createServerFn({ method: "POST" })
     return {
       feriados: feriados.map((feriado) => feriado.data),
       funcionarios,
-      alocacoes: Array.from(cobertura.values()),
+      alocacoes: cobertura,
       ultimasAlocacoes,
       vigenciasCentroCusto,
     };

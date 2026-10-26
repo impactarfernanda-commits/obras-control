@@ -48,7 +48,10 @@ export type FuncionarioBaseSemAlocacao = {
 export type CoberturaSemAlocacao = {
   funcionario_id: string;
   data: string;
+  tipo: TipoCobertura;
 };
+
+export type TipoCobertura = "alocacao" | "ferias" | "folga_campo" | "atestado" | "afastamento";
 
 export type VigenciaCentroCustoSemAlocacao = {
   funcionario_id: string;
@@ -59,6 +62,9 @@ export type VigenciaCentroCustoSemAlocacao = {
 export type PendenciaSemAlocacao<T extends FuncionarioBaseSemAlocacao> = T & {
   diasDisponiveis: number;
   diasComAlocacao: number;
+  diasCobertos: number;
+  coberturaPercentual: number;
+  tiposCobertura: TipoCobertura[];
   diasSemAlocacao: number;
   datasSemAlocacao: string[];
   admitidoNoPeriodo: boolean;
@@ -97,10 +103,12 @@ export function calcularPendenciasSemAlocacao<T extends FuncionarioBaseSemAlocac
   dataLimiteAnalise: string;
   vigenciasCentroCusto?: readonly VigenciaCentroCustoSemAlocacao[];
 }): PendenciaSemAlocacao<T>[] {
-  const coberturasPorFuncionario = new Map<string, Set<string>>();
+  const coberturasPorFuncionario = new Map<string, Map<string, Set<TipoCobertura>>>();
   for (const cobertura of input.coberturas) {
-    const datas = coberturasPorFuncionario.get(cobertura.funcionario_id) ?? new Set<string>();
-    datas.add(cobertura.data);
+    const datas = coberturasPorFuncionario.get(cobertura.funcionario_id) ?? new Map();
+    const tipos = datas.get(cobertura.data) ?? new Set<TipoCobertura>();
+    tipos.add(cobertura.tipo);
+    datas.set(cobertura.data, tipos);
     coberturasPorFuncionario.set(cobertura.funcionario_id, datas);
   }
 
@@ -122,29 +130,40 @@ export function calcularPendenciasSemAlocacao<T extends FuncionarioBaseSemAlocac
           ? fimAnteriorAoDesligamento
           : input.dataLimiteAnalise;
       const diasDisponiveis = datasUteisNoIntervalo(inicio, fim, input.feriados);
-      const datasCobertas = coberturasPorFuncionario.get(funcionario.id) ?? new Set<string>();
+      const datasCobertas = coberturasPorFuncionario.get(funcionario.id) ?? new Map();
       const vigenciasSupervisor =
         SUPERVISOR_CC_VIGENCIAS_ATIVAS && categoriaEhSupervisor(funcionario.categoria_mo)
           ? (input.vigenciasCentroCusto ?? []).filter(
               (vigencia) => vigencia.funcionario_id === funcionario.id,
             )
           : [];
-      const coberto = (data: string) =>
-        datasCobertas.has(data) ||
-        (SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
-          data >= SUPERVISOR_CC_DATA_CORTE &&
-          vigenciasSupervisor.some(
-            (vigencia) =>
-              vigencia.vigencia_inicio <= data &&
-              (!vigencia.vigencia_fim || vigencia.vigencia_fim >= data),
-          ));
-      const diasComAlocacao = diasDisponiveis.filter(coberto);
+      const cobertoPorVigencia = (data: string) =>
+        SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
+        data >= SUPERVISOR_CC_DATA_CORTE &&
+        vigenciasSupervisor.some(
+          (vigencia) =>
+            vigencia.vigencia_inicio <= data &&
+            (!vigencia.vigencia_fim || vigencia.vigencia_fim >= data),
+        );
+      const coberto = (data: string) => datasCobertas.has(data) || cobertoPorVigencia(data);
+      const diasComAlocacao = diasDisponiveis.filter(
+        (data) => datasCobertas.get(data)?.has("alocacao") || cobertoPorVigencia(data),
+      );
+      const diasCobertos = diasDisponiveis.filter(coberto);
       const diasSemAlocacao = diasDisponiveis.filter((data) => !coberto(data));
+      const tiposCobertura = new Set<TipoCobertura>();
+      for (const data of diasDisponiveis)
+        for (const tipo of datasCobertas.get(data) ?? []) tiposCobertura.add(tipo);
 
       return {
         ...funcionario,
         diasDisponiveis: diasDisponiveis.length,
         diasComAlocacao: diasComAlocacao.length,
+        diasCobertos: diasCobertos.length,
+        coberturaPercentual: diasDisponiveis.length
+          ? Math.min((diasCobertos.length / diasDisponiveis.length) * 100, 100)
+          : 0,
+        tiposCobertura: [...tiposCobertura],
         diasSemAlocacao: diasSemAlocacao.length,
         datasSemAlocacao: diasSemAlocacao,
         admitidoNoPeriodo: Boolean(

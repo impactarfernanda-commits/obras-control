@@ -32,6 +32,7 @@ import {
 import { calcularCompetencia, formatarPeriodoCompetencia } from "@/lib/competencias";
 import { getRelatorioAlocacaoCentroCusto } from "@/lib/relatorio-alocacao-centro-custo.functions";
 import {
+  type CoberturaFuncionarioAlocacaoCc,
   filtrarFuncionariosAlocacaoCc,
   montarRelatorioAlocacaoCentroCusto,
   separarCentroCustoObra,
@@ -44,12 +45,12 @@ const percentual = (valor: number) =>
 export function RelatorioAlocacaoCentroCusto({
   year,
   month,
-  quantidadePendenciasPorFuncionario,
+  coberturaPorFuncionario,
   carregandoPendencias = false,
 }: {
   year: number;
   month: number;
-  quantidadePendenciasPorFuncionario: ReadonlyMap<string, number>;
+  coberturaPorFuncionario: ReadonlyMap<string, CoberturaFuncionarioAlocacaoCc>;
   carregandoPendencias?: boolean;
 }) {
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}`;
@@ -65,8 +66,8 @@ export function RelatorioAlocacaoCentroCusto({
     queryFn: () => getRelatorioAlocacaoCentroCusto({ data: { competencia } }),
   });
   const relatorio = useMemo(
-    () => montarRelatorioAlocacaoCentroCusto(query.data ?? [], quantidadePendenciasPorFuncionario),
-    [query.data, quantidadePendenciasPorFuncionario],
+    () => montarRelatorioAlocacaoCentroCusto(query.data ?? [], coberturaPorFuncionario),
+    [query.data, coberturaPorFuncionario],
   );
   const funcionarios = relatorio.funcionarios;
   const obras = useMemo(() => {
@@ -203,6 +204,7 @@ export function RelatorioAlocacaoCentroCusto({
                       </TableHead>
                       <TableHead className="min-w-[120px] text-right">Dias disponíveis</TableHead>
                       <TableHead className="min-w-[110px] text-right">Dias alocados</TableHead>
+                      <TableHead className="min-w-[100px] text-right">Cobertura</TableHead>
                       <TableHead className="min-w-[190px]">Observação</TableHead>
                       <TableHead className="min-w-[320px]">Alocação por Centro de Custo</TableHead>
                     </TableRow>
@@ -210,7 +212,7 @@ export function RelatorioAlocacaoCentroCusto({
                   <TableBody>
                     {!filtradas.length ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                           Não há alocações para esta competência.
                         </TableCell>
                       </TableRow>
@@ -234,6 +236,9 @@ export function RelatorioAlocacaoCentroCusto({
                           </TableCell>
                           <TableCell className="text-right">
                             {funcionario.totalDiasAlocados}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {percentual(funcionario.coberturaPercentual)}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {funcionario.observacao}

@@ -136,7 +136,11 @@ test("diferença matemática sem pendência mantém percentual e não marca inco
 test("20 disponíveis, 15 alocados e 5 cobertos resultam em 75% sem pendência", () => {
   const datas = datasUteisNoIntervalo("2026-09-01", "2026-09-28");
   const alocadas = datas.slice(0, 15);
-  const coberturas = datas.map((data) => ({ funcionario_id: "f1", data }));
+  const coberturas = datas.map((data, indice) => ({
+    funcionario_id: "f1",
+    data,
+    tipo: indice < 15 ? ("alocacao" as const) : ("ferias" as const),
+  }));
   const [pendencia] = calcularPendenciasSemAlocacao({
     funcionarios: [
       {
@@ -154,14 +158,26 @@ test("20 disponíveis, 15 alocados e 5 cobertos resultam em 75% sem pendência",
   });
   const funcionario = montarRelatorioAlocacaoCentroCusto(
     alocadas.map((data) => linha({ data, dias_esperados_funcionario: 20 })),
-    new Map([["f1", pendencia.diasSemAlocacao]]),
+    new Map([
+      [
+        "f1",
+        {
+          quantidadePendenciasParaTratar: pendencia.diasSemAlocacao,
+          diasCobertos: 20,
+          tiposCobertura: ["alocacao", "ferias"],
+        },
+      ],
+    ]),
   ).funcionarios[0];
 
   assert.equal(funcionario.totalDiasDisponiveis, 20);
   assert.equal(funcionario.totalDiasAlocados, 15);
+  assert.equal(pendencia.diasComAlocacao, 15);
+  assert.equal(pendencia.diasCobertos, 20);
   assert.equal(funcionario.centros[0].percentualDiasAlocados, 75);
   assert.equal(pendencia.diasSemAlocacao, 0);
-  assert.equal(funcionario.observacao, "—");
+  assert.equal(funcionario.coberturaPercentual, 100);
+  assert.equal(funcionario.observacao, "Férias no período");
 });
 
 test("disponibilidade parcial pode representar 100% e usa datas explícitas do vínculo", () => {
@@ -192,7 +208,81 @@ test("não marca incompleto nem trunca percentual acima de 100% por trabalho nã
   ).funcionarios[0];
   assert.equal(funcionario.totalDiasAlocados, 22);
   assert.equal(Number(funcionario.centros[0].percentualDiasAlocados.toFixed(2)), 110);
+  assert.equal(funcionario.coberturaPercentual, 100);
   assert.equal(funcionario.observacao, "—");
+});
+
+test("combina ausências autorizadas e pendência na ordem definida", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto(
+    [linha({ dias_esperados_funcionario: 10 })],
+    new Map([
+      [
+        "f1",
+        {
+          quantidadePendenciasParaTratar: 1,
+          diasCobertos: 9,
+          tiposCobertura: ["atestado", "folga_campo", "ferias", "afastamento"],
+        },
+      ],
+    ]),
+  ).funcionarios[0];
+
+  assert.equal(funcionario.totalDiasCobertos, 9);
+  assert.equal(funcionario.coberturaPercentual, 90);
+  assert.equal(
+    funcionario.observacao,
+    "Férias no período · Folga de campo no período · Afastamento no período · Atestado no período · Alocação incompleta",
+  );
+});
+
+test("15 alocados e 5 folgas cobrem 100% sem marcar incompleto", () => {
+  const funcionario = montarRelatorioAlocacaoCentroCusto(
+    Array.from({ length: 15 }, (_, indice) =>
+      linha({
+        data: `2026-10-${String(indice + 1).padStart(2, "0")}`,
+        dias_esperados_funcionario: 20,
+      }),
+    ),
+    new Map([
+      [
+        "f1",
+        {
+          quantidadePendenciasParaTratar: 0,
+          diasCobertos: 20,
+          tiposCobertura: ["alocacao", "folga_campo"],
+        },
+      ],
+    ]),
+  ).funcionarios[0];
+
+  assert.equal(funcionario.totalDiasAlocados, 15);
+  assert.equal(funcionario.coberturaPercentual, 100);
+  assert.equal(funcionario.observacao, "Folga de campo no período");
+});
+
+test("combina admissão com férias e desligamento com afastamento", () => {
+  const admitido = montarRelatorioAlocacaoCentroCusto(
+    [linha({ data_admissao_funcionario: "2026-10-01" })],
+    new Map([
+      ["f1", { quantidadePendenciasParaTratar: 0, diasCobertos: 20, tiposCobertura: ["ferias"] }],
+    ]),
+  ).funcionarios[0];
+  const desligado = montarRelatorioAlocacaoCentroCusto(
+    [linha({ data_desligamento_funcionario: "2026-10-20" })],
+    new Map([
+      [
+        "f1",
+        {
+          quantidadePendenciasParaTratar: 0,
+          diasCobertos: 20,
+          tiposCobertura: ["afastamento"],
+        },
+      ],
+    ]),
+  ).funcionarios[0];
+
+  assert.equal(admitido.observacao, "Admitido no período · Férias no período");
+  assert.equal(desligado.observacao, "Desligado no período · Afastamento no período");
 });
 
 test("pendência canônica marca incompleto sem alterar o percentual", () => {
@@ -203,7 +293,7 @@ test("pendência canônica marca incompleto sem alterar o percentual", () => {
         dias_esperados_funcionario: 12,
       }),
     ),
-    new Map([["f1", 1]]),
+    new Map([["f1", { quantidadePendenciasParaTratar: 1, diasCobertos: 9, tiposCobertura: [] }]]),
   ).funcionarios[0];
   assert.equal(Number(funcionario.centros[0].percentualDiasAlocados.toFixed(2)), 66.67);
   assert.equal(funcionario.observacao, "Alocação incompleta");
@@ -222,7 +312,10 @@ test("admissão e desligamento combinam somente com pendência canônica", () =>
     "Admitido no período · Desligado no período",
   );
   assert.equal(
-    montarRelatorioAlocacaoCentroCusto(dados, new Map([["f1", 1]])).funcionarios[0].observacao,
+    montarRelatorioAlocacaoCentroCusto(
+      dados,
+      new Map([["f1", { quantidadePendenciasParaTratar: 1, diasCobertos: 1, tiposCobertura: [] }]]),
+    ).funcionarios[0].observacao,
     "Admitido no período · Desligado no período · Alocação incompleta",
   );
 });

@@ -77,9 +77,17 @@ export type FuncionarioAlocacaoCc = {
   categoria: string;
   totalDiasDisponiveis: number;
   totalDiasAlocados: number;
+  totalDiasCobertos: number;
+  coberturaPercentual: number;
   observacao: string;
   centros: ResumoAlocacaoCc[];
   detalhes: LinhaDiariaAlocacaoCc[];
+};
+
+export type CoberturaFuncionarioAlocacaoCc = {
+  quantidadePendenciasParaTratar: number;
+  diasCobertos: number;
+  tiposCobertura: readonly string[];
 };
 
 export type RelatorioAlocacaoCc = {
@@ -116,7 +124,7 @@ const chaveFuncionarioObra = (funcionarioId: string, obraId: string) =>
 
 export function montarRelatorioAlocacaoCentroCusto(
   entrada: readonly LinhaDiariaAlocacaoCc[],
-  quantidadePendenciasPorFuncionario: ReadonlyMap<string, number> = new Map(),
+  coberturaPorFuncionario: ReadonlyMap<string, CoberturaFuncionarioAlocacaoCc> = new Map(),
 ): RelatorioAlocacaoCc {
   const disponibilidadeInformada = new Map<string, number>();
   for (const linha of entrada) {
@@ -159,6 +167,14 @@ export function montarRelatorioAlocacaoCentroCusto(
     );
     const porObra = new Map<string, LinhaDiariaAlocacaoCc[]>();
     const totalDiasDisponiveis = disponibilidadeInformada.get(funcionarioId) ?? 0;
+    const cobertura = coberturaPorFuncionario.get(funcionarioId);
+    const totalDiasCobertos = Math.min(
+      cobertura?.diasCobertos ?? datasAlocadas.size,
+      totalDiasDisponiveis,
+    );
+    const coberturaPercentual = totalDiasDisponiveis
+      ? Math.min((totalDiasCobertos / totalDiasDisponiveis) * 100, 100)
+      : 0;
     const observacoes: string[] = [];
     const admitidoNoPeriodo = Boolean(
       primeira.data_admissao_funcionario &&
@@ -172,9 +188,14 @@ export function montarRelatorioAlocacaoCentroCusto(
     );
     if (admitidoNoPeriodo) observacoes.push("Admitido no período");
     if (desligadoNoPeriodo) observacoes.push("Desligado no período");
+    const tiposCobertura = new Set(cobertura?.tiposCobertura ?? []);
+    if (tiposCobertura.has("ferias")) observacoes.push("Férias no período");
+    if (tiposCobertura.has("folga_campo")) observacoes.push("Folga de campo no período");
+    if (tiposCobertura.has("afastamento")) observacoes.push("Afastamento no período");
+    if (tiposCobertura.has("atestado")) observacoes.push("Atestado no período");
     if (totalDiasDisponiveis < maiorDisponibilidade && !admitidoNoPeriodo && !desligadoNoPeriodo)
       observacoes.push("Disponibilidade parcial");
-    if ((quantidadePendenciasPorFuncionario.get(funcionarioId) ?? 0) > 0)
+    if ((cobertura?.quantidadePendenciasParaTratar ?? 0) > 0)
       observacoes.push("Alocação incompleta");
     for (const linha of linhas) {
       if (!linha.obra_id || linha.situacao !== "alocado") continue;
@@ -211,6 +232,8 @@ export function montarRelatorioAlocacaoCentroCusto(
       categoria: primeira.categoria,
       totalDiasDisponiveis,
       totalDiasAlocados: datasAlocadas.size,
+      totalDiasCobertos,
+      coberturaPercentual,
       observacao: observacoes.join(" · ") || "—",
       centros: linhasResumo,
       detalhes: linhas,

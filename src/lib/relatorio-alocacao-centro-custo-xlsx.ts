@@ -35,6 +35,8 @@ export function buildAlocacaoCentroCustoWorkbook(relatorio: RelatorioAlocacaoCc)
       "Categoria/Função",
       "Dias disponíveis",
       "Dias alocados total",
+      "Dias cobertos",
+      "Cobertura da competência",
       "Observação",
       "Centro de custo",
       "Obra",
@@ -47,6 +49,8 @@ export function buildAlocacaoCentroCustoWorkbook(relatorio: RelatorioAlocacaoCc)
         funcionario.categoria,
         funcionario.totalDiasDisponiveis,
         funcionario.totalDiasAlocados,
+        funcionario.totalDiasCobertos,
+        funcionario.coberturaPercentual / 100,
         funcionario.observacao,
         centro.centroCusto,
         centro.obra,
@@ -55,9 +59,9 @@ export function buildAlocacaoCentroCustoWorkbook(relatorio: RelatorioAlocacaoCc)
       ]),
     ),
   ]);
-  resumo["!cols"] = [28, 24, 16, 18, 32, 18, 34, 14, 14].map((wch) => ({ wch }));
-  resumo["!autofilter"] = { ref: `A1:I${Math.max(1, relatorio.resumo.length + 1)}` };
-  formatarColunas(resumo, 1, relatorio.resumo.length, [8], "0.00%");
+  resumo["!cols"] = [28, 24, 16, 18, 16, 24, 32, 18, 34, 14, 14].map((wch) => ({ wch }));
+  resumo["!autofilter"] = { ref: `A1:K${Math.max(1, relatorio.resumo.length + 1)}` };
+  formatarColunas(resumo, 1, relatorio.resumo.length, [5, 10], "0.00%");
   XLSX.utils.book_append_sheet(workbook, resumo, "RESUMO");
 
   const detalhamento = XLSX.utils.aoa_to_sheet([

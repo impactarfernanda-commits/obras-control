@@ -226,10 +226,10 @@ function RelatoriosPage() {
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
-    queryKey: ["relatorio-sem-alocacao", start, end, dataLimiteConsultaSemAlocacao],
+    queryKey: ["relatorio-sem-alocacao", start, end],
     queryFn: () =>
       getRelatorioSemAlocacao({
-        data: { inicio: start, fim: end, referencia: dataLimiteConsultaSemAlocacao },
+        data: { inicio: start, fim: end, referencia: end },
       }),
     enabled: !competenciaSemDadosConsultaveis,
   });
@@ -386,6 +386,20 @@ function RelatoriosPage() {
       ),
     [calcularPendenciasAte, dataLimitePendenciasParaTratar],
   );
+  const coberturaCompetenciaPorFuncionario = useMemo(() => {
+    const coberturaCompetencia = calcularPendenciasAte(end);
+    return new Map(
+      coberturaCompetencia.map((funcionario) => [
+        funcionario.id,
+        {
+          quantidadePendenciasParaTratar:
+            pendenciasParaTratarPorFuncionario.get(funcionario.id) ?? 0,
+          diasCobertos: funcionario.diasCobertos,
+          tiposCobertura: funcionario.tiposCobertura,
+        },
+      ]),
+    );
+  }, [calcularPendenciasAte, end, pendenciasParaTratarPorFuncionario]);
 
   const semAlocacao = useMemo(() => {
     if (competenciaSemDiasVencidos) return [];
@@ -923,7 +937,7 @@ function RelatoriosPage() {
           <RelatorioAlocacaoCentroCusto
             year={year}
             month={month}
-            quantidadePendenciasPorFuncionario={pendenciasParaTratarPorFuncionario}
+            coberturaPorFuncionario={coberturaCompetenciaPorFuncionario}
             carregandoPendencias={loadingSemAlocacao}
           />
         </TabsContent>
