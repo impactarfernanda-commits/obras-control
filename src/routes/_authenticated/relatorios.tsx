@@ -52,7 +52,6 @@ import {
   calcularCustoHorasExtras,
   classificarHorasPorData,
   formatarHorasDecimais,
-  type CustoHoraExtra,
 } from "@/lib/horas-extras";
 import { exportCostCenterXlsx } from "@/lib/relatorio-centro-custo-xlsx";
 import { rotuloFalta, rotuloTipoRegistro } from "@/lib/registro-falta";
@@ -67,6 +66,7 @@ import {
 } from "@/lib/supervisor-cc";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import { consolidarCustoFuncionario } from "@/lib/relatorio-funcionario";
+import { normalizarApuracaoHorasFinanceiras } from "@/lib/relatorio-horas-financeiras";
 import { RelatorioAlocacaoCentroCusto } from "@/components/RelatorioAlocacaoCentroCusto";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
@@ -287,42 +287,17 @@ function RelatoriosPage() {
 
   const diasUteis = useMemo(() => diasUteisNoIntervalo(startDate, endDate), [startDate, endDate]);
 
-  const horasExtrasPorFunc = useMemo(() => {
-    const registrosPorFunc = new Map<string, RegRow[]>();
-    for (const registro of registros ?? []) {
-      const lista = registrosPorFunc.get(registro.funcionario_id) ?? [];
-      lista.push(registro);
-      registrosPorFunc.set(registro.funcionario_id, lista);
-    }
-
-    const resultado = new Map<string, CustoHoraExtra>();
-    for (const funcionario of funcionariosRelatorio) {
-      const custo = custoPorFunc.get(funcionario.id);
-      if (!custo) continue;
-      resultado.set(
-        funcionario.id,
-        calcularCustoHorasExtras(
-          custo,
-          (registrosPorFunc.get(funcionario.id) ?? []).map((registro) => ({
-            data: registro.data,
-            horasExtras: (() => {
-              const detalhe = detalhePorRegistro.get(registro.id);
-              if (detalhe) return (detalhe.minutos_he_50 + detalhe.minutos_he_100) / 60;
-              const apuracao = classificarHorasPorData({
-                data: registro.data,
-                horasNormais: registro.horas_normais,
-                horasExtras: registro.horas_extras,
-              });
-              return apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
-            })(),
-          })),
-        ),
-      );
-    }
-    return resultado;
-  }, [custoPorFunc, detalhePorRegistro, funcionariosRelatorio, registros]);
-
   const obrasComCusto = useMemo(() => relatorioCentros?.centros ?? [], [relatorioCentros]);
+  const horasExtrasPorFunc = useMemo(
+    () =>
+      new Map(
+        funcionariosRelatorio.map((funcionario) => [
+          funcionario.id,
+          consolidarCustoFuncionario(obrasComCusto, funcionario.id),
+        ]),
+      ),
+    [funcionariosRelatorio, obrasComCusto],
+  );
   const segmentarMod = relatorioCentros?.segmentarMod ?? false;
   const avisosObras = useMemo(() => relatorioCentros?.avisos ?? [], [relatorioCentros]);
   const centroDetalhe = obrasComCusto.find((obra) => obra.id === centroDetalheId) ?? null;
@@ -497,7 +472,7 @@ function RelatoriosPage() {
   const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce(
     (s, f) =>
-      s + (custoPorFunc.get(f.id)?.total ?? 0) + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0),
+      s + (custoPorFunc.get(f.id)?.total ?? 0) + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0),
     0,
   );
 
@@ -534,17 +509,22 @@ function RelatoriosPage() {
             `${registro.funcionario_id}|${registro.obra_id}|${registro.data}`,
           );
           const detalhe = detalhePorRegistro.get(registro.id);
-          const apuracao = detalhe
+          const apuracaoOriginal = detalhe
             ? {
                 horasNormaisApuradas: detalhe.minutos_normais / 60,
                 horasExtra50Apuradas: detalhe.minutos_he_50 / 60,
                 horasExtra100Apuradas: detalhe.minutos_he_100 / 60,
+                horasSemAdicionalHeApuradas: detalhe.minutos_sem_adicional_he / 60,
               }
             : classificarHorasPorData({
                 data: registro.data,
                 horasNormais: registro.horas_normais,
                 horasExtras: registro.horas_extras,
               });
+          const apuracao = normalizarApuracaoHorasFinanceiras(
+            funcionarioDetalhe.categoria_mo,
+            apuracaoOriginal,
+          );
           const horasExtrasApuradas =
             apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
           return {
@@ -577,7 +557,8 @@ function RelatoriosPage() {
         acc.total +
         registro.apuracao.horasNormaisApuradas +
         registro.apuracao.horasExtra50Apuradas +
-        registro.apuracao.horasExtra100Apuradas,
+        registro.apuracao.horasExtra100Apuradas +
+        registro.apuracao.horasSemAdicionalHeApuradas,
     }),
     { dias: 0, normais: 0, total: 0 },
   );
@@ -747,7 +728,7 @@ function RelatoriosPage() {
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0)}</div>
+                                  <div>{fmtBRL(horasExtrasPorFunc.get(f.id)?.custoHE ?? 0)}</div>
                                   {(horasExtrasPorFunc.get(f.id)?.horas50 ?? 0) +
                                     (horasExtrasPorFunc.get(f.id)?.horas100 ?? 0) >
                                     0 && (
@@ -764,9 +745,7 @@ function RelatoriosPage() {
                                   )}
                                 </TableCell>
                                 <TableCell className="text-right font-semibold">
-                                  {fmtBRL(
-                                    c.total + (horasExtrasPorFunc.get(f.id)?.custoTotal ?? 0),
-                                  )}
+                                  {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0))}
                                 </TableCell>
                               </TableRow>
                             );
@@ -1313,6 +1292,10 @@ function RelatoriosPage() {
                   ["Horas normais", formatarHorasDecimais(resumoHorasDetalhe.normais)],
                   ["HE 50%", formatarHorasDecimais(horasExtrasDetalhe.horas50)],
                   ["HE 100%", formatarHorasDecimais(horasExtrasDetalhe.horas100)],
+                  [
+                    "Horas sem adicional de HE",
+                    formatarHorasDecimais(horasExtrasDetalhe.horasSemAdicionalHe),
+                  ],
                   ["Total de horas", formatarHorasDecimais(resumoHorasDetalhe.total)],
                   ["Custo mensal base", valorCustoDetalhe(custoConsolidadoDetalhe?.custoBase)],
                   ["Remuneração das HE", valorCustoDetalhe(custoConsolidadoDetalhe?.remuneracaoHE)],
@@ -1348,6 +1331,7 @@ function RelatoriosPage() {
                       <TableHead className="text-right">Horas normais</TableHead>
                       <TableHead className="text-right">HE 50%</TableHead>
                       <TableHead className="text-right">HE 100%</TableHead>
+                      <TableHead className="text-right">Sem adicional</TableHead>
                       <TableHead className="text-right">Custo da HE</TableHead>
                       <TableHead>Observação</TableHead>
                     </TableRow>
@@ -1355,7 +1339,7 @@ function RelatoriosPage() {
                   <TableBody>
                     {registrosDetalhe.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
+                        <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
                           Nenhum registro de horas encontrado nesta competência.
                         </TableCell>
                       </TableRow>
@@ -1402,6 +1386,13 @@ function RelatoriosPage() {
                             <TableCell className="text-right">
                               {registro.tipo_registro === "horas"
                                 ? formatarHorasDecimais(registro.apuracao.horasExtra100Apuradas)
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {registro.tipo_registro === "horas"
+                                ? formatarHorasDecimais(
+                                    registro.apuracao.horasSemAdicionalHeApuradas,
+                                  )
                                 : "—"}
                             </TableCell>
                             <TableCell className="text-right">

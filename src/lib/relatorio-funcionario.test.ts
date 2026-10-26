@@ -161,6 +161,10 @@ test("modal preserva demais cards e tabela diária sem refeição", () => {
   assert.doesNotMatch(modal, /horasExtrasDetalhe\.(remuneracao|encargos|provisao)/);
   assert.doesNotMatch(modal.slice(modal.indexOf("<Table>")), /refeição|custoRefeicao/i);
   assert.match(tela, /consolidarCustoFuncionario\(obrasComCusto, funcionarioDetalhe.id\)/);
+  assert.match(tela, /horasExtrasPorFunc\.get\(f.id\)\?\.custoHE/);
+  assert.doesNotMatch(tela, /horasExtrasPorFunc\.get\(f.id\)\?\.custoTotal/);
+  assert.match(tela, /normalizarApuracaoHorasFinanceiras/);
+  assert.ok(modal.includes("Horas sem adicional de HE"));
 });
 
 function apurarHE(registros: RegistroRelatorio[], feriados: string[] = []) {
@@ -337,6 +341,68 @@ test("resumo preserva adicional noturno e linhas distintas do mesmo funcionário
     encargosProvisoesHE: 0,
     custoAdicionalNoturno: 0,
     custoRefeicao: 0,
+    horas50: 0,
+    horas100: 0,
+    horasSemAdicionalHe: 0,
     total: 0,
   });
+});
+
+test("resumo individual herda supervisor sem HE e preserva horas remuneradas e adicional noturno", () => {
+  const centros = consolidarCustosCentros({
+    funcionarios: [{ id: "s", nome: "Supervisor", categoria_mo: "SUPERVISOR II" }],
+    obras: new Map([["a", "A"]]),
+    custos: new Map([["s", custo]]),
+    alocacoes: [
+      { funcionario_id: "s", obra_id: "a", data: "2026-08-08", tipo_mao_obra: "indireta" },
+      { funcionario_id: "s", obra_id: "a", data: "2026-08-09", tipo_mao_obra: "indireta" },
+    ],
+    registros: [
+      {
+        funcionario_id: "s",
+        obra_id: "a",
+        data: "2026-08-08",
+        horas_normais: 0,
+        horas_extras: 2,
+        ausencia: false,
+        detalhe: {
+          minutos_normais: 0,
+          minutos_he_50: 120,
+          minutos_he_100: 0,
+          minutos_sem_adicional_he: 0,
+          minutos_noturnos_reais: 120,
+          minutos_noturnos_remuneraveis: (120 * 60) / 52.5,
+          minutos_noturnos_normais_remuneraveis: 0,
+          minutos_noturnos_he_50_remuneraveis: (120 * 60) / 52.5,
+          minutos_noturnos_he_100_remuneraveis: 0,
+          minutos_noturnos_sem_adicional_he_remuneraveis: 0,
+        },
+      },
+      {
+        funcionario_id: "s",
+        obra_id: "a",
+        data: "2026-08-09",
+        horas_normais: 0,
+        horas_extras: 2,
+        ausencia: false,
+      },
+    ],
+    periodoInicial: "2026-08-01",
+    periodoFinal: "2026-08-31",
+    diasUteis: 22,
+    resolverTipo: () => "MOI",
+    calcularCustoBase: () => custo.total,
+    horasNormaisPadrao: () => 8,
+  }).centros;
+  const resumo = consolidarCustoFuncionario(centros, "s");
+  assert.equal(resumo.horas50, 0);
+  assert.equal(resumo.horas100, 0);
+  assert.equal(resumo.horasSemAdicionalHe, 4);
+  assert.equal(resumo.custoHE, 0);
+  assert.equal(resumo.remuneracaoHE, 0);
+  assert.ok(resumo.custoAdicionalNoturno > 0);
+  assert.equal(
+    resumo.total,
+    resumo.custoBase + resumo.custoAdicionalNoturno + resumo.custoRefeicao,
+  );
 });

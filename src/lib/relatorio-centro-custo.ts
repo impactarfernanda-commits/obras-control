@@ -6,6 +6,7 @@ import {
   classificarHorasPorData,
 } from "./horas-extras.ts";
 import type { DetalheJornadaVisual } from "./horas-visualizacao.ts";
+import { normalizarApuracaoHorasFinanceiras } from "./relatorio-horas-financeiras.ts";
 import {
   categoriaEhAjudante,
   classificarTipoMod,
@@ -384,18 +385,7 @@ export function consolidarCustosCentros(input: Input) {
           horasExtras: registro.horas_extras,
           feriado: input.feriados?.has(registro.data),
         });
-    const apuracao = {
-      horasNormaisApuradas: apuracaoOriginal.horasNormaisApuradas,
-      horasExtra50Apuradas: supervisor ? 0 : apuracaoOriginal.horasExtra50Apuradas,
-      horasExtra100Apuradas: supervisor ? 0 : apuracaoOriginal.horasExtra100Apuradas,
-      horasSemAdicionalHeApuradas:
-        ("horasSemAdicionalHeApuradas" in apuracaoOriginal
-          ? apuracaoOriginal.horasSemAdicionalHeApuradas
-          : 0) +
-        (supervisor
-          ? apuracaoOriginal.horasExtra50Apuradas + apuracaoOriginal.horasExtra100Apuradas
-          : 0),
-    };
+    const apuracao = normalizarApuracaoHorasFinanceiras(funcionario.categoria_mo, apuracaoOriginal);
     const horasExtrasApuradas = apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
     const horasNoturnasRemuneraveis =
       Number(registro.detalhe?.minutos_noturnos_remuneraveis ?? 0) / 60;

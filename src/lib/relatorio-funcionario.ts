@@ -39,6 +39,9 @@ export function consolidarCustoFuncionario(
     encargosProvisoesHE: 0,
     custoAdicionalNoturno: 0,
     custoRefeicao: 0,
+    horas50: 0,
+    horas100: 0,
+    horasSemAdicionalHe: 0,
     total: 0,
   };
   for (const centro of centros) {
@@ -50,6 +53,9 @@ export function consolidarCustoFuncionario(
       resumo.encargosProvisoesHE += linha.encargosProvisoesHE;
       resumo.custoAdicionalNoturno += linha.custoAdicionalNoturno;
       resumo.custoRefeicao += linha.custoRegime;
+      resumo.horas50 += linha.horas50;
+      resumo.horas100 += linha.horas100;
+      resumo.horasSemAdicionalHe += linha.horasSemAdicionalHe;
       resumo.total += linha.total;
     }
   }
