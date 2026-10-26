@@ -124,6 +124,33 @@ test("centro sem HE exporta zero numérico", () => {
   assert.equal(detalhe[1][16], 0);
 });
 
+test("supervisor corrigido exporta HE50, HE100 e Custo HE zerados", () => {
+  const linhaSupervisor = {
+    ...input.centro.linhas[0],
+    funcionarioNome: "Supervisor",
+    funcao: "SUPERVISOR II",
+    horas50: 0,
+    horas100: 0,
+    horasSemAdicionalHe: 8,
+    custoHE: 0,
+    remuneracaoHE: 0,
+    encargosProvisoesHE: 0,
+    total: input.centro.linhas[0].custoBase + input.centro.linhas[0].custoRegime,
+  };
+  const centro = {
+    ...input.centro,
+    custoHE: 0,
+    linhas: [linhaSupervisor],
+  };
+  const { resumo, detalhe } = sheets({ centro });
+
+  assert.equal(resumo[10][1], 0);
+  assert.equal(detalhe[1][11], 0);
+  assert.equal(detalhe[1][12], 0);
+  assert.equal(detalhe[1][13], 8);
+  assert.equal(detalhe[1][16], 0);
+});
+
 test("quantidade variável preserva ordem e alocação parcial sem recalcular custos", () => {
   const parcial = {
     ...input.centro.linhas[0],

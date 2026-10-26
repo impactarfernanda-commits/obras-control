@@ -1,3 +1,5 @@
+import { categoriaEhSupervisor } from "./funcionario-categoria.ts";
+
 const MINUTOS_DIA = 1440;
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -68,15 +70,7 @@ export function diaDaSemanaISO(dataISO: string) {
   return new Date(ano, (mes ?? 1) - 1, dia ?? 1).getDay();
 }
 
-export function funcaoEhSupervisor(funcao: string | null | undefined) {
-  const normalizada = (funcao ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-  return /^SUPERVISOR(?:\s|[-/]|$)/.test(normalizada);
-}
+export const funcaoEhSupervisor = categoriaEhSupervisor;
 
 export function jornadaNormal(dataISO: string): number {
   const dia = diaDaSemanaISO(dataISO);

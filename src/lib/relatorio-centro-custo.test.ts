@@ -48,6 +48,7 @@ function consolidar(
   registros: RegistroRelatorio[],
   listaFuncionarios = funcionarios,
   segmentarMod = true,
+  feriados: ReadonlySet<string> = new Set(),
 ) {
   return consolidarCustosCentros({
     alocacoes,
@@ -68,7 +69,26 @@ function consolidar(
     calcularCustoBase: ({ custoMensal, diasUteis, horasNormais, ausencia }) =>
       ausencia ? 0 : (custoMensal / diasUteis) * ((horasNormais ?? 9) / 9),
     horasNormaisPadrao: () => 9,
+    feriados,
   });
+}
+
+function detalhe(overrides: Partial<NonNullable<RegistroRelatorio["detalhe"]>> = {}) {
+  return {
+    minutos_normais: 0,
+    minutos_he_50: 0,
+    minutos_he_100: 0,
+    minutos_sem_adicional_he: 0,
+    minutos_noturnos_reais: 0,
+    minutos_noturnos_remuneraveis: 0,
+    ...overrides,
+  };
+}
+
+const supervisorII = [{ id: "sup", nome: "Supervisor", categoria_mo: "SUPERVISOR II" }];
+
+function custoBaseEsperado(horas: number) {
+  return (custo.total / 22) * (horas / 9);
 }
 
 test("historico preserva MOD, MOI e Total sem exigir segmentacao", () => {
@@ -433,4 +453,166 @@ test("falta integral não soma horas, produtividade ou custo de jornada", () => 
     ],
   );
   assert.equal(resultado.centros.length, 0);
+});
+
+test("SUPERVISOR II em sábado remunera detalhe correto na base sem HE", () => {
+  const data = "2026-10-03";
+  const centro = consolidar(
+    [alocacao("sup", "o1", data, "indireta")],
+    [{ ...registro("sup", "o1", data, 8), detalhe: detalhe({ minutos_sem_adicional_he: 480 }) }],
+    supervisorII,
+  ).centros[0];
+  const linha = centro.linhas[0];
+
+  assert.equal(linha.horas50, 0);
+  assert.equal(linha.horas100, 0);
+  assert.equal(linha.horasSemAdicionalHe, 8);
+  assert.equal(linha.custoHE, 0);
+  assert.ok(Math.abs(linha.custoBase - custoBaseEsperado(8)) < 1e-10);
+  assert.equal(centro.moi, linha.total);
+  assert.equal(centro.total, linha.total);
+});
+
+test("SUPERVISOR DE MONTAGEM em domingo e feriado permanece sem HE e com custo base", () => {
+  const lista = [
+    { id: "sup-m", nome: "Supervisor Montagem", categoria_mo: "SUPERVISOR DE MONTAGEM" },
+  ];
+  for (const data of ["2026-10-04", "2026-10-12"]) {
+    const centro = consolidar(
+      [alocacao("sup-m", "o1", data, "montagem")],
+      [
+        {
+          ...registro("sup-m", "o1", data, 8),
+          detalhe: detalhe({ minutos_sem_adicional_he: 480 }),
+        },
+      ],
+      lista,
+      true,
+      new Set(["2026-10-12"]),
+    ).centros[0];
+    const linha = centro.linhas[0];
+    assert.equal(linha.horas50, 0, data);
+    assert.equal(linha.horas100, 0, data);
+    assert.equal(linha.custoHE, 0, data);
+    assert.ok(Math.abs(linha.custoBase - custoBaseEsperado(8)) < 1e-10, data);
+    assert.equal(centro.mod, linha.total, data);
+  }
+});
+
+test("supervisor em dia útil recebe normal e excedente sem adicional no custo base", () => {
+  const data = "2026-10-05";
+  const linha = consolidar(
+    [alocacao("sup", "o1", data, "indireta")],
+    [
+      {
+        ...registro("sup", "o1", data, 11),
+        detalhe: detalhe({ minutos_normais: 540, minutos_sem_adicional_he: 120 }),
+      },
+    ],
+    supervisorII,
+  ).centros[0].linhas[0];
+
+  assert.equal(linha.horasNormais, 9);
+  assert.equal(linha.horasSemAdicionalHe, 2);
+  assert.equal(linha.horas50, 0);
+  assert.equal(linha.horas100, 0);
+  assert.equal(linha.custoHE, 0);
+  assert.ok(Math.abs(linha.custoBase - custoBaseEsperado(11)) < 1e-10);
+});
+
+test("fallback legado de supervisor reclassifica sábado e domingo sem criar HE", () => {
+  const centro = consolidar(
+    [
+      alocacao("sup", "o1", "2026-10-03", "indireta"),
+      alocacao("sup", "o1", "2026-10-04", "indireta"),
+    ],
+    [registro("sup", "o1", "2026-10-03", 8), registro("sup", "o1", "2026-10-04", 9)],
+    supervisorII,
+  ).centros[0];
+  const linha = centro.linhas[0];
+
+  assert.equal(linha.horas50, 0);
+  assert.equal(linha.horas100, 0);
+  assert.equal(linha.horasSemAdicionalHe, 17);
+  assert.equal(linha.custoHE, 0);
+  assert.ok(Math.abs(linha.custoBase - custoBaseEsperado(17)) < 1e-10);
+  assert.equal(centro.custoHE, 0);
+  assert.equal(centro.moi, linha.total);
+  assert.equal(centro.total, linha.total);
+});
+
+test("detalhe histórico incorreto de supervisor move HE50 e HE100 para sem adicional", () => {
+  const data = "2026-10-04";
+  const linha = consolidar(
+    [alocacao("sup", "o1", data, "indireta")],
+    [
+      {
+        ...registro("sup", "o1", data, 4.5),
+        detalhe: detalhe({
+          minutos_normais: 90,
+          minutos_he_50: 120,
+          minutos_he_100: 60,
+        }),
+      },
+    ],
+    supervisorII,
+  ).centros[0].linhas[0];
+
+  assert.equal(linha.horas50, 0);
+  assert.equal(linha.horas100, 0);
+  assert.equal(linha.horasSemAdicionalHe, 3);
+  assert.equal(linha.custoHE, 0);
+  assert.ok(Math.abs(linha.custoBase - custoBaseEsperado(4.5)) < 1e-10);
+});
+
+test("supervisor preserva adicional noturno ao reclassificar HE histórica", () => {
+  const data = "2026-10-03";
+  const linha = consolidar(
+    [alocacao("sup", "o1", data, "indireta")],
+    [
+      {
+        ...registro("sup", "o1", data, 2),
+        detalhe: detalhe({
+          minutos_he_50: 120,
+          minutos_noturnos_reais: 120,
+          minutos_noturnos_remuneraveis: 137.142857,
+          minutos_noturnos_he_50_remuneraveis: 137.142857,
+        }),
+      },
+    ],
+    supervisorII,
+  ).centros[0].linhas[0];
+
+  assert.equal(linha.horas50, 0);
+  assert.equal(linha.horas100, 0);
+  assert.equal(linha.custoHE, 0);
+  assert.equal(linha.horasSemAdicionalHe, 2);
+  assert.ok(linha.custoAdicionalNoturno > 0);
+  assert.equal(linha.total, linha.custoBase + linha.custoAdicionalNoturno);
+});
+
+test("funcionário comum mantém HE de sábado, domingo e feriado", () => {
+  const centro = consolidar(
+    [
+      alocacao("f1", "o1", "2026-10-03", "montagem"),
+      alocacao("f1", "o1", "2026-10-04", "montagem"),
+      alocacao("f1", "o1", "2026-10-12", "montagem"),
+    ],
+    [
+      registro("f1", "o1", "2026-10-03", 8),
+      registro("f1", "o1", "2026-10-04", 8),
+      registro("f1", "o1", "2026-10-12", 8),
+    ],
+    funcionarios,
+    true,
+    new Set(["2026-10-12"]),
+  ).centros[0];
+  const linha = centro.linhas[0];
+
+  assert.equal(linha.horas50, 8);
+  assert.equal(linha.horas100, 16);
+  assert.ok(linha.custoHE > 0);
+  assert.equal(centro.custoHE, linha.custoHE);
+  assert.equal(centro.mod, linha.total);
+  assert.equal(centro.total, linha.total);
 });

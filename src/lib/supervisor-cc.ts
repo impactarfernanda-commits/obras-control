@@ -1,21 +1,12 @@
+import { categoriaEhSupervisor, normalizarCategoriaFuncionario } from "./funcionario-categoria.ts";
+
+export { categoriaEhSupervisor, normalizarCategoriaFuncionario };
+
 export const SUPERVISOR_CC_DATA_CORTE = "2026-08-25";
 
 // Suspensao temporaria definida pela direcao. Manter a infraestrutura de vigencias
 // pronta para reativacao alterando somente este sinal.
 export const SUPERVISOR_CC_VIGENCIAS_ATIVAS = false;
-
-export function normalizarCategoriaFuncionario(valor: string | null | undefined) {
-  return (valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-}
-
-export function categoriaEhSupervisor(valor: string | null | undefined) {
-  return /^SUPERVISOR(?:\s|[-/]|$)/.test(normalizarCategoriaFuncionario(valor));
-}
 
 export function supervisorPodeRegistrarTipoNoPeriodo(input: {
   categoria: string | null | undefined;

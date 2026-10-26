@@ -260,11 +260,13 @@ export function consolidarCustosCentros(input: Input) {
     }
 
     const horasRegistradas = registro?.horas_normais ?? input.horasNormaisPadrao(alocacao.data);
-    const apuracao = registro?.detalhe
+    const supervisor = categoriaEhSupervisor(funcionario.categoria_mo);
+    const apuracaoOriginal = registro?.detalhe
       ? {
           horasNormaisApuradas: registro.detalhe.minutos_normais / 60,
           horasExtra50Apuradas: registro.detalhe.minutos_he_50 / 60,
           horasExtra100Apuradas: registro.detalhe.minutos_he_100 / 60,
+          horasSemAdicionalHeApuradas: registro.detalhe.minutos_sem_adicional_he / 60,
         }
       : classificarHorasPorData({
           data: alocacao.data,
@@ -272,11 +274,24 @@ export function consolidarCustosCentros(input: Input) {
           horasExtras: falta ? 0 : registro?.horas_extras,
           feriado: input.feriados?.has(alocacao.data),
         });
+    const apuracao = {
+      ...apuracaoOriginal,
+      horasSemAdicionalHeApuradas:
+        "horasSemAdicionalHeApuradas" in apuracaoOriginal
+          ? apuracaoOriginal.horasSemAdicionalHeApuradas
+          : 0,
+    };
+    const horasBaseRemuneraveis = supervisor
+      ? apuracao.horasNormaisApuradas +
+        apuracao.horasSemAdicionalHeApuradas +
+        apuracao.horasExtra50Apuradas +
+        apuracao.horasExtra100Apuradas
+      : apuracao.horasNormaisApuradas;
     const custoBase = input.calcularCustoBase({
       custoMensal: custo.total,
       diasUteis: input.diasUteis,
       dataISO: alocacao.data,
-      horasNormais: apuracao.horasNormaisApuradas,
+      horasNormais: horasBaseRemuneraveis,
       ausencia: falta || (registro?.ausencia ?? false),
     });
     const totalHorasApuradas =
@@ -352,11 +367,16 @@ export function consolidarCustosCentros(input: Input) {
 
   for (const registro of input.registros) {
     if (registro.tipo_registro != null && registro.tipo_registro !== "horas") continue;
-    const apuracao = registro.detalhe
+    const funcionario = funcMap.get(registro.funcionario_id);
+    const custo = input.custos.get(registro.funcionario_id);
+    if (!funcionario || !custo) continue;
+    const supervisor = categoriaEhSupervisor(funcionario.categoria_mo);
+    const apuracaoOriginal = registro.detalhe
       ? {
           horasNormaisApuradas: registro.detalhe.minutos_normais / 60,
           horasExtra50Apuradas: registro.detalhe.minutos_he_50 / 60,
           horasExtra100Apuradas: registro.detalhe.minutos_he_100 / 60,
+          horasSemAdicionalHeApuradas: registro.detalhe.minutos_sem_adicional_he / 60,
         }
       : classificarHorasPorData({
           data: registro.data,
@@ -364,13 +384,27 @@ export function consolidarCustosCentros(input: Input) {
           horasExtras: registro.horas_extras,
           feriado: input.feriados?.has(registro.data),
         });
+    const apuracao = {
+      horasNormaisApuradas: apuracaoOriginal.horasNormaisApuradas,
+      horasExtra50Apuradas: supervisor ? 0 : apuracaoOriginal.horasExtra50Apuradas,
+      horasExtra100Apuradas: supervisor ? 0 : apuracaoOriginal.horasExtra100Apuradas,
+      horasSemAdicionalHeApuradas:
+        ("horasSemAdicionalHeApuradas" in apuracaoOriginal
+          ? apuracaoOriginal.horasSemAdicionalHeApuradas
+          : 0) +
+        (supervisor
+          ? apuracaoOriginal.horasExtra50Apuradas + apuracaoOriginal.horasExtra100Apuradas
+          : 0),
+    };
     const horasExtrasApuradas = apuracao.horasExtra50Apuradas + apuracao.horasExtra100Apuradas;
     const horasNoturnasRemuneraveis =
       Number(registro.detalhe?.minutos_noturnos_remuneraveis ?? 0) / 60;
-    if (horasExtrasApuradas <= 0 && horasNoturnasRemuneraveis <= 0) continue;
-    const funcionario = funcMap.get(registro.funcionario_id);
-    const custo = input.custos.get(registro.funcionario_id);
-    if (!funcionario || !custo) continue;
+    if (
+      horasExtrasApuradas <= 0 &&
+      apuracao.horasSemAdicionalHeApuradas <= 0 &&
+      horasNoturnasRemuneraveis <= 0
+    )
+      continue;
 
     const alocacao = alocIndex.get(chave(registro.funcionario_id, registro.obra_id, registro.data));
     const tipo = input.resolverTipo(alocacao, funcionario);
@@ -387,7 +421,7 @@ export function consolidarCustosCentros(input: Input) {
     );
     linha.horas50 += apuracao.horasExtra50Apuradas;
     linha.horas100 += apuracao.horasExtra100Apuradas;
-    linha.horasSemAdicionalHe += Number(registro.detalhe?.minutos_sem_adicional_he ?? 0) / 60;
+    linha.horasSemAdicionalHe += apuracao.horasSemAdicionalHeApuradas;
     linha.horasNoturnasRemuneraveis += horasNoturnasRemuneraveis;
     if (registro.detalhe) {
       const custoDetalhado = calcularCustoJornadaDetalhada(custo, {
@@ -395,12 +429,19 @@ export function consolidarCustosCentros(input: Input) {
         horas100: apuracao.horasExtra100Apuradas,
         horasNoturnasNormaisRemuneraveis:
           Number(registro.detalhe.minutos_noturnos_normais_remuneraveis ?? 0) / 60,
-        horasNoturnas50Remuneraveis:
-          Number(registro.detalhe.minutos_noturnos_he_50_remuneraveis ?? 0) / 60,
-        horasNoturnas100Remuneraveis:
-          Number(registro.detalhe.minutos_noturnos_he_100_remuneraveis ?? 0) / 60,
+        horasNoturnas50Remuneraveis: supervisor
+          ? 0
+          : Number(registro.detalhe.minutos_noturnos_he_50_remuneraveis ?? 0) / 60,
+        horasNoturnas100Remuneraveis: supervisor
+          ? 0
+          : Number(registro.detalhe.minutos_noturnos_he_100_remuneraveis ?? 0) / 60,
         horasNoturnasSemHeRemuneraveis:
-          Number(registro.detalhe.minutos_noturnos_sem_adicional_he_remuneraveis ?? 0) / 60,
+          (Number(registro.detalhe.minutos_noturnos_sem_adicional_he_remuneraveis ?? 0) +
+            (supervisor
+              ? Number(registro.detalhe.minutos_noturnos_he_50_remuneraveis ?? 0) +
+                Number(registro.detalhe.minutos_noturnos_he_100_remuneraveis ?? 0)
+              : 0)) /
+          60,
       });
       const fatorReflexos =
         custoDetalhado.remuneracao > 0 ? custoDetalhado.custoTotal / custoDetalhado.remuneracao : 0;
