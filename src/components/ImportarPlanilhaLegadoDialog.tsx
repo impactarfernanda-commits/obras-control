@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/hooks/use-auth";
+import { invalidateFuncionarios, invalidateObras } from "@/lib/reference-data";
 import { supabase } from "@/integrations/supabase/client";
 import {
   buscarCompetenciasFechadasPorDatas,
@@ -1052,6 +1053,8 @@ export function ImportarPlanilhaLegadoDialog() {
       qc.invalidateQueries({ queryKey: ["registros-mes"] });
       qc.invalidateQueries({ queryKey: ["aloc-week"] });
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
+      invalidateObras(qc);
       setOpen(false);
       setPreview(null);
       setFileName("");

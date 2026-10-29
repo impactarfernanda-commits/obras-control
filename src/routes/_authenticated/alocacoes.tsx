@@ -69,6 +69,11 @@ import {
 import { RegistrosGrid } from "@/components/RegistrosGrid";
 import { AusenciaPlanejadaAcoes } from "@/components/AusenciaPlanejadaAcoes";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import {
+  feriadosAtivosOptions,
+  funcionariosSegurosOptions,
+  obrasMinimasOptions,
+} from "@/lib/reference-data";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
 import { categoriaEhSupervisor, supervisorPodeRegistrarTipoNoPeriodo } from "@/lib/supervisor-cc";
@@ -344,27 +349,12 @@ function AlocacoesPage() {
   const periodoLabel = formatarPeriodoCompetencia(competenciaPeriodo);
   const semanaInicial = useMemo(() => semanaInicialDaCompetencia(year, month), [year, month]);
   const { data: categorias } = useCategorias();
-  const feriadosQuery = useQuery({
-    queryKey: ["feriados-obras-control"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("feriados_obras_control" as never)
-        .select("data" as never)
-        .eq("ativo" as never, true);
-      if (error) throw error;
-      return new Set((data as unknown as Array<{ data: string }>).map((item) => item.data));
-    },
-  });
-  const feriados = useMemo(() => feriadosQuery.data ?? new Set<string>(), [feriadosQuery.data]);
+  const feriadosQuery = useQuery(feriadosAtivosOptions(user?.id));
+  const feriados = useMemo(() => new Set(feriadosQuery.data ?? []), [feriadosQuery.data]);
 
   const funcionariosQuery = useQuery({
-    queryKey: ["funcionarios-alocacao-selecao"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) {
-        logAlocacoesQueryError("funcionarios", error);
-        throw error;
-      }
+    ...funcionariosSegurosOptions(user?.id),
+    select: (data) => {
       const normalizados = normalizarFuncionariosAlocacao(data);
       logLinhasFuncionariosIgnoradas(normalizados.ignorados);
       return normalizados.validos;
@@ -405,21 +395,8 @@ function AlocacoesPage() {
     return m;
   }, [funcionarios]);
   const obrasQuery = useQuery({
-    queryKey: ["obras-min"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("obras")
-        .select("id,nome,visivel_obras_control")
-        .order("nome");
-      if (error) {
-        logAlocacoesQueryError("obras", error);
-        throw error;
-      }
-      return data.filter((obra) => obra.visivel_obras_control !== false) as Array<{
-        id: string;
-        nome: string;
-      }>;
-    },
+    ...obrasMinimasOptions(user?.id),
+    select: (data) => data.filter((obra) => obra.visivel_obras_control !== false),
   });
   const obras = obrasQuery.data;
 

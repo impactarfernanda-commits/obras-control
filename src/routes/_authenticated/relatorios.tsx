@@ -57,6 +57,7 @@ import { exportCostCenterXlsx } from "@/lib/relatorio-centro-custo-xlsx";
 import { rotuloFalta, rotuloTipoRegistro } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
+import { funcionariosSegurosOptions, obrasMinimasOptions } from "@/lib/reference-data";
 import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
 import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
 import {
@@ -119,7 +120,7 @@ function payrollRange(year: number, month: number) {
 }
 
 function RelatoriosPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const podeVerFolha = role === "gerente" || role === "diretor";
   const podeVerCentroCusto = role === "coordenador" || podeVerFolha;
   const today = new Date();
@@ -141,23 +142,13 @@ function RelatoriosPage() {
   const { data: categorias } = useCategorias({ enabled: podeVerFolha });
 
   const { data: funcionarios, isLoading: lf } = useQuery({
-    queryKey: ["funcionarios-relatorios"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      return (data ?? []) satisfies FuncRow[];
-    },
-    enabled: podeVerFolha,
+    ...funcionariosSegurosOptions(user?.id),
+    enabled: Boolean(user?.id) && podeVerFolha,
   });
 
   const { data: obras } = useQuery({
-    queryKey: ["obras"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
-      if (error) throw error;
-      return (data ?? []) as ObraRow[];
-    },
-    enabled: podeVerFolha,
+    ...obrasMinimasOptions(user?.id),
+    enabled: Boolean(user?.id) && podeVerFolha,
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);

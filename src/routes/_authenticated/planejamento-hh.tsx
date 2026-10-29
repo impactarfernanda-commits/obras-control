@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { categoriasOptions, obrasMinimasOptions } from "@/lib/reference-data";
 import { fmtBRL } from "@/lib/custos";
 import {
   composicoesNaoReconciliadas,
@@ -77,22 +78,14 @@ const pct = (v: number | null | undefined) => (v == null ? "—" : `${n(v)}%`);
 type Previa = PreviaImportacao & { resolucoesComposicoes?: ResolucaoComposicao[] };
 
 function PlanejamentoPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const financeiro = role === "gerente" || role === "diretor";
   const [obraId, setObraId] = useState("");
   const [dataInicial, setDataInicial] = useState(inicioAno());
   const [dataFinal, setDataFinal] = useState(hoje());
   const { data: obras = [] } = useQuery({
-    queryKey: ["obras-planejamento"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("obras")
-        .select("id,nome")
-        .eq("visivel_obras_control", true)
-        .order("nome");
-      if (error) throw error;
-      return data;
-    },
+    ...obrasMinimasOptions(user?.id),
+    select: (data) => data.filter((obra) => obra.visivel_obras_control === true),
   });
   const consulta = useQuery({
     queryKey: ["planejamento-hh", obraId, dataInicial, dataFinal],
@@ -430,6 +423,7 @@ function Resumo({
 }
 
 function ImportarBaseline({ obraId }: { obraId: string }) {
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [previa, setPrevia] = useState<Previa | null>(null);
@@ -440,14 +434,7 @@ function ImportarBaseline({ obraId }: { obraId: string }) {
   const [resolucoesComposicoes, setResolucoesComposicoes] = useState<ResolucaoComposicao[]>([]);
   const [baselineIdSalvo, setBaselineIdSalvo] = useState<string | null>(null);
   const [alteracoesPendentes, setAlteracoesPendentes] = useState(false);
-  const { data: categorias = [] } = useQuery({
-    queryKey: ["categorias-mapeamento-hh"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("categorias").select("nome,tipo").order("nome");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const { data: categorias = [] } = useQuery(categoriasOptions(user?.id));
   const rascunho = useQuery({
     queryKey: ["rascunho-planejamento-hh", obraId],
     queryFn: () => getRascunhoPlanejamentoHH({ data: { obraId } }),

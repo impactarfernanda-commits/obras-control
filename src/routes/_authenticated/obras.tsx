@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/hooks/use-auth";
+import { invalidateObras, obrasCompletasOptions } from "@/lib/reference-data";
 import { supabase } from "@/integrations/supabase/client";
 import { calcularCompetencia, formatarPeriodoCompetencia } from "@/lib/competencias";
 import {
@@ -146,15 +147,8 @@ function ObrasPage() {
   const competenciaAtual = useMemo(() => calcularCompetencia(dataLocalISO(new Date())), []);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["obras"],
-    queryFn: async () => {
-      const { data: obras, error } = await supabase
-        .from("obras")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (obras as Obra[]).filter((obra) => obra.visivel_obras_control !== false);
-    },
+    ...obrasCompletasOptions(user?.id),
+    select: (obras) => (obras as Obra[]).filter((obra) => obra.visivel_obras_control !== false),
   });
 
   const form = useForm<FormVals>({
@@ -199,6 +193,7 @@ function ObrasPage() {
       toast.success("Centro de custo atualizado");
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
+      invalidateObras(queryClient);
       setFormOpen(false);
       setEditing(null);
     },
@@ -222,6 +217,7 @@ function ObrasPage() {
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
       queryClient.invalidateQueries({ queryKey: ["obras-planejamento"] });
+      invalidateObras(queryClient);
       setCreateOpen(false);
       createForm.reset();
     },
@@ -238,6 +234,7 @@ function ObrasPage() {
       toast.success("Centro de custo removido");
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
+      invalidateObras(queryClient);
     },
     onError: (error: { code?: string | null; message?: string | null }) =>
       toast.error(mensagemErroExclusaoCentroCusto(error)),
@@ -252,6 +249,7 @@ function ObrasPage() {
       toast.success("Status atualizado");
       queryClient.invalidateQueries({ queryKey: ["obras"] });
       queryClient.invalidateQueries({ queryKey: ["obras-min"] });
+      invalidateObras(queryClient);
     },
     onError: (error: Error) => toast.error(error.message || "Erro ao atualizar status"),
   });

@@ -1,25 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { logConfigQueryError } from "@/lib/configuracoes-runtime";
+import { useAuth } from "@/hooks/use-auth";
+import { categoriasOptions, fetchCategorias } from "@/lib/reference-data";
 
 export type CategoriaTipo = "MOI" | "MOD";
 export type Categoria = { nome: string; tipo: CategoriaTipo };
 
 export function useCategorias(options?: { configContext?: boolean; enabled?: boolean }) {
+  const { user } = useAuth();
+  const canonical = categoriasOptions(user?.id);
   return useQuery({
-    queryKey: ["categorias"],
-    enabled: options?.enabled ?? true,
+    ...canonical,
+    enabled: Boolean(user?.id) && (options?.enabled ?? true),
     queryFn: async (): Promise<Categoria[]> => {
-      const { data, error } = await supabase
-        .from("categorias")
-        .select("nome, tipo")
-        .order("tipo", { ascending: true })
-        .order("nome", { ascending: true });
-      if (error) {
+      try {
+        return await fetchCategorias();
+      } catch (error) {
         if (options?.configContext) logConfigQueryError("categorias", error);
         throw error;
       }
-      return (data ?? []).map((row) => ({ nome: row.nome, tipo: row.tipo as CategoriaTipo }));
     },
   });
 }

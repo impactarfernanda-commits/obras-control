@@ -33,6 +33,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtBRL } from "@/lib/custos";
+import { obrasMinimasOptions } from "@/lib/reference-data";
 
 export const Route = createFileRoute("/_authenticated/custos")({ component: CustosPage });
 
@@ -79,14 +80,7 @@ function CustosPage() {
   const [confirmDel, setConfirmDel] = useState<Lancamento | null>(null);
   const [catOpen, setCatOpen] = useState(false);
 
-  const { data: obras } = useQuery({
-    queryKey: ["obras-min"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
-      if (error) throw error;
-      return data as Obra[];
-    },
-  });
+  const { data: obras } = useQuery(obrasMinimasOptions(user?.id));
 
   const { data: categorias } = useQuery({
     queryKey: ["custos-categorias"],

@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import { funcionariosSegurosOptions, obrasMinimasOptions } from "@/lib/reference-data";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -140,6 +142,7 @@ type CustoIndireto = {
 type Categoria = { id: string; nome: string };
 
 function DashboardPage() {
+  const { user } = useAuth();
   // ---------- Filters ----------
   const [dataIni, setDataIni] = useState<string>(monthsBack(5));
   const [dataFim, setDataFim] = useState<string>(todayISO());
@@ -151,23 +154,9 @@ function DashboardPage() {
   const { data: segurosVida } = useSegurosVida();
   const { data: categoriasMO } = useCategorias();
 
-  const { data: obras } = useQuery({
-    queryKey: ["obras-min"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("obras").select("id,nome").order("nome");
-      if (error) throw error;
-      return data as ObraRow[];
-    },
-  });
+  const { data: obras } = useQuery(obrasMinimasOptions(user?.id));
 
-  const { data: funcionarios, isLoading: lf } = useQuery({
-    queryKey: ["funcionarios-dash"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      return data satisfies FuncRow[];
-    },
-  });
+  const { data: funcionarios, isLoading: lf } = useQuery(funcionariosSegurosOptions(user?.id));
 
   const { data: alocacoes, isLoading: la } = useQuery({
     queryKey: ["aloc-dash", dataIni, dataFim],

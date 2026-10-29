@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Loader2, Check } from "lucide
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +23,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { obrasMinimasOptions } from "@/lib/reference-data";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
 import {
@@ -119,6 +121,7 @@ function cellStatus(r: Registro | undefined): CellStatus {
 
 // ---------- page ----------
 function RegistrosPage() {
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()));
   const [obraId, setObraId] = useState<string>("");
@@ -133,15 +136,8 @@ function RegistrosPage() {
   const cycleEndISO = isoDate(cycle.end);
 
   const { data: obras } = useQuery({
-    queryKey: ["obras-min"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("obras")
-        .select("id,nome,visivel_obras_control")
-        .order("nome");
-      if (error) throw error;
-      return data.filter((obra) => obra.visivel_obras_control !== false);
-    },
+    ...obrasMinimasOptions(user?.id),
+    select: (data) => data.filter((obra) => obra.visivel_obras_control !== false),
   });
 
   useEffect(() => {

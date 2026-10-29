@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
 import { FechamentoCompetenciaCard } from "@/components/FechamentoCompetenciaCard";
+import { invalidateCategorias } from "@/lib/reference-data";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,7 @@ function ConfiguracoesPage() {
       setNovoNome("");
       setNovoTipo("MOD");
       qc.invalidateQueries({ queryKey: ["categorias"] });
+      invalidateCategorias(qc);
       qc.invalidateQueries({ queryKey: ["categoria_salarios"] });
     },
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao criar função"),
@@ -145,6 +147,7 @@ function ConfiguracoesPage() {
     onSuccess: () => {
       toast.success("Função excluída");
       qc.invalidateQueries({ queryKey: ["categorias"] });
+      invalidateCategorias(qc);
       qc.invalidateQueries({ queryKey: ["categoria_salarios"] });
     },
     onError: (e: ErrorLike) => toast.error(e.message ?? "Erro ao excluir"),

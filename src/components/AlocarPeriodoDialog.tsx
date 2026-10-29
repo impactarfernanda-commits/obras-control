@@ -29,6 +29,7 @@ import {
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { useAuth } from "@/hooks/use-auth";
 import { usePersistentDraft } from "@/hooks/use-persistent-draft";
+import { feriadosAtivosOptions, funcionariosSegurosOptions } from "@/lib/reference-data";
 import { validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularJornadaDetalhada } from "@/lib/jornada-horas";
 import {
@@ -198,24 +199,8 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
   }, [dataFim, dataInicio, persistDraft, especialidadeAjudante, funcionarioId, modo, tipoRegistro]);
 
   const { data: funcionarios } = useQuery({
-    queryKey: ["funcionarios-alocar-periodo-base-segura"],
-    enabled: open,
-    refetchOnMount: "always",
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      const arr = data as unknown as Array<{
-        id: string;
-        nome: string;
-        categoria_mo: string | null;
-        ativo: boolean;
-        data_admissao: string | null;
-        data_desligamento: string | null;
-        deleted_at: string | null;
-        visivel_obras_control: boolean | null;
-      }>;
-      return arr;
-    },
+    ...funcionariosSegurosOptions(user?.id),
+    enabled: open && Boolean(user?.id),
   });
   const funcionariosElegiveis = useMemo(
     () =>
@@ -611,7 +596,7 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
         return;
       }
 
-      const [existentesAlocacao, existentesRegistro, feriadosResult] = await Promise.all([
+      const [existentesAlocacao, existentesRegistro, feriadosData] = await Promise.all([
         supabase
           .from("alocacoes")
           .select("id,data")
@@ -624,23 +609,17 @@ export function AlocarPeriodoDialog({ obraId, obraNome }: Props) {
           .eq("funcionario_id", funcionarioId)
           .eq("obra_id", obraId)
           .in("data", diasAlvo),
-        supabase
-          .from("feriados_obras_control" as never)
-          .select("data" as never)
-          .eq("ativo" as never, true),
+        qc.fetchQuery(feriadosAtivosOptions(user?.id)),
       ]);
       if (existentesAlocacao.error) throw existentesAlocacao.error;
       if (existentesRegistro.error) throw existentesRegistro.error;
-      if (feriadosResult.error) throw feriadosResult.error;
       const alocacaoPorData = new Map(
         (existentesAlocacao.data ?? []).map((item) => [item.data, item.id]),
       );
       const registroPorData = new Map(
         (existentesRegistro.data ?? []).map((item) => [item.data, item.id]),
       );
-      const feriados = new Set(
-        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
-      );
+      const feriados = new Set(feriadosData);
       const itens = diasAlvo.map((data) => {
         const horaSaida = diaDaSemana(data) === 5 ? "16:00" : "17:00";
         const detalhe = calcularJornadaDetalhada({

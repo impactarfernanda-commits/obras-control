@@ -67,6 +67,11 @@ import {
   canReactivateEmployee,
 } from "@/lib/access-control";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  funcionariosSegurosOptions,
+  invalidateFuncionarios,
+  obrasMinimasOptions,
+} from "@/lib/reference-data";
 import { calcularCusto, ENCARGOS_PCT, fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -146,7 +151,7 @@ function databaseError(error: unknown) {
 
 function FuncionariosPage() {
   const qc = useQueryClient();
-  const { isManagerOrAbove, role } = useAuth();
+  const { isManagerOrAbove, role, user } = useAuth();
   const canSeeSalario = isManagerOrAbove;
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<"all" | "MOI" | "MOD">("all");
@@ -175,14 +180,7 @@ function FuncionariosPage() {
     data: funcionarios,
     isLoading,
     error: funcionariosError,
-  } = useQuery({
-    queryKey: ["funcionarios-cadastro"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      return data satisfies Array<Funcionario>;
-    },
-  });
+  } = useQuery(funcionariosSegurosOptions(user?.id));
 
   const { data: tabelaSalarios } = useQuery({
     queryKey: ["categoria_salarios"],
@@ -198,15 +196,8 @@ function FuncionariosPage() {
   });
 
   const { data: obras } = useQuery({
-    queryKey: ["obras"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("obras")
-        .select("id,nome,visivel_obras_control")
-        .order("nome");
-      if (error) throw error;
-      return data.filter((obra) => obra.visivel_obras_control !== false);
-    },
+    ...obrasMinimasOptions(user?.id),
+    select: (data) => data.filter((obra) => obra.visivel_obras_control !== false),
   });
 
   const { data: currentAlocs } = useQuery({
@@ -392,6 +383,7 @@ function FuncionariosPage() {
     onSuccess: () => {
       toast.success(editing ? "Funcionário atualizado" : "Funcionário cadastrado");
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
       setOpen(false);
       setEditing(null);
       form.reset();
@@ -443,6 +435,7 @@ function FuncionariosPage() {
       setSelectedIds(new Set());
       setBulkOpen(false);
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
     },
     onError: (error: unknown) =>
       toast.error(databaseError(error).message || "Erro ao definir regime em lote"),
@@ -474,6 +467,7 @@ function FuncionariosPage() {
       toast.success("Funcionário excluído. O histórico foi preservado.");
       setDeleting(null);
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
       qc.invalidateQueries({ queryKey: ["funcionarios-min-all"] });
     },
     onError: (error: unknown) =>
@@ -517,6 +511,7 @@ function FuncionariosPage() {
       setDeactivating(null);
       setTerminationDate("");
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
       qc.invalidateQueries({ queryKey: ["funcionarios-min-all"] });
     },
     onError: (error: unknown) => {
@@ -551,6 +546,7 @@ function FuncionariosPage() {
       setReactivating(null);
       setReactivationReason("");
       qc.invalidateQueries({ queryKey: ["funcionarios-cadastro"] });
+      invalidateFuncionarios(qc);
       qc.invalidateQueries({ queryKey: ["funcionarios-min-all"] });
       qc.invalidateQueries({ queryKey: ["funcionarios-alocacao-selecao"] });
       qc.invalidateQueries({ queryKey: ["funcionarios-alocar-periodo-base-segura"] });

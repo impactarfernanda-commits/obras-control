@@ -8,10 +8,12 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { highestRole, type Role } from "@/lib/access-control";
 import { portalLogoutUrl } from "@/lib/sso";
 import { preserveAuthenticatedUser } from "@/lib/auth-session";
+import { removeReferenceDataForUser } from "@/lib/reference-data";
 
 interface AuthContextValue {
   user: User | null;
@@ -31,6 +33,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
@@ -43,11 +46,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const userVersion = useRef(0);
   const signingOut = useRef(false);
+  const cachedUserId = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
     const applySession = (s: Session | null) => {
       if (!active) return;
+      const nextUserId = s?.user.id ?? null;
+      if (cachedUserId.current && cachedUserId.current !== nextUserId) {
+        removeReferenceDataForUser(queryClient, cachedUserId.current);
+      }
+      cachedUserId.current = nextUserId;
       setSession(s);
       setUser((current) => preserveAuthenticatedUser(current, s?.user ?? null));
       setAuthStatus(s ? "authenticated" : "unauthenticated");
@@ -79,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, [authAttempt]);
+  }, [authAttempt, queryClient]);
 
   useEffect(() => {
     if (!user) {
@@ -148,6 +157,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await supabase.auth.signOut({ scope: "local" });
       } finally {
+        if (cachedUserId.current) {
+          removeReferenceDataForUser(queryClient, cachedUserId.current);
+          cachedUserId.current = null;
+        }
         userVersion.current += 1;
         setSession(null);
         setUser(null);

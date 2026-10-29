@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { funcionariosSegurosOptions } from "@/lib/reference-data";
 import { FuncionarioSearchSelect } from "@/components/FuncionarioSearchSelect";
 import { dataLancamentoFutura, validarDataLancamento } from "@/lib/data-lancamento";
 import { funcionarioElegivelNoPeriodo } from "@/lib/funcionarios";
@@ -126,23 +127,7 @@ export function RegistrosGrid({ obraId, categorias, initialWeekStart, onAddRegis
   const lastDay = isoDate(days[6]);
 
   // nomes seguros (visível a assistentes)
-  const { data: funcionariosAll } = useQuery({
-    queryKey: ["funcionarios-registros-selecao"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("obras_control_funcionarios_safe");
-      if (error) throw error;
-      return data as unknown as Array<{
-        id: string;
-        nome: string;
-        categoria_mo: string | null;
-        ativo: boolean;
-        data_admissao: string | null;
-        data_desligamento: string | null;
-        deleted_at: string | null;
-        visivel_obras_control: boolean | null;
-      }>;
-    },
-  });
+  const { data: funcionariosAll } = useQuery(funcionariosSegurosOptions(user?.id));
   const infoById = useMemo(() => {
     const m = new Map<
       string,

@@ -16,6 +16,7 @@ import {
 } from "@/lib/copiar-dia-anterior";
 import { ALOCACAO_ACTION_BUTTON_CLASS } from "@/lib/alocacoes-runtime";
 import { useAuth } from "@/hooks/use-auth";
+import { feriadosAtivosOptions, funcionariosSegurosOptions } from "@/lib/reference-data";
 import { usePersistentDraft } from "@/hooks/use-persistent-draft";
 import { dataLocalHoje, validarDataLancamento } from "@/lib/data-lancamento";
 import { calcularCompetencia } from "@/lib/competencias";
@@ -246,23 +247,18 @@ export function CopiarDiaAnteriorDialog({
           .gte("data", competenciaDestino.data_inicio)
           .lt("data", destino)
           .not("especialidade_ajudante", "is", null),
-        supabase.rpc("obras_control_funcionarios_safe"),
-        supabase
-          .from("feriados_obras_control" as never)
-          .select("data" as never)
-          .eq("ativo" as never, true),
+        qc.fetchQuery(funcionariosSegurosOptions(user?.id)),
+        qc.fetchQuery(feriadosAtivosOptions(user?.id)),
       ]);
       if (resumoResult.error) throw resumoResult.error;
       if (origemResult.error) throw origemResult.error;
       if (registrosOrigemResult.error) throw registrosOrigemResult.error;
       if (historicoResult.error) throw historicoResult.error;
-      if (funcionariosResult.error) throw funcionariosResult.error;
-      if (feriadosResult.error) throw feriadosResult.error;
       const resumo = resumoResult.data as unknown as ResumoCopiaDia;
       const categorias = new Map(
-        (
-          funcionariosResult.data as unknown as Array<{ id: string; categoria_mo: string | null }>
-        ).map((funcionario) => [funcionario.id, funcionario.categoria_mo]),
+        (funcionariosResult as Array<{ id: string; categoria_mo: string | null }>).map(
+          (funcionario) => [funcionario.id, funcionario.categoria_mo],
+        ),
       );
       const origens = new Map(
         (origemResult.data ?? []).map((alocacao) => [alocacao.funcionario_id, alocacao]),
@@ -299,9 +295,7 @@ export function CopiarDiaAnteriorDialog({
         }
         return item;
       });
-      const feriadosPrevia = new Set(
-        (feriadosResult.data as unknown as Array<{ data: string }>).map((item) => item.data),
-      );
+      const feriadosPrevia = new Set(feriadosResult);
       const funcoesPrevia = Object.fromEntries(categorias);
       const rascunhosPrevia: Record<string, JornadaCopiaRascunho> = {};
       setEscolhas({});
