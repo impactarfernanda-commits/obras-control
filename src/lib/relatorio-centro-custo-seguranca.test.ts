@@ -53,11 +53,11 @@ test("separa acesso a folha individual do acesso ao centro de custo", () => {
   );
   assert.match(route, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
   assert.match(route, /const podeVerCentroCusto = role === "coordenador" \|\| podeVerFolha/);
-  assert.match(route, /useBeneficios\(\{ enabled: podeVerFolha \}\)/);
+  assert.match(route, /useBeneficios\(\{ enabled: consultasAtivas\.folha \}\)/);
   assert.match(route, /getRelatorioCentrosCusto/);
   assert.match(
     route,
-    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerCentroCusto/,
+    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: consultasAtivas\.centros/,
   );
   assert.match(
     route,

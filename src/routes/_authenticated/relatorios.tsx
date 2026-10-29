@@ -69,6 +69,11 @@ import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import { consolidarCustoFuncionario } from "@/lib/relatorio-funcionario";
 import { normalizarApuracaoHorasFinanceiras } from "@/lib/relatorio-horas-financeiras";
 import { RelatorioAlocacaoCentroCusto } from "@/components/RelatorioAlocacaoCentroCusto";
+import {
+  abaInicialRelatorios,
+  consultasRelatoriosPorAba,
+  type AbaRelatorios,
+} from "@/lib/relatorios-carregamento";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -123,6 +128,8 @@ function RelatoriosPage() {
   const { role, user } = useAuth();
   const podeVerFolha = role === "gerente" || role === "diretor";
   const podeVerCentroCusto = role === "coordenador" || podeVerFolha;
+  const [abaAtiva, setAbaAtiva] = useState<AbaRelatorios>(() => abaInicialRelatorios(role));
+  const consultasAtivas = consultasRelatoriosPorAba(role, abaAtiva);
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -137,18 +144,18 @@ function RelatoriosPage() {
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
   const [exportandoCentro, setExportandoCentro] = useState(false);
 
-  const { data: beneficios } = useBeneficios({ enabled: podeVerFolha });
-  const { data: segurosVida } = useSegurosVida({ enabled: podeVerFolha });
-  const { data: categorias } = useCategorias({ enabled: podeVerFolha });
+  const { data: beneficios } = useBeneficios({ enabled: consultasAtivas.folha });
+  const { data: segurosVida } = useSegurosVida({ enabled: consultasAtivas.folha });
+  const { data: categorias } = useCategorias({ enabled: consultasAtivas.folha });
 
   const { data: funcionarios, isLoading: lf } = useQuery({
     ...funcionariosSegurosOptions(user?.id),
-    enabled: Boolean(user?.id) && podeVerFolha,
+    enabled: Boolean(user?.id) && consultasAtivas.folha,
   });
 
   const { data: obras } = useQuery({
     ...obrasMinimasOptions(user?.id),
-    enabled: Boolean(user?.id) && podeVerFolha,
+    enabled: Boolean(user?.id) && consultasAtivas.folha,
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);
@@ -173,7 +180,7 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
-    enabled: podeVerFolha,
+    enabled: consultasAtivas.folha,
   });
 
   const { data: registros, isLoading: lr } = useQuery({
@@ -192,7 +199,7 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
-    enabled: podeVerFolha,
+    enabled: consultasAtivas.folha,
   });
 
   const { data: detalhes } = useQuery({
@@ -208,7 +215,7 @@ function RelatoriosPage() {
       if (error) throw error;
       return data as unknown as Array<DetalheJornadaVisual & { registro_horas_id: string }>;
     },
-    enabled: podeVerFolha,
+    enabled: consultasAtivas.folha,
   });
   const detalhePorRegistro = useMemo(
     () => new Map((detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe])),
@@ -222,12 +229,12 @@ function RelatoriosPage() {
       getRelatorioSemAlocacao({
         data: { inicio: start, fim: end, referencia: end },
       }),
-    enabled: !competenciaSemDadosConsultaveis,
+    enabled: consultasAtivas.semAlocacao && !competenciaSemDadosConsultaveis,
   });
   const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
     queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
-    enabled: podeVerCentroCusto,
+    enabled: consultasAtivas.centros,
   });
 
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
@@ -625,7 +632,8 @@ function RelatoriosPage() {
       />
 
       <Tabs
-        defaultValue={podeVerFolha ? "funcionarios" : podeVerCentroCusto ? "obras" : "sem-alocacao"}
+        value={abaAtiva}
+        onValueChange={(value) => setAbaAtiva(value as AbaRelatorios)}
         className="space-y-4"
       >
         <TabsList>

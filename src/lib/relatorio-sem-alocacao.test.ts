@@ -227,10 +227,9 @@ test("todas as roles internas acessam o relatorio operacional", () => {
     assert.match(servidor, new RegExp(`role === "${role}"`));
     assert.match(navegacao, new RegExp(`"${role}"`));
   }
-  assert.match(
-    tela,
-    /defaultValue=\{podeVerFolha \? "funcionarios" : podeVerCentroCusto \? "obras" : "sem-alocacao"\}/,
-  );
+  assert.match(tela, /useState<AbaRelatorios>\(\(\) => abaInicialRelatorios\(role\)\)/);
+  assert.match(tela, /value=\{abaAtiva\}/);
+  assert.match(tela, /onValueChange=\{\(value\) => setAbaAtiva\(value as AbaRelatorios\)\}/);
   for (const roleExterna of ["cliente", "externo", "visualizador"])
     assert.doesNotMatch(servidor, new RegExp(`role === "${roleExterna}"`));
 });
@@ -252,7 +251,7 @@ test("matriz preserva centro de custo do coordenador sem liberar folha individua
   );
   assert.match(
     tela,
-    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: podeVerCentroCusto/,
+    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: consultasAtivas\.centros/,
   );
   for (const role of ["assistente", "supervisor", "cliente", "externo"])
     assert.doesNotMatch(financeiro, new RegExp(`role === "${role}"`));
