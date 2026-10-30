@@ -141,10 +141,11 @@ test("permissões mantêm folha salarial restrita e DTO compartilhado sem salár
     assert.equal(["gerente", "diretor", "coordenador"].includes(role), acesso.centro, role);
   }
   assert.match(tela, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
-  assert.match(servidor, /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/);
+  assert.match(servidor, /ROLES_CENTRO_CUSTO = \["coordenador", "gerente", "diretor"\]/);
+  assert.match(servidor, /ROLES_FINANCEIRO_COMPLETO = \["gerente", "diretor"\]/);
   const dto = servidor.slice(
     servidor.indexOf("export type RelatorioCentrosCustoDTO"),
-    servidor.indexOf("const inputSchema"),
+    servidor.indexOf("export type RelatorioFinanceiroCompletoDTO"),
   );
   for (const sensivel of [
     "salario",
@@ -162,8 +163,12 @@ test("permissões mantêm folha salarial restrita e DTO compartilhado sem salár
     /projecaoFolha: ProjecaoFinanceiraFuncionarioInterna\[\] \| null/,
   );
   assert.doesNotMatch(tela, /ProjecaoFinanceiraFuncionarioInterna|totalMensalIntegral/);
-  assert.match(servidor, /\{ incluirProjecaoFolha: false \}/);
-  assert.doesNotMatch(servidor, /incluirProjecaoFolha: true/);
+  const endpointCentro = servidor.slice(
+    servidor.indexOf("export const getRelatorioCentrosCusto"),
+    servidor.indexOf("export const getRelatorioFinanceiroCompleto"),
+  );
+  assert.match(endpointCentro, /incluirProjecaoFolha: false/);
+  assert.doesNotMatch(endpointCentro, /incluirProjecaoFolha: true/);
 });
 
 function projecaoFuturaSomenteTeste(centros: CentroConsolidado[], funcionarioId: string) {

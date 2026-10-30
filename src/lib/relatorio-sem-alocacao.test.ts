@@ -235,10 +235,8 @@ test("todas as roles internas acessam o relatorio operacional", () => {
 });
 
 test("matriz preserva centro de custo do coordenador sem liberar folha individual", () => {
-  assert.match(
-    financeiro,
-    /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/,
-  );
+  assert.match(financeiro, /ROLES_CENTRO_CUSTO = \["coordenador", "gerente", "diretor"\]/);
+  assert.match(financeiro, /ROLES_FINANCEIRO_COMPLETO = \["gerente", "diretor"\]/);
   assert.match(tela, /const podeVerFolha = role === "gerente" \|\| role === "diretor"/);
   assert.match(tela, /const podeVerCentroCusto = role === "coordenador" \|\| podeVerFolha/);
   assert.match(
@@ -254,7 +252,7 @@ test("matriz preserva centro de custo do coordenador sem liberar folha individua
     /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: consultasAtivas\.centros/,
   );
   for (const role of ["assistente", "supervisor", "cliente", "externo"])
-    assert.doesNotMatch(financeiro, new RegExp(`role === "${role}"`));
+    assert.doesNotMatch(financeiro, new RegExp(`ROLES_[A-Z_]+ = \\[.*"${role}"`));
 });
 
 test("Excel Sem alocacao contem somente campos operacionais", () => {

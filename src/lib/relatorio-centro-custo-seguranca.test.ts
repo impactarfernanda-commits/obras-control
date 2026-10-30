@@ -78,7 +78,8 @@ test("DTO publico nao declara campos de folha", () => {
     source.match(/export type RelatorioCentrosCustoDTO = \{([^;]+;){4}[^}]*\}/s)?.[0] ?? "";
   for (const proibido of ["salario", "beneficios", "seguroVida", "encargos", "prov13"])
     assert.doesNotMatch(dto, new RegExp(proibido, "i"));
-  assert.match(source, /role === "coordenador" \|\| role === "gerente" \|\| role === "diretor"/);
+  assert.match(source, /ROLES_CENTRO_CUSTO = \["coordenador", "gerente", "diretor"\]/);
+  assert.match(source, /ROLES_FINANCEIRO_COMPLETO = \["gerente", "diretor"\]/);
   for (const role of ["assistente", "supervisor", "cliente", "externo"])
-    assert.doesNotMatch(source, new RegExp(`role === "${role}"`));
+    assert.doesNotMatch(source, new RegExp(`ROLES_[A-Z_]+ = \\[.*"${role}"`));
 });
