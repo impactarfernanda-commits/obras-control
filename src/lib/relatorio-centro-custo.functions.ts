@@ -1,42 +1,25 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import {
-  calcularCusto,
-  custoDoDia,
-  diasUteisNoIntervalo,
-  horasPadraoDoDia,
-  type Beneficios,
-} from "@/lib/custos-core";
-import { tipoCategoria, type Categoria } from "@/lib/categorias-core";
-import { competenciaUsaSegmentacaoMod } from "@/lib/especialidade-ajudante";
+import { type Beneficios } from "@/lib/custos-core";
+import type { Categoria } from "@/lib/categorias-core";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 import { SUPERVISOR_CC_VIGENCIAS_ATIVAS } from "@/lib/supervisor-cc";
+import type { AlocacaoRelatorio, RegistroRelatorio } from "@/lib/relatorio-centro-custo";
 import {
-  consolidarCustosCentros,
-  type AlocacaoRelatorio,
-  type RegistroRelatorio,
-} from "@/lib/relatorio-centro-custo";
+  processarFinanceiroRelatoriosInterno,
+  type FuncionarioFinanceiroInterno,
+} from "@/lib/relatorio-financeiro-interno.server";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
 import type { RegimeVigencia } from "@/lib/regimes";
 import type { VigenciaCentroCusto } from "@/lib/supervisor-cc";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
-type FuncionarioInterno = {
-  id: string;
-  nome: string;
-  categoria_mo: string;
-  salario: number | null;
-  deleted_at: string | null;
-  visivel_obras_control: boolean | null;
-  data_admissao: string | null;
-  data_desligamento: string | null;
-};
 export type RelatorioCentrosCustoDTO = {
   competencia: string;
   periodoInicial: string;
   periodoFinal: string;
-  centros: ReturnType<typeof consolidarCustosCentros>["centros"];
+  centros: ReturnType<typeof processarFinanceiroRelatoriosInterno>["consolidacao"]["centros"];
   avisos: string[];
   segmentarMod: boolean;
 };
@@ -54,7 +37,7 @@ export function periodoFolha(competencia: string) {
 
 export function montarRelatorioCentrosCusto(input: {
   competencia: string;
-  funcionarios: FuncionarioInterno[];
+  funcionarios: FuncionarioFinanceiroInterno[];
   beneficios: Beneficios | null;
   seguros: Array<{ categoria: string; seguro_vida: number | null }>;
   categorias: Categoria[];
@@ -73,57 +56,19 @@ export function montarRelatorioCentrosCusto(input: {
   vigenciasCentroCusto?: VigenciaCentroCusto[];
 }): RelatorioCentrosCustoDTO {
   const periodo = periodoFolha(input.competencia);
-  const segmentarMod = competenciaUsaSegmentacaoMod(input.competencia);
-  const funcionarios = input.funcionarios.filter(
-    (f) => f.deleted_at == null && f.visivel_obras_control !== false,
+  const { consolidacao, segmentarMod } = processarFinanceiroRelatoriosInterno(
+    { ...input, periodo },
+    { incluirProjecaoFolha: false },
   );
-  const seguros = new Map(input.seguros.map((r) => [r.categoria, Number(r.seguro_vida ?? 0)]));
-  const custos = new Map(
-    funcionarios.map((f) => [
-      f.id,
-      calcularCusto(f.salario, input.beneficios, seguros.get(f.categoria_mo) ?? 0),
-    ]),
-  );
-  const detalhePorRegistro = new Map(
-    (input.detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe]),
-  );
-  const registros = input.registros.map((registro) => ({
-    ...registro,
-    detalhe: registro.id ? (detalhePorRegistro.get(registro.id) ?? null) : null,
-  }));
-  const resultado = consolidarCustosCentros({
-    alocacoes: input.alocacoes,
-    registros,
-    funcionarios,
-    custos,
-    obras: new Map(input.obras.map((obra) => [obra.id, obra.nome])),
-    diasUteis: diasUteisNoIntervalo(periodo.startDate, periodo.endDate),
-    resolverTipo: (alocacao, funcionario) => {
-      if (alocacao?.tipo_mao_obra === "montagem" || alocacao?.tipo_mao_obra === "civil")
-        return "MOD";
-      if (alocacao?.tipo_mao_obra === "indireta") return "MOI";
-      return tipoCategoria(funcionario.categoria_mo, input.categorias) ?? "MOD";
-    },
-    calcularCustoBase: (args) => custoDoDia({ ...args, horasExtras: 0 }),
-    horasNormaisPadrao: horasPadraoDoDia,
-    segmentarMod,
-    feriados: new Set(input.feriados ?? []),
-    periodoInicial: periodo.start,
-    periodoFinal: periodo.end,
-    vigenciasRegime: input.vigenciasRegime,
-    alocacoesReferenciaRegime: input.alocacoesReferenciaRegime,
-    alocacoesReferenciaClassificacao: input.alocacoesReferenciaClassificacao,
-    vigenciasCentroCusto: input.vigenciasCentroCusto,
-  });
   return {
     competencia: input.competencia,
     periodoInicial: periodo.start,
     periodoFinal: periodo.end,
-    centros: resultado.centros.map((centro) => ({
+    centros: consolidacao.centros.map((centro) => ({
       ...centro,
       linhas: centro.linhas.map((linha) => ({ ...linha })),
     })),
-    avisos: [...resultado.avisos],
+    avisos: [...consolidacao.avisos],
     segmentarMod,
   };
 }
@@ -156,11 +101,11 @@ export const getRelatorioCentrosCusto = createServerFn({ method: "POST" })
       vigenciasCentroCusto,
       alocacoesReferenciaRegime,
     ] = await Promise.all([
-      buscarTodasPaginas<FuncionarioInterno>((from, to) =>
+      buscarTodasPaginas<FuncionarioFinanceiroInterno>((from, to) =>
         supabaseAdmin
           .from("funcionarios")
           .select(
-            "id,nome,categoria_mo,salario,deleted_at,visivel_obras_control,data_admissao,data_desligamento",
+            "id,nome,categoria_mo,ativo,salario,deleted_at,visivel_obras_control,data_admissao,data_desligamento",
           )
           .order("id", { ascending: true })
           .range(from, to),
