@@ -87,6 +87,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MARCO_INICIAL_REGIMES, vigenciaInicialOuMudanca } from "@/lib/regimes";
 import { SUPERVISOR_CC_VIGENCIAS_ATIVAS, categoriaEhSupervisor } from "@/lib/supervisor-cc";
+import {
+  alocacoesCurrentKey,
+  filtrarFuncionariosCandidatosAlocacao,
+  idsCanonicosFuncionarios,
+  nomeObraDaAlocacao,
+  nomesObrasPorId,
+  ultimasAlocacoesPorFuncionario,
+} from "@/lib/funcionarios-alocacoes-current";
 
 export const Route = createFileRoute("/_authenticated/funcionarios")({
   component: FuncionariosPage,
@@ -195,56 +203,56 @@ function FuncionariosPage() {
     },
   });
 
-  const { data: obras } = useQuery({
-    ...obrasMinimasOptions(user?.id),
-    select: (data) => data.filter((obra) => obra.visivel_obras_control !== false),
-  });
+  const { data: obrasTodas } = useQuery(obrasMinimasOptions(user?.id));
+  const obras = useMemo(
+    () => obrasTodas?.filter((obra) => obra.visivel_obras_control !== false),
+    [obrasTodas],
+  );
+  const nomesObras = useMemo(() => nomesObrasPorId(obrasTodas), [obrasTodas]);
+
+  const funcionariosElegiveisAlocacao = useMemo(
+    () =>
+      (funcionarios ?? []).filter((f) => f.deleted_at === null && f.visivel_obras_control === true),
+    [funcionarios],
+  );
+  const funcionariosCandidatosIds = useMemo(
+    () => idsCanonicosFuncionarios(funcionariosElegiveisAlocacao),
+    [funcionariosElegiveisAlocacao],
+  );
+
+  const funcionariosCandidatos = useMemo(
+    () =>
+      filtrarFuncionariosCandidatosAlocacao(
+        funcionarios ?? [],
+        { status: statusFilter, tipo: tipoFilter, busca: search },
+        (categoria) => tipoCategoria(categoria, categorias),
+      ),
+    [funcionarios, statusFilter, tipoFilter, search, categorias],
+  );
 
   const { data: currentAlocs } = useQuery({
-    queryKey: ["alocacoes-current"],
+    queryKey: alocacoesCurrentKey(user?.id ?? "sem-usuario", funcionariosCandidatosIds),
+    enabled:
+      Boolean(user?.id) && funcionarios !== undefined && funcionariosCandidatosIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("alocacoes")
-        .select("funcionario_id, obra_id, data, obras(nome)")
+        .select("funcionario_id, obra_id, data")
+        .in("funcionario_id", funcionariosCandidatosIds)
         .order("data", { ascending: false });
       if (error) throw error;
-      const map = new Map<string, { obra_id: string; nome: string; data: string }>();
-      for (const a of data ?? []) {
-        if (!map.has(a.funcionario_id)) {
-          map.set(a.funcionario_id, {
-            obra_id: a.obra_id,
-            nome: a.obras?.nome ?? "—",
-            data: a.data,
-          });
-        }
-      }
-      return map;
+      return ultimasAlocacoesPorFuncionario(data ?? []);
     },
   });
 
   const filtered = useMemo(() => {
-    const brutos = funcionarios ?? [];
-    const naoExcluidos = brutos.filter((f) => f.deleted_at == null);
-    const visiveis = naoExcluidos.filter((f) => f.visivel_obras_control === true);
-    const porStatus = visiveis.filter((f) => {
-      if (statusFilter === "ativo") return f.ativo === true;
-      if (statusFilter === "inativo") return f.ativo === false;
-      return true;
-    });
-    const porCategoria = porStatus.filter(
-      (f) => tipoFilter === "all" || tipoCategoria(f.categoria_mo, categorias) === tipoFilter,
-    );
     const porCentroCusto =
       obraFilter === "all"
-        ? porCategoria
-        : porCategoria.filter((f) => currentAlocs?.get(f.id)?.obra_id === obraFilter);
-    const termo = search.trim().toLocaleLowerCase("pt-BR");
-    const porBusca = porCentroCusto.filter(
-      (f) => !termo || f.nome.toLocaleLowerCase("pt-BR").includes(termo),
-    );
+        ? funcionariosCandidatos
+        : funcionariosCandidatos.filter((f) => currentAlocs?.get(f.id)?.obra_id === obraFilter);
 
-    return porBusca;
-  }, [funcionarios, search, tipoFilter, statusFilter, obraFilter, currentAlocs, categorias]);
+    return porCentroCusto;
+  }, [funcionariosCandidatos, obraFilter, currentAlocs]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
@@ -976,8 +984,10 @@ function FuncionariosPage() {
                                 role === "coordenador" || role === "gerente" || role === "diretor"
                               }
                             />
+                          ) : cur ? (
+                            nomeObraDaAlocacao(cur.obra_id, nomesObras)
                           ) : (
-                            (cur?.nome ?? <span className="text-muted-foreground">—</span>)
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
                         <TableCell className="text-sm">
