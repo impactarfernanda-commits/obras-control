@@ -249,7 +249,7 @@ test("matriz preserva centro de custo do coordenador sem liberar folha individua
   );
   assert.match(
     tela,
-    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: consultasAtivas\.centros/,
+    /queryFn: \(\) => getRelatorioCentrosCusto[\s\S]*?enabled: fluxoFinanceiro\.consultarCentros/,
   );
   for (const role of ["assistente", "supervisor", "cliente", "externo"])
     assert.doesNotMatch(financeiro, new RegExp(`ROLES_[A-Z_]+ = \\[.*"${role}"`));

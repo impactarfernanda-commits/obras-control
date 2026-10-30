@@ -486,10 +486,9 @@ test("projeção salarial interna permanece desativada quando não autorizada pe
 });
 
 test("divergências atuais ficam documentadas sem alteração silenciosa", () => {
-  assert.match(
-    tela,
-    /custoPorFunc\.get\(f\.id\)\?\.total \?\? 0\) \+ \(horasExtrasPorFunc\.get\(f\.id\)\?\.custoHE \?\? 0\)/,
-  );
+  assert.match(tela, /dadosFinanceirosCompletos\.totaisMensaisIntegrais\.get\(f\.id\)/);
+  assert.match(tela, /custoPorFunc\.get\(f\.id\)\?\.total/);
+  assert.match(tela, /horasExtrasPorFunc\.get\(f\.id\)\?\.custoHE/);
   assert.match(tela, /valorCustoDetalhe\(custoConsolidadoDetalhe\?\.total\)/);
   assert.match(tela, /classificarHorasPorData\(\{[\s\S]*?data: registro\.data[\s\S]*?\}\)/);
   const detalheFuncionario = tela.slice(

@@ -30,6 +30,7 @@ export type RelatorioCentrosCustoDTO = {
 };
 
 export type RelatorioFinanceiroCompletoDTO = RelatorioCentrosCustoDTO & {
+  obras: Array<{ id: string; nome: string }>;
   funcionarios: ProjecaoFinanceiraFuncionarioInterna[];
 };
 
@@ -323,6 +324,7 @@ export const getRelatorioFinanceiroCompleto = createServerFn({ method: "POST" })
       throw new Error("Projeção financeira indisponível para a solicitação autorizada");
     return {
       ...montarRelatorioCentrosCustoDTO(entrada, processamento),
+      obras: entrada.obras.map((obra) => ({ ...obra })),
       funcionarios: processamento.projecaoFolha,
     };
   });

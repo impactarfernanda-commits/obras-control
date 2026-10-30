@@ -58,7 +58,10 @@ import { rotuloFalta, rotuloTipoRegistro } from "@/lib/registro-falta";
 import { RequireRole } from "@/components/RouteAccess";
 import { useAuth } from "@/hooks/use-auth";
 import { funcionariosSegurosOptions, obrasMinimasOptions } from "@/lib/reference-data";
-import { getRelatorioCentrosCusto } from "@/lib/relatorio-centro-custo.functions";
+import {
+  getRelatorioCentrosCusto,
+  getRelatorioFinanceiroCompleto,
+} from "@/lib/relatorio-centro-custo.functions";
 import { getRelatorioSemAlocacao } from "@/lib/relatorio-sem-alocacao.functions";
 import {
   SUPERVISOR_CC_DATA_CORTE,
@@ -74,6 +77,12 @@ import {
   consultasRelatoriosPorAba,
   type AbaRelatorios,
 } from "@/lib/relatorios-carregamento";
+import {
+  adaptarRelatorioFinanceiroCompleto,
+  relatorioFinanceiroCompletoHabilitado,
+  relatorioFinanceiroCompletoKeys,
+  selecionarFluxoFinanceiro,
+} from "@/lib/relatorio-financeiro-frontend";
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   component: () => (
@@ -130,6 +139,11 @@ function RelatoriosPage() {
   const podeVerCentroCusto = role === "coordenador" || podeVerFolha;
   const [abaAtiva, setAbaAtiva] = useState<AbaRelatorios>(() => abaInicialRelatorios(role));
   const consultasAtivas = consultasRelatoriosPorAba(role, abaAtiva);
+  const fluxoFinanceiro = selecionarFluxoFinanceiro({
+    role,
+    aba: abaAtiva,
+    flagHabilitada: relatorioFinanceiroCompletoHabilitado(),
+  });
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -144,18 +158,18 @@ function RelatoriosPage() {
   const [centroDetalheId, setCentroDetalheId] = useState<string | null>(null);
   const [exportandoCentro, setExportandoCentro] = useState(false);
 
-  const { data: beneficios } = useBeneficios({ enabled: consultasAtivas.folha });
-  const { data: segurosVida } = useSegurosVida({ enabled: consultasAtivas.folha });
-  const { data: categorias } = useCategorias({ enabled: consultasAtivas.folha });
+  const { data: beneficios } = useBeneficios({ enabled: fluxoFinanceiro.consultarFolhaLegada });
+  const { data: segurosVida } = useSegurosVida({ enabled: fluxoFinanceiro.consultarFolhaLegada });
+  const { data: categorias } = useCategorias({ enabled: fluxoFinanceiro.consultarFolhaLegada });
 
-  const { data: funcionarios, isLoading: lf } = useQuery({
+  const { data: funcionariosLegado, isLoading: lf } = useQuery({
     ...funcionariosSegurosOptions(user?.id),
-    enabled: Boolean(user?.id) && consultasAtivas.folha,
+    enabled: Boolean(user?.id) && fluxoFinanceiro.consultarFolhaLegada,
   });
 
-  const { data: obras } = useQuery({
+  const { data: obrasLegado } = useQuery({
     ...obrasMinimasOptions(user?.id),
-    enabled: Boolean(user?.id) && consultasAtivas.folha,
+    enabled: Boolean(user?.id) && fluxoFinanceiro.consultarFolhaLegada,
   });
 
   const { start, end, startDate, endDate } = payrollRange(year, month);
@@ -166,7 +180,7 @@ function RelatoriosPage() {
   const competenciaSemDiasVencidos = dataLimiteAnalise < start;
   const competenciaSemDadosConsultaveis = dataLimiteConsultaSemAlocacao < start;
 
-  const { data: alocacoes, isLoading: la } = useQuery({
+  const { data: alocacoesLegado, isLoading: la } = useQuery({
     queryKey: ["alocacoes-mes", start, end],
     queryFn: async () =>
       buscarTodasPaginas<AlocRow>((from, to) =>
@@ -180,10 +194,10 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
-    enabled: consultasAtivas.folha,
+    enabled: fluxoFinanceiro.consultarFolhaLegada,
   });
 
-  const { data: registros, isLoading: lr } = useQuery({
+  const { data: registrosLegado, isLoading: lr } = useQuery({
     queryKey: ["registros-mes", start, end],
     queryFn: async () =>
       buscarTodasPaginas<RegRow>((from, to) =>
@@ -199,10 +213,10 @@ function RelatoriosPage() {
           .order("obra_id", { ascending: true })
           .range(from, to),
       ),
-    enabled: consultasAtivas.folha,
+    enabled: fluxoFinanceiro.consultarFolhaLegada,
   });
 
-  const { data: detalhes } = useQuery({
+  const { data: detalhesLegado } = useQuery({
     queryKey: ["registros-horas-detalhes-relatorio", start, end],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -215,12 +229,8 @@ function RelatoriosPage() {
       if (error) throw error;
       return data as unknown as Array<DetalheJornadaVisual & { registro_horas_id: string }>;
     },
-    enabled: consultasAtivas.folha,
+    enabled: fluxoFinanceiro.consultarFolhaLegada,
   });
-  const detalhePorRegistro = useMemo(
-    () => new Map((detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe])),
-    [detalhes],
-  );
 
   const competencia = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const { data: relatorioSemAlocacao, isLoading: loadingSemAlocacao } = useQuery({
@@ -231,11 +241,46 @@ function RelatoriosPage() {
       }),
     enabled: consultasAtivas.semAlocacao && !competenciaSemDadosConsultaveis,
   });
-  const { data: relatorioCentros, isLoading: loadingCentros } = useQuery({
+  const { data: relatorioCentrosLegado, isLoading: loadingCentrosLegado } = useQuery({
     queryKey: ["relatorio-centros-custo", competencia],
     queryFn: () => getRelatorioCentrosCusto({ data: { competencia } }),
-    enabled: consultasAtivas.centros,
+    enabled: fluxoFinanceiro.consultarCentros,
   });
+  const { data: relatorioFinanceiroCompleto, isLoading: loadingFinanceiroCompleto } = useQuery({
+    queryKey: relatorioFinanceiroCompletoKeys.competencia(user?.id, competencia),
+    queryFn: () => getRelatorioFinanceiroCompleto({ data: { competencia } }),
+    enabled: Boolean(user?.id) && fluxoFinanceiro.usarCompleto,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+  });
+  const dadosFinanceirosCompletos = useMemo(
+    () => adaptarRelatorioFinanceiroCompleto(relatorioFinanceiroCompleto),
+    [relatorioFinanceiroCompleto],
+  );
+  const funcionarios = fluxoFinanceiro.usarCompleto
+    ? dadosFinanceirosCompletos.funcionarios
+    : funcionariosLegado;
+  const alocacoes = fluxoFinanceiro.usarCompleto
+    ? dadosFinanceirosCompletos.alocacoes
+    : alocacoesLegado;
+  const registros = fluxoFinanceiro.usarCompleto
+    ? dadosFinanceirosCompletos.registros
+    : registrosLegado;
+  const detalhes = fluxoFinanceiro.usarCompleto
+    ? dadosFinanceirosCompletos.detalhes
+    : detalhesLegado;
+  const relatorioCentros = fluxoFinanceiro.usarCompleto
+    ? relatorioFinanceiroCompleto
+    : relatorioCentrosLegado;
+  const loadingCentros = fluxoFinanceiro.usarCompleto
+    ? loadingFinanceiroCompleto
+    : loadingCentrosLegado;
+  const detalhePorRegistro = useMemo(
+    () => new Map((detalhes ?? []).map((detalhe) => [detalhe.registro_horas_id, detalhe])),
+    [detalhes],
+  );
 
   // Exclusao logica identifica cadastro incorreto. Inatividade/desligamento e historico valido.
   // O filtro local protege todos os calculos e exportacoes mesmo se a origem deixar de filtrar.
@@ -273,6 +318,7 @@ function RelatoriosPage() {
   }, [relatorioSemAlocacao]);
 
   const custoPorFunc = useMemo(() => {
+    if (fluxoFinanceiro.usarCompleto) return dadosFinanceirosCompletos.custosPorFuncionario;
     const m = new Map<string, ReturnType<typeof calcularCusto>>();
     for (const f of funcionariosRelatorio) {
       m.set(
@@ -281,21 +327,31 @@ function RelatoriosPage() {
       );
     }
     return m;
-  }, [funcionariosRelatorio, beneficios, segurosVida]);
+  }, [
+    beneficios,
+    dadosFinanceirosCompletos.custosPorFuncionario,
+    fluxoFinanceiro.usarCompleto,
+    funcionariosRelatorio,
+    segurosVida,
+  ]);
 
   const diasUteis = useMemo(() => diasUteisNoIntervalo(startDate, endDate), [startDate, endDate]);
 
   const obrasComCusto = useMemo(() => relatorioCentros?.centros ?? [], [relatorioCentros]);
-  const horasExtrasPorFunc = useMemo(
-    () =>
-      new Map(
-        funcionariosRelatorio.map((funcionario) => [
-          funcionario.id,
-          consolidarCustoFuncionario(obrasComCusto, funcionario.id),
-        ]),
-      ),
-    [funcionariosRelatorio, obrasComCusto],
-  );
+  const horasExtrasPorFunc = useMemo(() => {
+    if (fluxoFinanceiro.usarCompleto) return dadosFinanceirosCompletos.proporcionaisPorFuncionario;
+    return new Map(
+      funcionariosRelatorio.map((funcionario) => [
+        funcionario.id,
+        consolidarCustoFuncionario(obrasComCusto, funcionario.id),
+      ]),
+    );
+  }, [
+    dadosFinanceirosCompletos.proporcionaisPorFuncionario,
+    fluxoFinanceiro.usarCompleto,
+    funcionariosRelatorio,
+    obrasComCusto,
+  ]);
   const segmentarMod = relatorioCentros?.segmentarMod ?? false;
   const avisosObras = useMemo(() => relatorioCentros?.avisos ?? [], [relatorioCentros]);
   const centroDetalhe = obrasComCusto.find((obra) => obra.id === centroDetalheId) ?? null;
@@ -470,14 +526,18 @@ function RelatoriosPage() {
   const ativos = funcionariosRelatorio.filter((f) => f.ativo || funcIdsComLancamento.has(f.id));
   const totalFolhaAtiva = ativos.reduce(
     (s, f) =>
-      s + (custoPorFunc.get(f.id)?.total ?? 0) + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0),
+      s +
+      (fluxoFinanceiro.usarCompleto
+        ? (dadosFinanceirosCompletos.totaisMensaisIntegrais.get(f.id) ?? 0)
+        : (custoPorFunc.get(f.id)?.total ?? 0) + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0)),
     0,
   );
 
-  const obraMap = useMemo(
-    () => new Map((obras ?? []).map((obra) => [obra.id, obra.nome])),
-    [obras],
-  );
+  const obraMap = useMemo(() => {
+    if (fluxoFinanceiro.usarCompleto)
+      return new Map(dadosFinanceirosCompletos.obras.map((obra) => [obra.id, obra.nome]));
+    return new Map((obrasLegado ?? []).map((obra) => [obra.id, obra.nome]));
+  }, [dadosFinanceirosCompletos.obras, fluxoFinanceiro.usarCompleto, obrasLegado]);
   const alocacaoMap = useMemo(
     () =>
       new Map(
@@ -492,7 +552,9 @@ function RelatoriosPage() {
     ativos.find((funcionario) => funcionario.id === funcionarioDetalheId) ?? null;
   const custoDetalhe = funcionarioDetalhe ? custoPorFunc.get(funcionarioDetalhe.id) : null;
   const custoConsolidadoDetalhe = funcionarioDetalhe
-    ? consolidarCustoFuncionario(obrasComCusto, funcionarioDetalhe.id)
+    ? fluxoFinanceiro.usarCompleto
+      ? (dadosFinanceirosCompletos.proporcionaisPorFuncionario.get(funcionarioDetalhe.id) ?? null)
+      : consolidarCustoFuncionario(obrasComCusto, funcionarioDetalhe.id)
     : null;
   const valorCustoDetalhe = (valor: number | undefined) =>
     loadingCentros ? "Carregando…" : relatorioCentros ? fmtBRL(valor ?? 0) : "Indisponível";
@@ -590,7 +652,7 @@ function RelatoriosPage() {
     }
   }
 
-  const loading = lf || la || lr;
+  const loading = fluxoFinanceiro.usarCompleto ? loadingFinanceiroCompleto : lf || la || lr;
   const loadingPendencias = loadingSemAlocacao;
 
   return (
@@ -691,7 +753,9 @@ function RelatoriosPage() {
                         ) : (
                           ativos.map((f) => {
                             const c = custoPorFunc.get(f.id);
-                            const tipo = tipoCategoria(f.categoria_mo, categorias);
+                            const tipo = fluxoFinanceiro.usarCompleto
+                              ? dadosFinanceirosCompletos.tiposPorFuncionario.get(f.id)
+                              : tipoCategoria(f.categoria_mo, categorias);
                             if (!c) return null;
                             return (
                               <TableRow key={f.id}>
@@ -744,7 +808,13 @@ function RelatoriosPage() {
                                   )}
                                 </TableCell>
                                 <TableCell className="text-right font-semibold">
-                                  {fmtBRL(c.total + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0))}
+                                  {fmtBRL(
+                                    fluxoFinanceiro.usarCompleto
+                                      ? (dadosFinanceirosCompletos.totaisMensaisIntegrais.get(
+                                          f.id,
+                                        ) ?? 0)
+                                      : c.total + (horasExtrasPorFunc.get(f.id)?.custoHE ?? 0),
+                                  )}
                                 </TableCell>
                               </TableRow>
                             );
