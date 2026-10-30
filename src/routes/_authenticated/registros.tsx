@@ -27,6 +27,17 @@ import { obrasMinimasOptions } from "@/lib/reference-data";
 import { payloadHorasPermitido } from "@/lib/jornada-horas";
 import { formatDecimalHours, formatExtraHours } from "@/lib/formatacao-horas";
 import {
+  dadosOperacionaisKeys,
+  datasDoEventoRealtime,
+  derivarPeriodoCompleto,
+  devePreservarEdicaoLocal,
+  identificarQueriesOperacionaisAfetadas,
+  periodoContemPeriodo,
+  resultadoPertenceAVersaoAtual,
+  type EstadoEdicaoOperacional,
+  type PeriodoOperacional,
+} from "@/lib/dados-operacionais-query";
+import {
   AVISO_FALTA_INTEGRAL,
   CLASSIFICACOES_FALTA,
   buscarConflitoRegistroDiario,
@@ -134,6 +145,32 @@ function RegistrosPage() {
   const cycle = useMemo(() => payrollCycleOf(days[3]), [days]);
   const cycleStartISO = isoDate(cycle.start);
   const cycleEndISO = isoDate(cycle.end);
+  const userId = user?.id ?? "sem-usuario";
+  const semanaPeriodo = useMemo<PeriodoOperacional>(
+    () => ({ inicio: firstDay, fim: lastDay }),
+    [firstDay, lastDay],
+  );
+  const competenciaPeriodo = useMemo<PeriodoOperacional>(
+    () => ({ inicio: cycleStartISO, fim: cycleEndISO }),
+    [cycleStartISO, cycleEndISO],
+  );
+  const semanaDentroDaCompetencia = periodoContemPeriodo(competenciaPeriodo, semanaPeriodo);
+  const alocacoesSemanaKey = useMemo(
+    () => dadosOperacionaisKeys.alocacoesSemana(userId, obraId, semanaPeriodo),
+    [userId, obraId, semanaPeriodo],
+  );
+  const registrosSemanaKey = useMemo(
+    () => dadosOperacionaisKeys.registrosSemana(userId, obraId, semanaPeriodo),
+    [userId, obraId, semanaPeriodo],
+  );
+  const alocacoesCompetenciaKey = useMemo(
+    () => dadosOperacionaisKeys.alocacoesCompetencia(userId, obraId, competenciaPeriodo),
+    [userId, obraId, competenciaPeriodo],
+  );
+  const registrosCompetenciaKey = useMemo(
+    () => dadosOperacionaisKeys.registrosCompetencia(userId, obraId, competenciaPeriodo),
+    [userId, obraId, competenciaPeriodo],
+  );
 
   const { data: obras } = useQuery({
     ...obrasMinimasOptions(user?.id),
@@ -145,9 +182,9 @@ function RegistrosPage() {
   }, [obras, obraId]);
 
   // Funcionários alocados nesta obra na semana
-  const { data: alocacoes, isLoading: loadingAloc } = useQuery({
-    enabled: !!obraId,
-    queryKey: ["aloc-week", obraId, firstDay, lastDay],
+  const alocacoesSemanaQuery = useQuery({
+    enabled: !!obraId && !!user?.id && !semanaDentroDaCompetencia,
+    queryKey: alocacoesSemanaKey,
     queryFn: async () =>
       buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
         supabase
@@ -163,16 +200,10 @@ function RegistrosPage() {
       ),
   });
 
-  const allocSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const a of alocacoes ?? []) s.add(`${a.funcionario_id}|${a.data}`);
-    return s;
-  }, [alocacoes]);
-
   // Registros existentes da semana
-  const { data: registrosRemote, isLoading: loadingReg } = useQuery({
-    enabled: !!obraId,
-    queryKey: ["registros-week", obraId, firstDay, lastDay],
+  const registrosSemanaQuery = useQuery({
+    enabled: !!obraId && !!user?.id && !semanaDentroDaCompetencia,
+    queryKey: registrosSemanaKey,
     queryFn: async () =>
       buscarTodasPaginas<Registro>((from, to) =>
         supabase
@@ -189,9 +220,9 @@ function RegistrosPage() {
   });
 
   // Resumo do ciclo de folha (25 -> 24)
-  const { data: registrosCycle } = useQuery({
-    enabled: !!obraId,
-    queryKey: ["registros-cycle", obraId, cycleStartISO, cycleEndISO],
+  const registrosCompetenciaQuery = useQuery({
+    enabled: !!obraId && !!user?.id,
+    queryKey: registrosCompetenciaKey,
     queryFn: async () =>
       buscarTodasPaginas<Registro>((from, to) =>
         supabase
@@ -207,9 +238,9 @@ function RegistrosPage() {
       ),
   });
 
-  const { data: alocCycle } = useQuery({
-    enabled: !!obraId,
-    queryKey: ["aloc-cycle", obraId, cycleStartISO, cycleEndISO],
+  const alocacoesCompetenciaQuery = useQuery({
+    enabled: !!obraId && !!user?.id,
+    queryKey: alocacoesCompetenciaKey,
     queryFn: async () =>
       buscarTodasPaginas<{ funcionario_id: string; data: string }>((from, to) =>
         supabase
@@ -224,6 +255,27 @@ function RegistrosPage() {
           .range(from, to),
       ),
   });
+
+  const registrosCycle = registrosCompetenciaQuery.data;
+  const alocCycle = alocacoesCompetenciaQuery.data;
+  const registrosRemote = semanaDentroDaCompetencia
+    ? derivarPeriodoCompleto(registrosCycle, competenciaPeriodo, semanaPeriodo)
+    : registrosSemanaQuery.data;
+  const alocacoes = semanaDentroDaCompetencia
+    ? derivarPeriodoCompleto(alocCycle, competenciaPeriodo, semanaPeriodo)
+    : alocacoesSemanaQuery.data;
+  const loadingReg = semanaDentroDaCompetencia
+    ? registrosCompetenciaQuery.isLoading
+    : registrosSemanaQuery.isLoading;
+  const loadingAloc = semanaDentroDaCompetencia
+    ? alocacoesCompetenciaQuery.isLoading
+    : alocacoesSemanaQuery.isLoading;
+
+  const allocSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of alocacoes ?? []) s.add(`${a.funcionario_id}|${a.data}`);
+    return s;
+  }, [alocacoes]);
 
   const idsHistoricos = useMemo(
     () =>
@@ -270,7 +322,7 @@ function RegistrosPage() {
 
   // Estado local editável
   const [cells, setCells] = useState<Record<CellKey, Registro>>({});
-  const [saving, setSaving] = useState<Record<CellKey, "idle" | "saving" | "saved" | "error">>({});
+  const [saving, setSaving] = useState<Record<CellKey, EstadoEdicaoOperacional>>({});
 
   // hydrate from remote
   useEffect(() => {
@@ -279,8 +331,8 @@ function RegistrosPage() {
       const next = { ...prev };
       for (const r of registrosRemote) {
         const key = ck(r.funcionario_id, r.obra_id, r.data);
-        // Don't clobber an in-flight local edit
-        if (saving[key] === "saving") continue;
+        // Não sobrescreve edição pendente, gravação em curso ou erro ainda visível.
+        if (devePreservarEdicaoLocal(saving[key])) continue;
         next[key] = r;
       }
       return next;
@@ -290,46 +342,91 @@ function RegistrosPage() {
 
   // Realtime subscription
   useEffect(() => {
-    if (!obraId) return;
+    if (!obraId || !user?.id) return;
     const channel = supabase
-      .channel(`registros_horas_${obraId}_${firstDay}`)
+      .channel(`registros_horas_${user.id}_${obraId}_${firstDay}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "registros_horas", filter: `obra_id=eq.${obraId}` },
-        () => {
-          qc.invalidateQueries({ queryKey: ["registros-week", obraId, firstDay, lastDay] });
-          qc.invalidateQueries({
-            queryKey: ["registros-cycle", obraId, cycleStartISO, cycleEndISO],
-          });
+        (payload) => {
+          const afetadas = identificarQueriesOperacionaisAfetadas(
+            datasDoEventoRealtime(payload),
+            semanaPeriodo,
+            competenciaPeriodo,
+          );
+          if (afetadas.semana && !semanaDentroDaCompetencia) {
+            void qc.invalidateQueries({ queryKey: registrosSemanaKey, exact: true });
+          }
+          if (afetadas.competencia) {
+            void qc.invalidateQueries({ queryKey: registrosCompetenciaKey, exact: true });
+          }
         },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [obraId, firstDay, lastDay, cycleStartISO, cycleEndISO, qc]);
+  }, [
+    obraId,
+    user?.id,
+    firstDay,
+    semanaPeriodo,
+    competenciaPeriodo,
+    semanaDentroDaCompetencia,
+    registrosSemanaKey,
+    registrosCompetenciaKey,
+    qc,
+  ]);
 
   // Debounced save
   const timersRef = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({});
+  const editVersionsRef = useRef<Record<CellKey, number>>({});
+  const previousUserIdRef = useRef(user?.id);
+
+  useEffect(() => {
+    if (previousUserIdRef.current === user?.id) return;
+    for (const timer of Object.values(timersRef.current)) clearTimeout(timer);
+    timersRef.current = {};
+    editVersionsRef.current = {};
+    setCells({});
+    setSaving({});
+    previousUserIdRef.current = user?.id;
+  }, [user?.id]);
+
+  useEffect(
+    () => () => {
+      for (const timer of Object.values(timersRef.current)) clearTimeout(timer);
+      timersRef.current = {};
+    },
+    [],
+  );
+
   const saveCell = useCallback(
-    async (key: CellKey, r: Registro) => {
+    async (key: CellKey, r: Registro, editVersion: number) => {
+      if (!resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) return;
       setSaving((s) => ({ ...s, [key]: "saving" }));
       const total = (r.horas_normais ?? 0) + (r.horas_extras ?? 0);
       // Skip persisting completely empty rows that have no id
       if (!r.id && !registroEhFalta(r) && total === 0 && !r.observacoes?.trim()) {
-        setSaving((s) => ({ ...s, [key]: "idle" }));
+        if (resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) {
+          setSaving((s) => ({ ...s, [key]: "idle" }));
+        }
         return;
       }
       const erroValidacao = validarRegistroApontamento(r);
       if (erroValidacao) {
-        setSaving((s) => ({ ...s, [key]: "error" }));
-        toast.error(erroValidacao);
+        if (resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) {
+          setSaving((s) => ({ ...s, [key]: "error" }));
+          toast.error(erroValidacao);
+        }
         return;
       }
       const conflitoRegistro = await buscarConflitoRegistroDiario(supabase, r);
       if (conflitoRegistro) {
-        setSaving((s) => ({ ...s, [key]: "error" }));
-        toast.error(conflitoRegistro);
+        if (resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) {
+          setSaving((s) => ({ ...s, [key]: "error" }));
+          toast.error(conflitoRegistro);
+        }
         return;
       }
       const { data, error } = await supabase.rpc("obras_salvar_registro_horas", {
@@ -345,28 +442,36 @@ function RegistrosPage() {
         p_observacoes: r.observacoes?.trim() || null,
       });
       if (error) {
-        setSaving((s) => ({ ...s, [key]: "error" }));
-        toast.error(mensagemErroRegistro(error));
+        if (resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) {
+          setSaving((s) => ({ ...s, [key]: "error" }));
+          toast.error(mensagemErroRegistro(error));
+        }
         return;
       }
+      if (!resultadoPertenceAVersaoAtual(editVersionsRef.current[key], editVersion)) return;
       setCells((prev) => ({ ...prev, [key]: data as Registro }));
       setSaving((s) => ({ ...s, [key]: "saved" }));
-      qc.invalidateQueries({ queryKey: ["registros-week", obraId] });
-      qc.invalidateQueries({ queryKey: ["registros-cycle", obraId] });
-      qc.invalidateQueries({ queryKey: ["registros-mes"] });
+      if (!semanaDentroDaCompetencia) {
+        void qc.invalidateQueries({ queryKey: registrosSemanaKey, exact: true });
+      }
+      void qc.invalidateQueries({ queryKey: registrosCompetenciaKey, exact: true });
+      void qc.invalidateQueries({ queryKey: ["registros-mes"] });
       setTimeout(() => {
         setSaving((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s));
       }, 1200);
     },
-    [qc, obraId],
+    [qc, registrosSemanaKey, registrosCompetenciaKey, semanaDentroDaCompetencia],
   );
 
   const updateCell = useCallback(
     (key: CellKey, patch: Partial<Registro>, base: Registro) => {
       const next: Registro = { ...base, ...patch };
       setCells((prev) => ({ ...prev, [key]: next }));
+      setSaving((s) => ({ ...s, [key]: "dirty" }));
+      const editVersion = (editVersionsRef.current[key] ?? 0) + 1;
+      editVersionsRef.current[key] = editVersion;
       if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
-      timersRef.current[key] = setTimeout(() => saveCell(key, next), 700);
+      timersRef.current[key] = setTimeout(() => saveCell(key, next, editVersion), 700);
     },
     [saveCell],
   );
@@ -798,7 +903,7 @@ function DayCell({
 }: {
   registro: Registro;
   alocado: boolean;
-  status: "idle" | "saving" | "saved" | "error";
+  status: EstadoEdicaoOperacional;
   onChange: (patch: Partial<Registro>) => void;
 }) {
   const s = cellStatus(registro);
