@@ -1,4 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  buscarIdsAtividadeEmLotes,
+  criarAlertasAtividadeFuncionarios,
+  dataInicioAtividadeRecente,
+  identificarHistoricoCandidatos,
+} from "@/lib/alertas-atividade";
+import { buscarTodasPaginas } from "@/lib/paginacao";
 
 type Severidade = "info" | "warning" | "critical";
 
@@ -55,94 +62,115 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
   const alerts: AlertaInput[] = [];
 
   // === 1. Funcionarios sem alocacao no ultimo mes ===
-  const desdeAlocacao = new Date(hoje);
-  desdeAlocacao.setDate(desdeAlocacao.getDate() - DEFAULTS.dias_sem_alocacao);
-  const { data: funcAtivos } = await admin
-    .from("funcionarios")
-    .select("id, nome, categoria_mo")
-    .eq("ativo", true);
+  const desdeAlocacaoStr = dataInicioAtividadeRecente(hoje, DEFAULTS.dias_sem_alocacao);
+  const funcAtivos = await buscarTodasPaginas<{
+    id: string;
+    nome: string;
+    categoria_mo: string | null;
+  }>((inicio, fim) =>
+    admin
+      .from("funcionarios")
+      .select("id, nome, categoria_mo")
+      .eq("ativo", true)
+      .order("id", { ascending: true })
+      .range(inicio, fim),
+  );
 
-  if (funcAtivos?.length) {
+  if (funcAtivos.length) {
     const ids = funcAtivos.map((f) => f.id);
-    const { data: alocs } = await admin
-      .from("alocacoes")
-      .select("funcionario_id")
-      .gte("data", isoDate(desdeAlocacao))
-      .in("funcionario_id", ids);
-    const { data: regs } = await admin
-      .from("registros_horas")
-      .select("funcionario_id")
-      .gte("data", isoDate(desdeAlocacao))
-      .in("funcionario_id", ids);
-    const comAtividade = new Set<string>([
-      ...(alocs ?? []).map((a) => a.funcionario_id as string),
-      ...(regs ?? []).map((r) => r.funcionario_id as string),
-    ]);
-    const { data: vigenciasSupervisor } =
-      SUPERVISOR_CC_VIGENCIAS_ATIVAS && hojeStr >= SUPERVISOR_CC_DATA_CORTE
-        ? await admin
-            .from("funcionario_cc_vigencias" as never)
-            .select("funcionario_id" as never)
-            .lte("vigencia_inicio" as never, hojeStr as never)
-            .or(`vigencia_fim.is.null,vigencia_fim.gte.${hojeStr}` as never)
-        : { data: [] };
-    const supervisoresComVigencia = new Set(
-      ((vigenciasSupervisor as unknown as Array<{ funcionario_id: string }> | null) ?? []).map(
-        (item) => item.funcionario_id,
-      ),
+    const alocacoesRecentes = await buscarIdsAtividadeEmLotes({
+      funcionarioIds: ids,
+      buscarPagina: (lote, inicio, fim) =>
+        admin
+          .from("alocacoes")
+          .select("funcionario_id")
+          .gte("data", desdeAlocacaoStr)
+          .in("funcionario_id", lote)
+          .order("funcionario_id", { ascending: true })
+          .order("data", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim),
+    });
+    const registrosRecentes = await buscarIdsAtividadeEmLotes({
+      funcionarioIds: ids,
+      buscarPagina: (lote, inicio, fim) =>
+        admin
+          .from("registros_horas")
+          .select("funcionario_id")
+          .gte("data", desdeAlocacaoStr)
+          .in("funcionario_id", lote)
+          .order("funcionario_id", { ascending: true })
+          .order("data", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, fim),
+    });
+    const comAtividade = new Set<string>([...alocacoesRecentes, ...registrosRecentes]);
+    const vigenciasSupervisorAtivas =
+      SUPERVISOR_CC_VIGENCIAS_ATIVAS && hojeStr >= SUPERVISOR_CC_DATA_CORTE;
+    const vigenciasSupervisor = vigenciasSupervisorAtivas
+      ? await buscarTodasPaginas<{ funcionario_id: string }>(
+          (inicio, fim) =>
+            admin
+              .from("funcionario_cc_vigencias" as never)
+              .select("funcionario_id" as never)
+              .lte("vigencia_inicio" as never, hojeStr as never)
+              .or(`vigencia_fim.is.null,vigencia_fim.gte.${hojeStr}` as never)
+              .order("funcionario_id" as never, { ascending: true } as never)
+              .order("vigencia_inicio" as never, { ascending: true } as never)
+              .range(inicio as never, fim as never) as never,
+        )
+      : [];
+    const supervisoresComVigencia = new Set(vigenciasSupervisor.map((item) => item.funcionario_id));
+    const supervisoresTratadosPorVigencia = new Set(
+      vigenciasSupervisorAtivas
+        ? funcAtivos
+            .filter((funcionario) => categoriaEhSupervisor(funcionario.categoria_mo))
+            .map((funcionario) => funcionario.id)
+        : [],
     );
 
-    // Histórico completo para identificar quem nunca foi alocado
-    const { data: alocsAll } = await admin
-      .from("alocacoes")
-      .select("funcionario_id")
-      .in("funcionario_id", ids);
-    const { data: regsAll } = await admin
-      .from("registros_horas")
-      .select("funcionario_id")
-      .in("funcionario_id", ids);
-    const jaAlocado = new Set<string>([
-      ...(alocsAll ?? []).map((a) => a.funcionario_id as string),
-      ...(regsAll ?? []).map((r) => r.funcionario_id as string),
-    ]);
-
-    for (const f of funcAtivos) {
-      if (
-        SUPERVISOR_CC_VIGENCIAS_ATIVAS &&
-        hojeStr >= SUPERVISOR_CC_DATA_CORTE &&
-        categoriaEhSupervisor(f.categoria_mo)
-      ) {
-        if (!supervisoresComVigencia.has(f.id))
-          alerts.push({
-            tipo: "sem_alocacao",
-            titulo: `Supervisor sem vigência de CC: ${f.nome}`,
-            mensagem: `${f.nome} está ativo, mas não possui vigência de centro de custo na data atual.`,
-            severidade: "warning",
-            metadata: { funcionario_id: f.id, funcionario_nome: f.nome },
-            dedupe_key: `supervisor_sem_vigencia:${f.id}:${hojeStr}`,
-          });
-        continue;
-      }
-      if (!jaAlocado.has(f.id)) {
-        alerts.push({
-          tipo: "nunca_alocado",
-          titulo: `Funcionário nunca alocado: ${f.nome}`,
-          mensagem: `${f.nome} está cadastrado como ativo mas nunca foi alocado a nenhum centro de custo. Faça a primeira alocação ou desative o cadastro.`,
-          severidade: "warning",
-          metadata: { funcionario_id: f.id, funcionario_nome: f.nome },
-          dedupe_key: `nunca_alocado:${f.id}:${hojeStr}`,
-        });
-      } else if (!comAtividade.has(f.id)) {
-        alerts.push({
-          tipo: "sem_alocacao",
-          titulo: `Funcionário sem alocação: ${f.nome}`,
-          mensagem: `${f.nome} está ativo mas não possui alocação nem registro de horas nos últimos ${DEFAULTS.dias_sem_alocacao} dias. Verifique se está de folga de campo, férias, afastado, desligado ou se a alocação foi esquecida.`,
-          severidade: "warning",
-          metadata: { funcionario_id: f.id, funcionario_nome: f.nome },
-          dedupe_key: `sem_alocacao:${f.id}:${hojeStr}`,
-        });
-      }
-    }
+    const { funcionarioIdsComHistorico } = await identificarHistoricoCandidatos({
+      funcionarioIdsAtivos: ids,
+      funcionarioIdsComAtividadeRecente: comAtividade,
+      funcionarioIdsIgnorados: supervisoresTratadosPorVigencia,
+      buscarHistoricoAlocacoes: (candidatos) =>
+        buscarIdsAtividadeEmLotes({
+          funcionarioIds: candidatos,
+          buscarPagina: (lote, inicio, fim) =>
+            admin
+              .from("alocacoes")
+              .select("funcionario_id")
+              .in("funcionario_id", lote)
+              .order("funcionario_id", { ascending: true })
+              .order("data", { ascending: true })
+              .order("id", { ascending: true })
+              .range(inicio, fim),
+        }),
+      buscarHistoricoRegistros: (candidatos) =>
+        buscarIdsAtividadeEmLotes({
+          funcionarioIds: candidatos,
+          buscarPagina: (lote, inicio, fim) =>
+            admin
+              .from("registros_horas")
+              .select("funcionario_id")
+              .in("funcionario_id", lote)
+              .order("funcionario_id", { ascending: true })
+              .order("data", { ascending: true })
+              .order("id", { ascending: true })
+              .range(inicio, fim),
+        }),
+    });
+    alerts.push(
+      ...criarAlertasAtividadeFuncionarios({
+        funcionariosAtivos: funcAtivos,
+        funcionarioIdsComAtividadeRecente: comAtividade,
+        funcionarioIdsComHistorico,
+        funcionarioIdsSupervisoresTratados: supervisoresTratadosPorVigencia,
+        funcionarioIdsSupervisoresComVigencia: supervisoresComVigencia,
+        hojeStr,
+        diasSemAlocacao: DEFAULTS.dias_sem_alocacao,
+      }),
+    );
   }
 
   // === 2. Horas extras > 15h/semana ===
