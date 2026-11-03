@@ -5,6 +5,10 @@ import {
   dataInicioAtividadeRecente,
   identificarHistoricoCandidatos,
 } from "@/lib/alertas-atividade";
+import {
+  buscarObrasComUltimoRegistro,
+  criarAlertasObrasSemLancamento,
+} from "@/lib/alertas-obras-sem-lancamento";
 import { buscarTodasPaginas } from "@/lib/paginacao";
 
 type Severidade = "info" | "warning" | "critical";
@@ -296,35 +300,15 @@ export async function runAlertChecks(): Promise<{ created: number; alerts: numbe
   }
 
   // === 5. Obras sem lancamentos ha > 3 dias ===
-  const { data: obras } = await admin.from("obras").select("id, nome");
-  if (obras?.length) {
-    const { data: ultimos } = await admin
-      .from("registros_horas")
-      .select("obra_id, data")
-      .order("data", { ascending: false });
-    const ultimoPorObra = new Map<string, string>();
-    for (const r of ultimos ?? []) {
-      if (!ultimoPorObra.has(r.obra_id as string)) {
-        ultimoPorObra.set(r.obra_id as string, r.data as string);
-      }
-    }
-    for (const o of obras) {
-      const ult = ultimoPorObra.get(o.id);
-      const diff = ult ? Math.floor((hoje.getTime() - new Date(ult).getTime()) / 86400000) : 999;
-      if (diff > DEFAULTS.dias_sem_lancamento) {
-        alerts.push({
-          tipo: "obra_sem_lancamento",
-          titulo: `Centro de custo sem lançamentos: ${o.nome}`,
-          mensagem: ult
-            ? `O centro de custo ${o.nome} não recebe registros de horas há ${diff} dias (último: ${new Date(ult).toLocaleDateString("pt-BR")}).`
-            : `O centro de custo ${o.nome} nunca recebeu registros de horas.`,
-          severidade: diff > 7 ? "critical" : "warning",
-          metadata: { obra_id: o.id, obra_nome: o.nome, dias: diff },
-          dedupe_key: `obra_sem_lancamento:${o.id}:${hojeStr}`,
-        });
-      }
-    }
-  }
+  const obras = await buscarObrasComUltimoRegistro(admin);
+  alerts.push(
+    ...criarAlertasObrasSemLancamento({
+      obras,
+      hoje,
+      hojeStr,
+      diasSemLancamento: DEFAULTS.dias_sem_lancamento,
+    }),
+  );
 
   // === Insert (broadcast por usuário) ===
   if (alerts.length === 0) return { created: 0, alerts: 0 };
