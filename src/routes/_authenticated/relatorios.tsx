@@ -48,6 +48,7 @@ import { tipoCategoria } from "@/lib/categorias-core";
 import { fmtBRL, useBeneficios, useSegurosVida } from "@/lib/custos";
 import { calcularCusto, diasUteisNoIntervalo } from "@/lib/custos-core";
 import { buscarTodasPaginas } from "@/lib/paginacao";
+import { buscarDetalhesHorasPaginados } from "@/lib/relatorio-detalhes-paginacao";
 import {
   calcularCustoHorasExtras,
   classificarHorasPorData,
@@ -204,17 +205,19 @@ function RelatoriosPage() {
 
   const { data: detalhes } = useQuery({
     queryKey: ["registros-horas-detalhes-relatorio", start, end],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("registros_horas_detalhes" as never)
-        .select(
-          "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,jornada_excepcional" as never,
-        )
-        .gte("data_inicio" as never, start)
-        .lte("data_inicio" as never, end);
-      if (error) throw error;
-      return data as unknown as Array<DetalheJornadaVisual & { registro_horas_id: string }>;
-    },
+    queryFn: () =>
+      buscarDetalhesHorasPaginados<DetalheJornadaVisual & { registro_horas_id: string }>(
+        (from, to) =>
+          supabase
+            .from("registros_horas_detalhes" as never)
+            .select(
+              "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,jornada_excepcional" as never,
+            )
+            .gte("data_inicio" as never, start)
+            .lte("data_inicio" as never, end)
+            .order("registro_horas_id" as never, { ascending: true })
+            .range(from, to) as never,
+      ),
     enabled: consultasAtivas.folha,
   });
   const detalhePorRegistro = useMemo(

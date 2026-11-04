@@ -16,6 +16,7 @@ import {
   type RegistroFinanceiroInterno,
 } from "@/lib/relatorio-financeiro-interno.server";
 import type { DetalheJornadaVisual } from "@/lib/horas-visualizacao";
+import { buscarDetalhesHorasPaginados } from "@/lib/relatorio-detalhes-paginacao";
 
 type Role = "assistente" | "supervisor" | "coordenador" | "gerente" | "diretor";
 type ProcessamentoFinanceiroInterno = ReturnType<typeof processarFinanceiroRelatoriosInterno>;
@@ -160,13 +161,18 @@ async function carregarEntradaRelatorioFinanceiro(
         .order("id", { ascending: true })
         .range(from, to),
     ),
-    supabaseAdmin
-      .from("registros_horas_detalhes" as never)
-      .select(
-        "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,minutos_noturnos_normais_remuneraveis,minutos_noturnos_he_50_remuneraveis,minutos_noturnos_he_100_remuneraveis,minutos_noturnos_sem_adicional_he_remuneraveis,jornada_excepcional" as never,
-      )
-      .gte("data_inicio" as never, periodo.start)
-      .lte("data_inicio" as never, periodo.end),
+    buscarDetalhesHorasPaginados<DetalheJornadaVisual & { registro_horas_id: string }>(
+      (from, to) =>
+        supabaseAdmin
+          .from("registros_horas_detalhes" as never)
+          .select(
+            "registro_horas_id,minutos_normais,minutos_he_50,minutos_he_100,minutos_sem_adicional_he,minutos_noturnos_reais,minutos_noturnos_remuneraveis,minutos_noturnos_normais_remuneraveis,minutos_noturnos_he_50_remuneraveis,minutos_noturnos_he_100_remuneraveis,minutos_noturnos_sem_adicional_he_remuneraveis,jornada_excepcional" as never,
+          )
+          .gte("data_inicio" as never, periodo.start)
+          .lte("data_inicio" as never, periodo.end)
+          .order("registro_horas_id" as never, { ascending: true })
+          .range(from, to) as never,
+    ),
     supabaseAdmin
       .from("feriados_obras_control" as never)
       .select("data" as never)
@@ -218,7 +224,6 @@ async function carregarEntradaRelatorioFinanceiro(
     })(),
   ]);
   if (beneficiosRes.error) throw new Error(beneficiosRes.error.message);
-  if (detalhesRes.error) throw new Error(detalhesRes.error.message);
   if (feriadosRes.error) throw new Error(feriadosRes.error.message);
 
   const referenciasAnteriores = alocacoesReferenciaRegime.filter(
@@ -249,9 +254,7 @@ async function carregarEntradaRelatorioFinanceiro(
     obras,
     alocacoes,
     registros,
-    detalhes: detalhesRes.data as unknown as Array<
-      DetalheJornadaVisual & { registro_horas_id: string }
-    >,
+    detalhes: detalhesRes,
     feriados: (feriadosRes.data as unknown as Array<{ data: string }>).map((item) => item.data),
     vigenciasRegime: regimes.map((vigencia) => ({
       funcionarioId: vigencia.funcionario_id,
