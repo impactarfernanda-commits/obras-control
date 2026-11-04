@@ -300,7 +300,9 @@ test("endpoint completo autoriza antes de carregar e consolida uma única vez", 
   );
   assert.match(endpointCompleto, /rolesPermitidas: ROLES_FINANCEIRO_COMPLETO/);
   assert.match(endpointCompleto, /incluirProjecaoFolha: true/);
-  assert.doesNotMatch(tela, /getRelatorioFinanceiroCompleto/);
+  assert.match(endpointCompleto, /obras: entrada\.obras\.map/);
+  assert.match(tela, /getRelatorioFinanceiroCompleto/);
+  assert.match(tela, /enabled: Boolean\(user\?\.id\) && fluxoFinanceiro\.usarCompleto/);
 });
 
 test("plano compartilhado não duplica consultas para produzir as duas projeções", () => {

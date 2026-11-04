@@ -14,6 +14,7 @@ import { highestRole, type Role } from "@/lib/access-control";
 import { portalLogoutUrl } from "@/lib/sso";
 import { preserveAuthenticatedUser } from "@/lib/auth-session";
 import { removeReferenceDataForUser } from "@/lib/reference-data";
+import { removerRelatorioFinanceiroDoUsuario } from "@/lib/relatorio-financeiro-frontend";
 
 interface AuthContextValue {
   user: User | null;
@@ -55,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextUserId = s?.user.id ?? null;
       if (cachedUserId.current && cachedUserId.current !== nextUserId) {
         removeReferenceDataForUser(queryClient, cachedUserId.current);
+        removerRelatorioFinanceiroDoUsuario(queryClient, cachedUserId.current);
       }
       cachedUserId.current = nextUserId;
       setSession(s);
@@ -159,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } finally {
         if (cachedUserId.current) {
           removeReferenceDataForUser(queryClient, cachedUserId.current);
+          removerRelatorioFinanceiroDoUsuario(queryClient, cachedUserId.current);
           cachedUserId.current = null;
         }
         userVersion.current += 1;
